@@ -1,22 +1,27 @@
 /* Epoch & Equinox game runner.
  *
- * This binary only runs carts. Game selection, cover art, mod toggles and
- * settings live in the separate launcher app (see launcher/), the way
- * Zelda64Recomp and Ship of Harkinian split them -- so the UI can be iterated
- * on without a multi-minute rebuild, and a crash in the cart can't take the
- * launcher down with it.
+ * A native player for Game Boy / Game Boy Color ROMs, tuned for the two
+ * Oracle games. There is no build-time game code here and none linked in:
+ * the ROM is read from disk at startup, mods are applied to it in memory,
+ * and the gbrt runtime executes it. That is why this binary can be
+ * distributed prebuilt -- it contains nothing derived from any game.
  *
- * The cart table isn't written here. cmake/GenerateCarts.cmake emits
- * epoch_games.h describing exactly the ROMs that were recompiled, and this
- * file expands it. Drop a different ROM in roms/, reconfigure, and it appears
- * with no C to edit.
+ * (Historical note, because the repository's shape only makes sense with
+ * it: this project once compiled each ROM into ~170 MB of generated C and
+ * linked it in. tools/interp_probe.c demonstrated that the generated code
+ * was never executed -- the runtime's dispatch interprets straight from
+ * the loaded ROM image, byte-identically. The generation step is gone;
+ * this file is what remains.)
  *
- * Contract with the launcher:
+ * Games are whatever sits in roms/ next to the binary. The two Oracles
+ * ids get titles and hash verification; anything else runs under its
+ * filename.
+ *
+ * Contract with the launcher (launcher/epoch_launcher.py):
  *   --games-json     print the game table as JSON and exit
- *   --game <id>      run that cart
+ *   --game <id>      run that game
  *   --no-mods        boot the stock ROM, ignoring mods/
- *   --voxel <n>      start with the diorama renderer on (0 = off, the default)
- * Everything else is forwarded to the cart's own argument parser.
+ *   --voxel <n>      start with the diorama renderer on (0 = off)
  */
 #define SDL_MAIN_HANDLED
 
@@ -29,7 +34,6 @@
 extern "C" {
 #include "gbrt.h"
 #include "gb_sha256.h"
-#include "gb_asset_loader.h"
 #include "mod_loader.h"
 #include "platform_compat.h"
 #if EPOCH_HAVE_VOXEL
@@ -38,191 +42,332 @@ extern "C" {
 }
 
 #include "platform_sdl.h"
-#include "epoch_games.h"
 
-/* Each generated cart exposes <id>_main() and its own manifest header. */
-#define EPOCH_GAME(sym, id, title, rom, size, sha256, sha1) \
-    extern "C" int sym##_main(int argc, char* argv[]);
-EPOCH_GAME_LIST
-#undef EPOCH_GAME
+#define EPOCH_MAX_GAMES 32
 
-typedef int (*GBRunnerMainFn)(int argc, char* argv[]);
+typedef struct {
+    char id[64];            /* rom filename without extension */
+    char title[96];
+    char rom_path[512];
+    const char* expected_sha256;   /* NULL for unknown carts */
+} EpochGame;
 
+/* The carts this player is about: pretty titles and the revision hashes
+ * verification warns against. Everything else in roms/ still runs. */
 typedef struct {
     const char* id;
     const char* title;
-    const char* rom_path;
-    GBRunnerMainFn main_fn;
-    const char* expected_sha256;   /* lowercase hex */
-    const char* expected_sha1;     /* lowercase hex */
-    uint32_t rom_size;
-} GBRunnerGame;
+    const char* sha256;
+} EpochKnownGame;
 
-/* The generated table carries hashes as hex strings (a braced byte array
- * would break X-macro expansion -- the preprocessor reads each byte as a
- * separate argument). The asset loader wants raw bytes, so decode here. */
-static bool hex_to_bytes(const char* hex, uint8_t* out, size_t out_len) {
-    if (!hex || strlen(hex) != out_len * 2) return false;
-    for (size_t i = 0; i < out_len; i++) {
-        unsigned byte = 0;
-        if (sscanf(hex + i * 2, "%2x", &byte) != 1) return false;
-        out[i] = (uint8_t)byte;
-    }
-    return true;
-}
-
-static GBRunnerGame g_games[] = {
-#define EPOCH_GAME(sym, id, title, rom, size, sha256, sha1) \
-    {id, title, rom, sym##_main, sha256, sha1, size},
-    EPOCH_GAME_LIST
-#undef EPOCH_GAME
+static const EpochKnownGame KNOWN[] = {
+    {"tlozooa", "Oracle of Ages",
+     "0b56b78a9e45452e98c33edd111234931f1e034dc097f6f23082eb8db6055474"},
+    {"tlozoos", "Oracle of Seasons",
+     "862a51368fb30539279d336b3fe193b43876d2cb15c87a36f5da517804ab3971"},
 };
 
-static const size_t g_game_count = sizeof(g_games) / sizeof(g_games[0]);
+static EpochGame g_games[EPOCH_MAX_GAMES];
+static size_t g_game_count = 0;
 static bool g_mods_disabled = false;
 
-/* The asset manifest is per-cart and lives in that cart's generated dir. All
- * of them are single-section (whole ROM as rom.bin), so the runner can stage
- * with a locally described entry rather than pulling in every header. */
-typedef struct {
-    uint32_t rom_offset;
-    uint32_t size;
-    const char* path;
-} RunnerAssetEntry;
+static const EpochKnownGame* known_by_id(const char* id) {
+    for (size_t i = 0; i < sizeof(KNOWN) / sizeof(KNOWN[0]); i++) {
+        if (strcmp(KNOWN[i].id, id) == 0) return &KNOWN[i];
+    }
+    return NULL;
+}
 
-static bool game_assets_available(const char* id) {
-    if (!id || !*id) return false;
-    char path[512];
-    struct stat st;
-
-    snprintf(path, sizeof(path), "assets/%s", id);
-    if (stat(path, &st) == 0 && (st.st_mode & S_IFDIR)) return true;
-
-    static const char* extensions[] = {".gb", ".gbc", ".sgb"};
-    for (size_t i = 0; i < sizeof(extensions) / sizeof(extensions[0]); i++) {
-        snprintf(path, sizeof(path), "roms/%s%s", id, extensions[i]);
-        if (stat(path, &st) == 0) return true;
+static bool has_rom_ext(const char* name, const char** ext_out) {
+    static const char* exts[] = {".gbc", ".gb", ".sgb"};
+    size_t n = strlen(name);
+    for (size_t i = 0; i < 3; i++) {
+        size_t e = strlen(exts[i]);
+        if (n > e && strcmp(name + n - e, exts[i]) == 0) {
+            if (ext_out) *ext_out = exts[i];
+            return true;
+        }
     }
     return false;
 }
 
-static bool rom_file_present(const char* rom_path) {
-    struct stat st;
-    return rom_path && stat(rom_path, &st) == 0;
+/* Populate g_games from roms/. The two known ids are always listed --
+ * present or not -- so the launcher can offer "Install ROM" for them. */
+static void scan_games(void) {
+    g_game_count = 0;
+
+    bool have_known[sizeof(KNOWN) / sizeof(KNOWN[0])] = {false};
+
+    EpochDir* d = epoch_dir_open("roms");
+    const char* name;
+    while (d && (name = epoch_dir_next(d)) != NULL &&
+           g_game_count < EPOCH_MAX_GAMES) {
+        const char* ext = NULL;
+        if (!has_rom_ext(name, &ext)) continue;
+
+        EpochGame* g = &g_games[g_game_count];
+        size_t stem = strlen(name) - strlen(ext);
+        if (stem >= sizeof(g->id)) stem = sizeof(g->id) - 1;
+        memcpy(g->id, name, stem);
+        g->id[stem] = '\0';
+        snprintf(g->rom_path, sizeof(g->rom_path), "roms/%s", name);
+
+        const EpochKnownGame* k = known_by_id(g->id);
+        if (k) {
+            snprintf(g->title, sizeof(g->title), "%s", k->title);
+            g->expected_sha256 = k->sha256;
+            for (size_t i = 0; i < sizeof(KNOWN) / sizeof(KNOWN[0]); i++) {
+                if (&KNOWN[i] == k) have_known[i] = true;
+            }
+        } else {
+            snprintf(g->title, sizeof(g->title), "%s", g->id);
+            g->expected_sha256 = NULL;
+        }
+        g_game_count++;
+    }
+    if (d) epoch_dir_close(d);
+
+    for (size_t i = 0; i < sizeof(KNOWN) / sizeof(KNOWN[0]) &&
+                       g_game_count < EPOCH_MAX_GAMES; i++) {
+        if (have_known[i]) continue;
+        EpochGame* g = &g_games[g_game_count++];
+        snprintf(g->id, sizeof(g->id), "%s", KNOWN[i].id);
+        snprintf(g->title, sizeof(g->title), "%s", KNOWN[i].title);
+        snprintf(g->rom_path, sizeof(g->rom_path), "roms/%s.gbc", KNOWN[i].id);
+        g->expected_sha256 = KNOWN[i].sha256;
+    }
 }
 
-static const GBRunnerGame* find_game_by_id(const char* id) {
-    if (!id) return NULL;
+static bool rom_present(const EpochGame* g) {
+    struct stat st;
+    return stat(g->rom_path, &st) == 0;
+}
+
+static const EpochGame* find_game(const char* id) {
     for (size_t i = 0; i < g_game_count; i++) {
         if (strcmp(g_games[i].id, id) == 0) return &g_games[i];
     }
     return NULL;
 }
 
-static void print_usage(const char* program) {
-    fprintf(stderr,
-            "Usage: %s [--game <id>] [--no-mods] [--voxel <n>] [--games-json]\n"
-            "       [--list-games] [cart arguments...]\n"
-            "\n"
-            "Game selection and mod management live in the launcher app;\n"
-            "run `python3 launcher/epoch_launcher.py` for the UI.\n",
-            program);
-}
-
 static void print_games(void) {
-    fprintf(stderr, "Games in this build:\n");
+    fprintf(stderr, "Games (roms/ next to the binary):\n");
     for (size_t i = 0; i < g_game_count; i++) {
-        fprintf(stderr, "  %zu. %-20s [%s]%s\n", i + 1, g_games[i].title, g_games[i].id,
-                game_assets_available(g_games[i].id) ? "" : "  (missing ROM)");
+        fprintf(stderr, "  %-20s [%s]%s\n", g_games[i].title, g_games[i].id,
+                rom_present(&g_games[i]) ? "" : "  (missing ROM)");
     }
 }
 
-/* The launcher reads this instead of hardcoding a game table. */
 static void print_games_json(void) {
     printf("{\"games\":[");
     for (size_t i = 0; i < g_game_count; i++) {
-        const GBRunnerGame* g = &g_games[i];
+        const EpochGame* g = &g_games[i];
+        struct stat st;
+        long size = (stat(g->rom_path, &st) == 0) ? (long)st.st_size : 0;
+        bool present = size > 0;
         printf("%s{\"id\":\"%s\",\"title\":\"%s\",\"rom_path\":\"%s\","
-               "\"rom_size\":%u,\"sha256\":\"%s\",\"rom_present\":%s,\"ready\":%s}",
-               i ? "," : "", g->id, g->title, g->rom_path, g->rom_size,
-               g->expected_sha256,
-               rom_file_present(g->rom_path) ? "true" : "false",
-               game_assets_available(g->id) ? "true" : "false");
+               "\"rom_size\":%ld,\"sha256\":\"%s\",\"rom_present\":%s,\"ready\":%s}",
+               i ? "," : "", g->id, g->title, g->rom_path, size,
+               g->expected_sha256 ? g->expected_sha256 : "",
+               present ? "true" : "false", present ? "true" : "false");
     }
     printf("]}\n");
 }
 
-static void prepare_mods_for(const GBRunnerGame* game) {
-    if (!game) return;
-    if (g_mods_disabled) {
-        if (gb_mods_restore_stock(game->id)) {
-            fprintf(stderr, "[MOD] --no-mods: stock ROM restored for %s\n", game->id);
-        }
-        return;
-    }
-
-    static const RunnerAssetEntry whole_rom = {0u, 0u, "rom.bin"};
-    RunnerAssetEntry manifest = whole_rom;
-    manifest.size = game->rom_size;
-
-    uint8_t sha1[20];
-    if (!hex_to_bytes(game->expected_sha1, sha1, sizeof(sha1))) {
-        fprintf(stderr, "[MOD] %s: bad SHA-1 in the generated game table\n", game->id);
-        return;
-    }
-
-    if (!gb_mods_stage_assets(game->id, game->rom_path, sha1,
-                              game->rom_size, &manifest, 1)) {
-        return; /* nothing staged; the cart reports the real error */
-    }
-    gb_mods_scan(game->id);
-    if (gb_mods_count() > 0) {
-        gb_mods_apply(game->id, game->rom_size);
-    } else {
-        gb_mods_restore_stock(game->id);
-    }
+static void print_usage(const char* program) {
+    fprintf(stderr,
+            "Usage: %s [--game <id>] [--no-mods] [--voxel <n>] [--games-json]\n"
+            "       [--list-games] [--input <script>] [--limit-frames <n>]\n"
+            "       [--dump-frames <list>]\n"
+            "\n"
+            "Drop ROMs in roms/ next to this binary. The launcher UI is\n"
+            "launcher/epoch_launcher.py.\n",
+            program);
 }
 
-int main(int argc, char* argv[]) {
-    const GBRunnerGame* selected = NULL;
-    char** forwarded_argv = (char**)calloc((size_t)argc + 1, sizeof(char*));
-    int forwarded_argc = 1;
-    if (!forwarded_argv) {
-        fprintf(stderr, "Failed to allocate runner argument buffer\n");
+/* ------------------------------------------------------------------ */
+/* running one game                                                    */
+/* ------------------------------------------------------------------ */
+
+static uint8_t* load_rom_file(const char* path, size_t* out_size) {
+    FILE* f = fopen(path, "rb");
+    if (!f) return NULL;
+    fseek(f, 0, SEEK_END);
+    long size = ftell(f);
+    rewind(f);
+    if (size <= 0) { fclose(f); return NULL; }
+    uint8_t* buf = (uint8_t*)malloc((size_t)size);
+    if (!buf || fread(buf, 1, (size_t)size, f) != (size_t)size) {
+        free(buf);
+        fclose(f);
+        return NULL;
+    }
+    fclose(f);
+    *out_size = (size_t)size;
+    return buf;
+}
+
+static int run_game(const EpochGame* game, unsigned long long frame_limit) {
+    size_t rom_size = 0;
+    uint8_t* rom = load_rom_file(game->rom_path, &rom_size);
+    if (!rom) {
+        fprintf(stderr, "[RUN] cannot read %s\n", game->rom_path);
         return 1;
     }
-    forwarded_argv[0] = argv[0];
 
-    /* Every path below (roms/, assets/, mods/, covers/) is relative to the
-     * binary, so this has to succeed however the runner was launched --
-     * double-clicked from a file manager included. Our own implementation
-     * rather than the runtime's, which is Linux/macOS-only and returns
-     * false on Windows. */
-    if (!epoch_chdir_to_exe_dir()) {
-        fprintf(stderr,
-                "[RUN] warning: could not locate the executable's directory; "
-                "relative paths will resolve against the current directory\n");
+    if (game->expected_sha256) {
+        gb_sha256_verify_file(game->rom_path, game->expected_sha256, game->rom_path);
     }
 
+    /* Mods: applied to the in-memory image only. Stock on disk, always. */
+    if (!g_mods_disabled) {
+        gb_mods_scan(game->id);
+        if (gb_mods_count() > 0) {
+            int n = gb_mods_apply_buffer(rom, (uint32_t)rom_size);
+            if (n > 0) {
+                char digest[65];
+                gb_sha256_hex(rom, rom_size, digest);
+                fprintf(stderr, "[MOD] %d mod(s) applied; image sha256=%s\n", n, digest);
+            }
+        }
+    }
+
+    /* Model from the cartridge header, the same policy the generated
+     * launchers used: CGB when supported, DMG otherwise. */
+    uint8_t cgb_flag = rom_size > 0x143 ? rom[0x143] : 0;
+    GBConfig cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.model = (cgb_flag & 0x80) ? GB_MODEL_CGB : GB_MODEL_DMG;
+    cfg.cgb_compatibility_mode = false;
+    cfg.cartridge_supports_cgb = (cgb_flag & 0x80) != 0;
+    cfg.cartridge_requires_cgb = (cgb_flag == 0xC0);
+    cfg.enable_bootrom = false;
+    cfg.enable_audio = true;
+    cfg.enable_serial = true;
+    cfg.speed_percent = 100;
+
+    GBContext* ctx = gb_context_create(&cfg);
+    if (!ctx) {
+        fprintf(stderr, "[RUN] gb_context_create failed\n");
+        free(rom);
+        return 1;
+    }
+
+    gb_platform_register_context(ctx);
+    gb_platform_set_game_id(ctx, game->id);   /* saves, prefs, cheats key */
+    gb_platform_set_title(game->title);
+
+    gb_context_load_rom(ctx, rom, rom_size);
+    ctx->mbc_type = rom_size > 0x147 ? rom[0x147] : 0;
+    gb_context_reset(ctx, true);
+
+    fprintf(stderr, "[RUN] %s [%s] %zu KiB mbc=%02X model=%s\n",
+            game->title, game->id, rom_size / 1024, ctx->mbc_type,
+            cfg.model == GB_MODEL_CGB ? "CGB" : "DMG");
+
+    /* The frame loop, matching what the generated launchers did: run in
+     * slices so long guest frames stay smooth, pace against the guest
+     * clock, and hand every finished frame to the platform (where the
+     * voxel hook, shaders and scaling live). */
+    const uint32_t slice_cycles_budget = 70224u;
+    unsigned long long frame_index = 0;
+    bool running = true;
+    int exit_code = 0;
+
+    while (running) {
+        uint32_t paced_cycles = 0;
+        gb_reset_frame(ctx);
+        ctx->stopped = 0;
+
+        while (!ctx->frame_done) {
+            bool smooth = gb_platform_get_smooth_lcd_transitions();
+            uint32_t budget = smooth ? slice_cycles_budget : 0xFFFFFFFFu;
+            uint32_t slice_start = ctx->frame_cycles;
+            gb_run_cycles(ctx, budget);
+            uint32_t slice_cycles = ctx->frame_cycles - slice_start;
+
+            if (!gb_platform_poll_events(ctx)) {
+                running = false;
+                break;
+            }
+            if (smooth && !ctx->frame_done && slice_cycles >= slice_cycles_budget) {
+                if (ctx->lcd_off_active || !(ctx->io[0x40] & 0x80)) {
+                    gb_platform_render_lcd_off_frame();
+                } else {
+                    const uint32_t* slice_fb = gb_get_framebuffer(ctx);
+                    if (slice_fb) gb_platform_present_framebuffer(slice_fb);
+                }
+                gb_platform_vsync(slice_cycles);
+                paced_cycles += slice_cycles;
+            }
+        }
+        if (!running) break;
+
+        frame_index++;
+        const uint32_t* fb = gb_get_framebuffer(ctx);
+        if (fb) gb_platform_render_frame(fb);
+
+        uint32_t remaining = ctx->frame_cycles > paced_cycles
+                                 ? ctx->frame_cycles - paced_cycles : 0;
+        if (remaining > 0) gb_platform_vsync(remaining);
+
+        if (frame_limit > 0 && frame_index >= frame_limit) {
+            fprintf(stderr, "[LIMIT] Reached frame limit %llu\n", frame_limit);
+            break;
+        }
+    }
+
+    if (gb_platform_get_exit_action() == GB_PLATFORM_EXIT_RETURN_TO_LAUNCHER) {
+        exit_code = GB_PLATFORM_RETURN_TO_LAUNCHER_EXIT_CODE;
+    }
+    gb_context_destroy(ctx);   /* battery RAM save happens in here */
+    free(rom);
+    return exit_code;
+}
+
+/* ------------------------------------------------------------------ */
+
+int main(int argc, char* argv[]) {
+    /* roms/, mods/, covers/, saves: all relative to the binary, however it
+     * was launched -- double-clicked included. */
+    if (!epoch_chdir_to_exe_dir()) {
+        fprintf(stderr, "[RUN] warning: could not locate the executable's "
+                        "directory; using the current directory\n");
+    }
+
+    scan_games();
+
+    const EpochGame* selected = NULL;
+    unsigned long long frame_limit = 0;
+
     for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--games-json") == 0) {
-            print_games_json();
-            free(forwarded_argv);
-            return 0;
-        }
-        if (strcmp(argv[i], "--list-games") == 0) {
-            print_games();
-            free(forwarded_argv);
-            return 0;
-        }
-        if ((strcmp(argv[i], "-h") == 0) || (strcmp(argv[i], "--help") == 0)) {
+        if (strcmp(argv[i], "--games-json") == 0) { print_games_json(); return 0; }
+        if (strcmp(argv[i], "--list-games") == 0) { print_games(); return 0; }
+        if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "--help")) {
             print_usage(argv[0]);
             print_games();
-            free(forwarded_argv);
             return 0;
         }
-        if (strcmp(argv[i], "--no-mods") == 0) {
-            g_mods_disabled = true;
+        if (strcmp(argv[i], "--no-mods") == 0) { g_mods_disabled = true; continue; }
+        if (strcmp(argv[i], "--game") == 0 && i + 1 < argc) {
+            selected = find_game(argv[++i]);
+            if (!selected) {
+                fprintf(stderr, "Unknown game id '%s'\n", argv[i]);
+                print_games();
+                return 1;
+            }
+            continue;
+        }
+        if (strcmp(argv[i], "--limit-frames") == 0 && i + 1 < argc) {
+            frame_limit = strtoull(argv[++i], NULL, 10);
+            continue;
+        }
+        if (strcmp(argv[i], "--input") == 0 && i + 1 < argc) {
+            gb_platform_set_input_script(argv[++i]);
+            continue;
+        }
+        if (strcmp(argv[i], "--dump-frames") == 0 && i + 1 < argc) {
+            gb_platform_set_dump_frames(argv[++i]);
             continue;
         }
 #if EPOCH_HAVE_VOXEL
@@ -231,61 +376,42 @@ int main(int argc, char* argv[]) {
             continue;
         }
 #endif
-        if (strcmp(argv[i], "--game") == 0) {
-            if (i + 1 >= argc) {
-                fprintf(stderr, "Missing value for --game\n");
-                print_usage(argv[0]);
-                free(forwarded_argv);
-                return 1;
-            }
-            selected = find_game_by_id(argv[++i]);
-            if (!selected) {
-                fprintf(stderr, "Unknown game id '%s'\n", argv[i]);
-                print_games();
-                free(forwarded_argv);
-                return 1;
-            }
-            continue;
-        }
-        forwarded_argv[forwarded_argc++] = argv[i];
-    }
-    forwarded_argv[forwarded_argc] = NULL;
-
-    /* Launched bare (double-clicked, say): fall back to the first cart whose
-     * ROM is actually there rather than dying with a usage message. */
-    if (!selected) {
-        for (size_t i = 0; i < g_game_count && !selected; i++) {
-            if (game_assets_available(g_games[i].id)) selected = &g_games[i];
-        }
-    }
-    if (!selected) {
-        fprintf(stderr, "[RUN] No playable game found. Drop your ROMs in roms/:\n");
-        for (size_t i = 0; i < g_game_count; i++) {
-            fprintf(stderr, "        %-20s -> %s\n", g_games[i].title, g_games[i].rom_path);
-        }
-        free(forwarded_argv);
+        fprintf(stderr, "Unknown option '%s'\n", argv[i]);
+        print_usage(argv[0]);
         return 1;
     }
 
+    if (!selected) {
+        for (size_t i = 0; i < g_game_count && !selected; i++) {
+            if (rom_present(&g_games[i])) selected = &g_games[i];
+        }
+    }
+    if (!selected || !rom_present(selected)) {
+        fprintf(stderr,
+                "[RUN] No playable game. Drop your ROMs in roms/ next to this "
+                "binary:\n"
+                "        roms/tlozooa.gbc   Oracle of Ages    (USA, Australia)\n"
+                "        roms/tlozoos.gbc   Oracle of Seasons (USA, Australia)\n");
+        return 1;
+    }
+
+    if (!gb_platform_init(5)) {
+        fprintf(stderr, "[RUN] platform init failed\n");
+        return 1;
+    }
+    gb_platform_set_launcher_return_enabled(false);
 #if EPOCH_HAVE_VOXEL
     voxel_install();
 #endif
 
-    for (;;) {
-        fprintf(stderr, "[RUN] Starting %s [%s]\n", selected->title, selected->id);
-        if (selected->expected_sha256 && selected->rom_path) {
-            gb_sha256_verify_file(selected->rom_path, selected->expected_sha256,
-                                  selected->rom_path);
-        }
-        prepare_mods_for(selected);
+    /* "Restart Game" from the Esc menu loops back around; everything is
+     * rebuilt from the stock file, so a restart also re-applies mods
+     * fresh. */
+    int rc;
+    do {
+        rc = run_game(selected, frame_limit);
+    } while (gb_platform_consume_restart_requested());
 
-        /* There is no in-process launcher to go back to, so the Esc menu
-         * shows "Restart Game" instead of "Return to Launcher". */
-        gb_platform_set_launcher_return_enabled(false);
-        int rc = selected->main_fn(forwarded_argc, forwarded_argv);
-
-        if (gb_platform_consume_restart_requested()) continue;
-        free(forwarded_argv);
-        return rc;
-    }
+    gb_platform_shutdown();
+    return rc;
 }

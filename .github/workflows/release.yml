@@ -1,0 +1,100 @@
+name: Release builds
+
+# Builds the player for each platform. The binary contains no game code --
+# it is an emulator that reads the user's own ROM at runtime -- so unlike
+# earlier revisions of this project there is nothing here that cannot be
+# distributed.
+#
+# Runs on version tags, and on demand from the Actions tab (workflow_dispatch)
+# so a build can be produced without cutting a release.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  linux:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build libsdl2-dev libcurl4-openssl-dev
+      - name: Build
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build -j"$(nproc)"
+          ./build/epoch --list-games
+      - name: Package
+        run: |
+          staging=epoch-equinox-linux-x64
+          mkdir -p "$staging/roms" "$staging/mods" "$staging/covers"
+          cp build/epoch "$staging/"
+          cp -r launcher "$staging/"
+          cp README.md LICENSE CREDITS.md "$staging/"
+          cp examples/mods/README.md "$staging/mods/"
+          printf 'Drop your ROMs here:\n  tlozooa.gbc  Oracle of Ages (USA, Australia)\n  tlozoos.gbc  Oracle of Seasons (USA, Australia)\nAny other .gb/.gbc works too.\n' > "$staging/roms/README.txt"
+          tar czf "$staging.tar.gz" "$staging"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: epoch-equinox-linux-x64
+          path: epoch-equinox-linux-x64.tar.gz
+
+  windows:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - name: Dependencies (vcpkg is preinstalled on the runner)
+        run: |
+          & "$env:VCPKG_INSTALLATION_ROOT\vcpkg.exe" install sdl2:x64-windows curl:x64-windows
+      - name: Build
+        run: |
+          cmake -S . -B build `
+            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT\scripts\buildsystems\vcpkg.cmake" `
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --config Release --parallel
+      - name: Smoke test
+        run: |
+          $exe = Get-ChildItem -Path build -Recurse -Filter epoch.exe | Select-Object -First 1
+          & $exe.FullName --list-games
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+      - name: Package
+        run: |
+          $exe = Get-ChildItem -Path build -Recurse -Filter epoch.exe | Select-Object -First 1
+          $staging = "epoch-equinox-windows-x64"
+          New-Item -ItemType Directory -Force -Path "$staging/roms","$staging/mods","$staging/covers" | Out-Null
+          # vcpkg applocal deployment puts the needed DLLs beside the exe.
+          Copy-Item "$($exe.DirectoryName)\*" -Include *.exe,*.dll -Destination $staging
+          Copy-Item -Recurse launcher "$staging/launcher"
+          Copy-Item README.md,LICENSE,CREDITS.md $staging
+          Copy-Item examples/mods/README.md "$staging/mods/"
+          Set-Content "$staging/roms/README.txt" "Drop your ROMs here:`n  tlozooa.gbc  Oracle of Ages (USA, Australia)`n  tlozoos.gbc  Oracle of Seasons (USA, Australia)`nAny other .gb/.gbc works too."
+          Compress-Archive -Path $staging -DestinationPath "$staging.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: epoch-equinox-windows-x64
+          path: epoch-equinox-windows-x64.zip
+
+  release:
+    needs: [linux, windows]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            *.tar.gz
+            *.zip
+          generate_release_notes: true
+          body: |
+            Prebuilt player. **No game data included** — drop your own ROMs
+            into `roms/` next to the binary and run it. The optional launcher
+            UI is `launcher/epoch_launcher.py` (needs Python + PySide6).

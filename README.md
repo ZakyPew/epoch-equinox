@@ -1,9 +1,9 @@
 <h1 align="center">Epoch &amp; Equinox</h1>
 
 <p align="center">
-  <b>The Legend of Zelda: Oracle of Ages</b> and <b>Oracle of Seasons</b>,
-  statically recompiled to native C — with a modern launcher, mod support,
-  and an optional 3D diorama mode.
+  A native player for <b>The Legend of Zelda: Oracle of Ages</b> and
+  <b>Oracle of Seasons</b> — modern launcher, mod support, and an optional
+  3D diorama mode. Bring your own ROMs.
 </p>
 
 <p align="center">
@@ -19,12 +19,9 @@
 ---
 
 > [!IMPORTANT]
-> **This project contains no game code.** The C that runs the games is
-> generated on your machine, from a ROM you already own, when you build it.
-> Nothing derived from the games enters this repository, and there are no
-> binary downloads — the same approach
-> [Zelda64Recomp](https://github.com/Zelda64Recomp/Zelda64Recomp) and
-> [Ship of Harkinian](https://github.com/HarbourMasters/Shipwright) take.
+> **This project contains no game code, and neither do its binaries.** The
+> player reads a ROM you supply at runtime, like any emulator — nothing
+> derived from the games ships in this repository or in a release.
 
 Both games run from one binary at full native speed, with savestates, shader
 presets, controller remapping, SGB borders, IPS/BPS mod loading — and a voxel
@@ -33,63 +30,38 @@ tilemap.
 
 ## Quick start
 
-You need your own dumps. Put them in `roms/`, named by game id:
+**Easiest: grab a build from [Releases](../../releases)** (or the latest
+`build` artifact under Actions), unzip it, and drop your ROMs into the
+`roms/` folder next to the binary:
 
 | game | file | SHA-1 |
 |---|---|---|
 | Oracle of Ages (USA/Australia) | `roms/tlozooa.gbc` | `880374fb978b18af4aa529e2e32f7ffb4d7dd2f4` |
 | Oracle of Seasons (USA/Australia) | `roms/tlozoos.gbc` | `ba1268290fb2b1b70505d2d7b5825fc8a4816a4b` |
 
-Then:
+Then run `epoch` (double-click works). Either game alone is fine — you'll
+just get that one, and any other Game Boy / Game Boy Color ROM in `roms/`
+shows up too. The Oracles hashes are verified at launch; a different
+revision gets a warning.
 
-**Linux / macOS**
+**Building from source** takes about a minute — no game data is involved:
 
 ```sh
 git clone https://github.com/ZakyPew/epoch-equinox.git
 cd epoch-equinox
-./setup.sh
+./setup.sh          # Linux/macOS; Windows: setup.ps1 (needs VS + vcpkg)
 ```
-
-**Windows** — in PowerShell:
-
-```powershell
-git clone https://github.com/ZakyPew/epoch-equinox.git
-cd epoch-equinox
-powershell -ExecutionPolicy Bypass -File setup.ps1
-```
-
-The script checks your toolchain, builds the recompiler, turns your ROMs into
-C, compiles both games, installs the launcher's Python dependencies and opens
-it. Re-running is cheap — recompilation is cached against the ROM's hash.
-
-Windows additionally needs Visual Studio's C++ workload and
-[vcpkg](https://github.com/microsoft/vcpkg) for SDL2 and libcurl; `setup.ps1`
-checks for both and tells you the exact command if either is missing.
-
-> [!NOTE]
-> Linux and macOS are what this is tested on. The Windows path is written and
-> the portability blockers are fixed — directory scanning no longer needs
-> `<dirent.h>`, and the binary locates its own folder via `GetModuleFileName`
-> so double-clicking works — but it hasn't been verified on real hardware yet.
-> If you build it there, an issue either way would genuinely help.
-
-Either game on its own is fine; you'll just get that one. Any other Game Boy
-Color ROM in `roms/` builds too.
-
-Hashes are verified before anything is recompiled. A different revision is
-refused rather than quietly producing a broken build.
 
 <details>
-<summary><b>What the first build actually does</b> (and why it takes a while)</summary>
+<summary><b>History: why this repo used to take 25 minutes to build</b></summary>
 
-1. fetches [gb-recompiled](https://github.com/GB-Recomp/gb-recompiled) (MIT)
-   and builds `gbrecomp`, the recompiler — about 2 minutes
-2. runs it over each ROM, emitting ~48 C files per game — about 75 seconds each
-3. compiles all of it — the slow part
-
-Budget 20–30 minutes cold on four cores. After that, builds are incremental.
-Step 2 is why there are no prebuilt downloads: the output is translated from
-your ROM, so it can only legitimately be made by you, on your machine.
+Earlier revisions statically recompiled each ROM into ~170 MB of generated C
+and linked it into the binary — which is also why binaries could never be
+distributed. Then [`tools/interp_probe.c`](tools/interp_probe.c) demonstrated
+the generated code was never executed: the runtime's dispatch interprets
+straight from the loaded ROM image, and a cart-free binary produces
+byte-identical frames. The generation step is gone; what remains is a player
+that happens to have unusually good knowledge of two specific games.
 
 </details>
 
@@ -149,9 +121,9 @@ The launcher handles this for you, but the binary stands alone:
 you turn it on.
 
 The overworld is re-rendered as a tilted 3D diorama, rebuilt every frame from
-PPU state. A static recompilation has no scene graph, entity list or collision
-data, so this reads the only honest source there is: the BG tilemap, CGB
-palettes and OAM sitting in emulated VRAM.
+PPU state, plus the game's own collision and camera data read live from WRAM
+at the addresses named by
+[oracles-disasm](https://github.com/Stewmath/oracles-disasm).
 
 - **on the Oracles carts, terrain height comes from the game's own collision
   data** — `wRoomCollisions` and the camera, read live from WRAM at the
@@ -166,6 +138,9 @@ palettes and OAM sitting in emulated VRAM.
 - terrain is textured with the game's *own* composed frame, so palettes,
   season tints and tile animation carry through untouched
 - sprites are re-decoded from VRAM and stood upright as billboards
+- **the sky follows the game**: season-tinted in Seasons (spring through
+  winter, ember-red in Subrosia), day blue in Ages' present, golden dusk in
+  the past — with slow procedural clouds. Interiors keep a neutral backdrop
 - the status bar stays flat and composites back on top
 
 Output is a normal 160×144 frame handed back through the runtime's present
@@ -185,8 +160,7 @@ Colour-only vs the game's own collision data, same frame:
   *next* room while the screen still shows both, so those half-seconds use the
   colour classifier. `VOXEL_NO_ORACLE=1` forces it everywhere, for A/B tests.
 - Fixed pitch ladder. No free-roam or first-person camera — moving the player
-  off the grid needs the engine's own collision, which a recompilation doesn't
-  expose.
+  off the grid would mean fighting the game's own movement code.
 - Native 160×144, so it's chunky by construction. Deliberate.
 - On the Oracles carts, menus and boot cinematics now render flat
   automatically. Interiors extrude by their real collision, which reads well.
@@ -266,34 +240,30 @@ shouldn't be redistributed. Details: [`art/covers/README.md`](art/covers/README.
 
 ```sh
 sudo apt-get install -y build-essential cmake ninja-build \
-    libsdl2-dev libcurl4-openssl-dev python3-pip     # Debian/Ubuntu
-# brew install cmake ninja sdl2 curl                 # macOS
+    libsdl2-dev libcurl4-openssl-dev     # Debian/Ubuntu
+# brew install cmake ninja sdl2 curl    # macOS
 
-cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=MinSizeRel
-cmake --build build -j$(nproc)
+cmake -S . -B build -G Ninja
+cmake --build build -j$(nproc)          # ~1 minute
 
 pip install -r launcher/requirements.txt
-python3 launcher/epoch_launcher.py
+python3 launcher/epoch_launcher.py      # or just ./build/epoch
 ```
 
 | CMake option | default | effect |
 |---|---|---|
-| `EPOCH_ROM_DIR` | `./roms` | where your ROMs live |
 | `EPOCH_WITH_VOXEL` | `ON` | build the voxel renderer |
-| `EPOCH_JOBS` | auto | parallelism for recompilation |
-| `GBRECOMP_SHRINK` | `ON` | dead-strip + symbol-strip |
 | `GBRT_REF` | `main` | pin a git ref for the fetched runtime |
 
-**Nicer symbol names (optional):** drop the `.sym` files from
-[Stewmath/oracles-disasm](https://github.com/Stewmath/oracles-disasm) beside
-your ROMs as `roms/tlozooa.sym` / `roms/tlozoos.sym` and generated functions
-carry real names like `gfxRegisterStates` instead of addresses.
+Windows source builds need Visual Studio's C++ workload plus
+[vcpkg](https://github.com/microsoft/vcpkg) for SDL2/libcurl — `setup.ps1`
+walks through it. Or skip all of that and take the release binary.
 
 <details>
 <summary><b>Troubleshooting</b></summary>
 
-**"The games haven't been built yet"** — you ran the launcher before building.
-`./setup.sh`, or the two `cmake` commands above.
+**"No playable game"** — the binary looks for `roms/` next to itself. Put
+your ROMs there (see [Quick start](#quick-start)).
 
 **pip refuses: "externally managed environment"** — use a virtualenv:
 
@@ -303,23 +273,16 @@ pip install -r launcher/requirements.txt
 python launcher/epoch_launcher.py
 ```
 
-**"No ROMs found in .../roms"** — expected. Nothing can be built without one;
-see [Quick start](#quick-start).
-
-**SHA-1 mismatch** — your dump isn't the USA/Australia revision the hashes
-above describe. Other revisions aren't supported yet.
+**SHA-256 warning at launch** — your dump isn't the USA/Australia revision.
+It will still run; the warning just means the hashes don't match the
+revision this project is tuned against.
 
 **No controller in the launcher** — `pip install pygame`. Optional; the game
 itself handles pads either way.
 
-**Windows: "cannot be loaded because running scripts is disabled"** — that's
-PowerShell's execution policy. Use the invocation above verbatim; the
-`-ExecutionPolicy Bypass` applies to that one run and changes nothing
-permanently.
-
-**Windows: the game starts but finds no ROMs** — it should chdir to its own
-folder automatically. If it doesn't, run it from the folder containing
-`roms\`, and please open an issue with your Windows version.
+**Windows: "cannot be loaded because running scripts is disabled"** — use
+`powershell -ExecutionPolicy Bypass -File setup.ps1` verbatim; it applies to
+that one run only.
 
 </details>
 

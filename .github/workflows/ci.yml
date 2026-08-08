@@ -15,7 +15,7 @@ on:
 
 jobs:
   native:
-    name: Build our own C
+    name: Build the player
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
@@ -25,33 +25,18 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ninja-build libsdl2-dev libcurl4-openssl-dev
 
-      - name: Refuses to configure without a ROM
+      # The whole build -- no ROM involved anywhere, which is the point.
+      - name: Build
         run: |
-          cmake -S . -B build-norom -G Ninja -DEPOCH_ROM_DIR=/nonexistent \
-            > cfg.log 2>&1 || true
-          grep -q "No ROMs found" cfg.log
-          echo "Confirmed: no ROM, no build."
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build -j"$(nproc)"
 
-      # epoch_support is the mod loader plus the voxel renderer -- all our
-      # own code, and the part worth regression-checking. A tiny synthetic
-      # cart is enough to satisfy the recompiler; it is not a game and
-      # contains nothing copyrighted.
-      - name: Build support library
+      - name: Smoke test
         run: |
-          mkdir -p ci-roms
-          python3 - <<'EOF'
-          data = bytearray(32 * 1024)
-          data[0x100:0x104] = bytes([0x00, 0xC3, 0x50, 0x01])
-          data[0x104:0x134] = bytes.fromhex(
-              "CEED6666CC0D000B03730083000C000D0008111F8889000E"
-              "DCCC6EE6DDDDD999BBBB67636E0EECCCDDDC999FBBB9333E")
-          data[0x134:0x13e] = b"CITESTCART"
-          data[0x14d] = (-sum(data[0x134:0x14d]) - 1) & 0xFF
-          open("ci-roms/citest.gb", "wb").write(bytes(data))
-          EOF
-          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
-            -DEPOCH_ROM_DIR="$PWD/ci-roms"
-          cmake --build build --target epoch_support -j"$(nproc)"
+          test -x build/epoch
+          ./build/epoch --list-games
+          ./build/epoch --games-json | python3 -m json.tool > /dev/null
+          echo "player builds and answers"
 
   launcher:
     name: Check the launcher
