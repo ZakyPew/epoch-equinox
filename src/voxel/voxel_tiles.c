@@ -168,6 +168,13 @@ bool vox_scrape(GBContext* ctx, VoxTileGrid* grid, VoxSpriteList* sprites) {
                     io_reg(ctx, 0x44));
         }
     }
+    {
+        const char* want = getenv("VOXEL_DUMP_MAP");
+        if (want) {
+            static long n = 0;
+            if (n++ == atol(want)) vox_dump_bg_map(ctx, "bgmap.ppm");
+        }
+    }
     grid->scx = scx;
     grid->scy = scy;
     grid->fine_x = scx & 7;
@@ -239,4 +246,47 @@ void vox_decode_sprite_row(GBContext* ctx, const VoxSprite* s, int row,
         int idx = ((lo >> bit) & 1) | (((hi >> bit) & 1) << 1);
         out[px] = idx ? cgb_color(ppu->obj_palette_ram, pal, idx) : 0;
     }
+}
+
+/* ------------------------------------------------------------------ */
+/* diagnostics                                                         */
+/* ------------------------------------------------------------------ */
+
+/* VOXEL_DUMP_MAP=<frame> writes the whole 32x32 BG map (256x256 px) as a
+ * PPM. The screen only ever shows a 160x144 window into it, so this is how
+ * you find out how much real world data sits off-screen -- which is the
+ * thing that decides whether widescreen is possible at all. */
+void vox_dump_bg_map(GBContext* ctx, const char* path) {
+    GBPPU* ppu = (GBPPU*)ctx->ppu;
+    uint8_t lcdc = io_reg(ctx, 0x40);
+    bool signed_tiles = !(lcdc & 0x10);
+    unsigned map_base = (lcdc & 0x08) ? 0x1C00 : 0x1800;
+
+    static uint8_t img[256 * 256 * 3];
+    for (int my = 0; my < 32; my++) {
+        for (int mx = 0; mx < 32; mx++) {
+            unsigned off = map_base + my * 32 + mx;
+            uint8_t tile = ctx->vram[off];
+            uint8_t attr = ctx->vram[0x2000 + off];
+            const uint8_t* pat = tile_pattern(ctx, tile, signed_tiles, (attr >> 3) & 1);
+            for (int row = 0; row < 8; row++) {
+                uint8_t lo = pat[row * 2], hi = pat[row * 2 + 1];
+                for (int col = 0; col < 8; col++) {
+                    int idx = ((lo >> (7 - col)) & 1) | (((hi >> (7 - col)) & 1) << 1);
+                    uint32_t c = cgb_color(ppu->bg_palette_ram, attr & 7, idx);
+                    int px = mx * 8 + col, py = my * 8 + row;
+                    uint8_t* o = &img[(py * 256 + px) * 3];
+                    o[0] = (uint8_t)(c & 0xFF);
+                    o[1] = (uint8_t)((c >> 8) & 0xFF);
+                    o[2] = (uint8_t)((c >> 16) & 0xFF);
+                }
+            }
+        }
+    }
+    FILE* f = fopen(path, "wb");
+    if (!f) return;
+    fprintf(f, "P6\n256 256\n255\n");
+    fwrite(img, 1, sizeof(img), f);
+    fclose(f);
+    fprintf(stderr, "[VOXEL] BG map dumped to %s\n", path);
 }
