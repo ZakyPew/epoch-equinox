@@ -99,16 +99,19 @@ bool vox_oracle_read(GBContext* ctx, VoxOracleState* st) {
 
     const OracleProfile* prof = detect(ctx);
     if (!prof || !ctx->wram || !ctx->hram) return false;
+    st->profile_matched = true;
 
     st->menu_open = wram0(ctx, A_wOpenedMenuType) != 0;
 
-    /* wScrollMode is 1 in normal play; bit 2 set (or value 8) while the
-     * screen scrolls to the next room, during which wRoomCollisions already
-     * holds the NEW room while the screen still shows a mix of both. The
-     * colour fallback covers that half-second better than a misaligned
-     * grid would. 0 means no room is active at all. */
+    /* wScrollMode is 1 in normal play. Anything else -- 0 (no room), bit 2
+     * (scrolling), and the other transition values the disasm names -- means
+     * the screen shows a mix of two rooms while wRoomCollisions already
+     * holds the NEW room's grid. Extruding that draws the wrong terrain
+     * under half the picture (verified live: the old `bit 2` filter let
+     * several mid-scroll frames through), so accept exactly the one value
+     * that means "one room, at rest". */
     uint8_t scroll = wram0(ctx, A_wScrollMode);
-    if (scroll == 0 || (scroll & 0x04)) return false;
+    if (scroll != 0x01) return false;
 
     st->cam_y = (int)ctx->hram[prof->cam_y_off] |
                 ((int)ctx->hram[prof->cam_y_off + 1] << 8);

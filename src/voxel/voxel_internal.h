@@ -13,6 +13,11 @@
 #define VOX_TILES_W 21
 #define VOX_TILES_H 19
 
+/* The sprite-free terrain texture, in screen-aligned pixels (one extra
+ * tile each way for scroll, like the tile grid). */
+#define VOX_TEX_W (VOX_TILES_W * 8)
+#define VOX_TEX_H (VOX_TILES_H * 8)
+
 /* BG map rows at or below this index hold the status bar rather than world
  * tiles (see VoxTileGrid::hud_rows). */
 #define VOX_HUD_MAP_ROW 30
@@ -31,6 +36,11 @@ typedef enum {
  * voxel_oracle.c for the addresses and the validity rules. */
 typedef struct {
     bool valid;
+    /* The running cart IS one of the Oracles, even if this particular
+     * frame's room state can't be trusted (mid-scroll, cinematic). Lets
+     * the renderer hold steady instead of falling back to colour
+     * guesswork for half a second every room change. */
+    bool profile_matched;
     bool menu_open;
     int  cam_y, cam_x;          /* hCameraY/X, room pixels */
     int  off_y, off_x;          /* wScreenOffsetY/X, transient draw offset */
@@ -53,6 +63,12 @@ typedef struct {
     /* Per visible tile: height class and whether it's part of the window
      * layer (HUD) rather than the scrolling BG. */
     uint8_t height[VOX_TILES_H][VOX_TILES_W];
+    /* Terrain texture decoded straight from the BG tilemap -- the composed
+     * frame has sprites baked into it, and using it as the ground texture
+     * warped a flattened copy of every character into the terrain
+     * underneath their billboard. Screen-aligned: screen pixel (x, y) is
+     * tex[(y + fine_y) * VOX_TEX_W + x + fine_x]. */
+    uint32_t tex[VOX_TEX_H * VOX_TEX_W];
     /* True while a full-screen menu owns the display: render the frame
      * flat instead of extruding inventory screens. */
     bool flat;
