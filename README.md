@@ -12,7 +12,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/license-MIT-informational?style=for-the-badge" alt="MIT">
-  <img src="https://img.shields.io/badge/platform-Linux%20%7C%20macOS-lightgrey?style=for-the-badge" alt="Platforms">
+  <img src="https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey?style=for-the-badge" alt="Platforms">
   <img src="https://img.shields.io/badge/ROM-not%20included-critical?style=for-the-badge" alt="No ROM included">
 </p>
 
@@ -42,15 +42,36 @@ You need your own dumps. Put them in `roms/`, named by game id:
 
 Then:
 
+**Linux / macOS**
+
 ```sh
 git clone https://github.com/ZakyPew/epoch-equinox.git
 cd epoch-equinox
 ./setup.sh
 ```
 
-`setup.sh` checks your toolchain, builds the recompiler, turns your ROMs into
+**Windows** — in PowerShell:
+
+```powershell
+git clone https://github.com/ZakyPew/epoch-equinox.git
+cd epoch-equinox
+powershell -ExecutionPolicy Bypass -File setup.ps1
+```
+
+The script checks your toolchain, builds the recompiler, turns your ROMs into
 C, compiles both games, installs the launcher's Python dependencies and opens
 it. Re-running is cheap — recompilation is cached against the ROM's hash.
+
+Windows additionally needs Visual Studio's C++ workload and
+[vcpkg](https://github.com/microsoft/vcpkg) for SDL2 and libcurl; `setup.ps1`
+checks for both and tells you the exact command if either is missing.
+
+> [!NOTE]
+> Linux and macOS are what this is tested on. The Windows path is written and
+> the portability blockers are fixed — directory scanning no longer needs
+> `<dirent.h>`, and the binary locates its own folder via `GetModuleFileName`
+> so double-clicking works — but it hasn't been verified on real hardware yet.
+> If you build it there, an issue either way would genuinely help.
 
 Either game on its own is fine; you'll just get that one. Any other Game Boy
 Color ROM in `roms/` builds too.
@@ -277,6 +298,15 @@ above describe. Other revisions aren't supported yet.
 **No controller in the launcher** — `pip install pygame`. Optional; the game
 itself handles pads either way.
 
+**Windows: "cannot be loaded because running scripts is disabled"** — that's
+PowerShell's execution policy. Use the invocation above verbatim; the
+`-ExecutionPolicy Bypass` applies to that one run and changes nothing
+permanently.
+
+**Windows: the game starts but finds no ROMs** — it should chdir to its own
+folder automatically. If it doesn't, run it from the folder containing
+`roms\`, and please open an issue with your Windows version.
+
 </details>
 
 ## Contributing
@@ -288,9 +318,9 @@ Issues and pull requests welcome. Useful things to know:
 - CI builds our C against a synthetic cart, imports the launcher headlessly,
   and checks the runtime patch still applies upstream
 
-Good first areas: tuning the voxel height classifier against
-`oracles-disasm`'s real collision tables, per-section asset splitting for
-finer-grained mods, and Windows build support.
+Good first areas: **confirming (or fixing) the Windows build**, tuning the
+voxel height classifier against `oracles-disasm`'s real collision tables, and
+per-section asset splitting for finer-grained mods.
 
 **Never attach a ROM, savefile, or ROM-derived asset to an issue or PR.**
 

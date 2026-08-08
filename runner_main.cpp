@@ -31,6 +31,7 @@ extern "C" {
 #include "gb_sha256.h"
 #include "gb_asset_loader.h"
 #include "mod_loader.h"
+#include "platform_compat.h"
 #if EPOCH_HAVE_VOXEL
 #include "voxel/voxel.h"
 #endif
@@ -192,9 +193,15 @@ int main(int argc, char* argv[]) {
     }
     forwarded_argv[0] = argv[0];
 
-    /* --games-json reports asset state, which is relative to the binary. */
-    if (!gb_chdir_to_exe_dir()) {
-        fprintf(stderr, "[RUN] warning: could not chdir to the executable's directory\n");
+    /* Every path below (roms/, assets/, mods/, covers/) is relative to the
+     * binary, so this has to succeed however the runner was launched --
+     * double-clicked from a file manager included. Our own implementation
+     * rather than the runtime's, which is Linux/macOS-only and returns
+     * false on Windows. */
+    if (!epoch_chdir_to_exe_dir()) {
+        fprintf(stderr,
+                "[RUN] warning: could not locate the executable's directory; "
+                "relative paths will resolve against the current directory\n");
     }
 
     for (int i = 1; i < argc; i++) {

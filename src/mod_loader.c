@@ -3,8 +3,9 @@
 
 #include "gb_asset_loader.h"
 
+#include "platform_compat.h"
+
 #include <ctype.h>
-#include <dirent.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -378,39 +379,39 @@ static uint8_t* bps_apply(const uint8_t* patch, size_t plen,
  * offset it lands at, e.g. `overlay/0x3f200.bin` or `overlay/3f200.bin`.
  * Useful for hand-edited graphics without generating a whole patch. */
 static int overlay_apply(const char* dir, uint8_t* rom, size_t rom_len) {
-    DIR* d = opendir(dir);
+    EpochDir* d = epoch_dir_open(dir);
     if (!d) return 0;
     int applied = 0;
-    struct dirent* ent;
-    while ((ent = readdir(d)) != NULL) {
-        if (ent->d_name[0] == '.') continue;
-        if (!has_ext(ent->d_name, ".bin")) continue;
+    const char* entry;
+    while ((entry = epoch_dir_next(d)) != NULL) {
+        if (entry[0] == '.') continue;
+        if (!has_ext(entry, ".bin")) continue;
 
-        const char* nm = ent->d_name;
+        const char* nm = entry;
         if (nm[0] == '0' && (nm[1] == 'x' || nm[1] == 'X')) nm += 2;
         char* endp = NULL;
         unsigned long off = strtoul(nm, &endp, 16);
         if (endp == nm) {
-            LOG("overlay: '%s' is not a hex offset, skipping", ent->d_name);
+            LOG("overlay: '%s' is not a hex offset, skipping", entry);
             continue;
         }
 
         char path[GB_MOD_PATH_MAX];
-        snprintf(path, sizeof(path), "%s/%s", dir, ent->d_name);
+        snprintf(path, sizeof(path), "%s/%s", dir, entry);
         size_t len = 0;
         uint8_t* buf = read_whole_file(path, &len);
         if (!buf) continue;
         if (off + len > rom_len) {
-            LOG("overlay: '%s' (0x%lx +%zu) runs past the ROM, skipping", ent->d_name, off, len);
+            LOG("overlay: '%s' (0x%lx +%zu) runs past the ROM, skipping", entry, off, len);
             free(buf);
             continue;
         }
         memcpy(rom + off, buf, len);
         free(buf);
-        LOG("overlay: %s -> 0x%06lx (%zu bytes)", ent->d_name, off, len);
+        LOG("overlay: %s -> 0x%06lx (%zu bytes)", entry, off, len);
         applied++;
     }
-    closedir(d);
+    epoch_dir_close(d);
     return applied;
 }
 
@@ -442,21 +443,20 @@ int gb_mods_scan(const char* game_id) {
     g_mod_count = 0;
     if (!game_id || !*game_id) return 0;
 
-    DIR* d = opendir("mods");
+    EpochDir* d = epoch_dir_open("mods");
     if (!d) return -1;
 
     char* state = read_mod_state();
-    struct dirent* ent;
-    while ((ent = readdir(d)) != NULL && g_mod_count < GB_MOD_MAX_ENTRIES) {
-        if (ent->d_name[0] == '.') continue;
+    const char* entry;
+    while ((entry = epoch_dir_next(d)) != NULL && g_mod_count < GB_MOD_MAX_ENTRIES) {
+        if (entry[0] == '.') continue;
 
         char dir[GB_MOD_PATH_MAX];
         char manifest_path[GB_MOD_PATH_MAX];
-        int n = snprintf(dir, sizeof(dir), "mods/%s", ent->d_name);
+        int n = snprintf(dir, sizeof(dir), "mods/%s", entry);
         if (n < 0 || (size_t)n >= sizeof(dir)) continue;
 
-        struct stat st;
-        if (stat(dir, &st) != 0 || !(st.st_mode & S_IFDIR)) continue;
+        if (!epoch_is_dir(dir)) continue;
 
         n = snprintf(manifest_path, sizeof(manifest_path), "%s/manifest.json", dir);
         if (n < 0 || (size_t)n >= sizeof(manifest_path)) continue;
@@ -478,7 +478,7 @@ int gb_mods_scan(const char* game_id) {
         memset(m, 0, sizeof(*m));
         snprintf(m->dir, sizeof(m->dir), "%s", dir);
         if (!json_get_string(json, "id", m->id, sizeof(m->id))) {
-            snprintf(m->id, sizeof(m->id), "%s", ent->d_name);
+            snprintf(m->id, sizeof(m->id), "%s", entry);
         }
         if (!json_get_string(json, "name", m->name, sizeof(m->name))) {
             snprintf(m->name, sizeof(m->name), "%s", m->id);
@@ -518,7 +518,7 @@ int gb_mods_scan(const char* game_id) {
         free(json);
         g_mod_count++;
     }
-    closedir(d);
+    epoch_dir_close(d);
     free(state);
 
     qsort(g_mods, (size_t)g_mod_count, sizeof(g_mods[0]), mod_priority_cmp);
