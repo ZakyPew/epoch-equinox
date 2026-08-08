@@ -8,6 +8,9 @@ art/covers/tlozooa.png     Oracle of Ages panel
 art/covers/tlozoos.png     Oracle of Seasons panel
 ```
 
+`ages.png` and `seasons.png` work too, as do `.jpg` and `.webp` — the cart
+ids are what the runner reports, but they're not names anyone would guess.
+
 (The directory is `art/`, not `assets/`, on purpose: the runtime creates its
 own `assets/<game_id>/` next to the binary for extracted ROM sections, and
 having two different `assets/` in play was a trap waiting to happen.)

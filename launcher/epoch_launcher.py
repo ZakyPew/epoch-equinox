@@ -95,6 +95,15 @@ APP_VERSION = "1.0.0"
 SEAM_TOP = 0.62
 SEAM_BOTTOM = 0.38
 
+# Cover art lookup. The cart ids are what the runner reports, but nobody
+# drops a file called "tlozooa.png" into a folder without being told to, so
+# each cart also answers to a plain-English name.
+COVER_ALIASES = {
+    "tlozooa": ["ages", "oracle-of-ages", "oracle_of_ages"],
+    "tlozoos": ["seasons", "oracle-of-seasons", "oracle_of_seasons"],
+}
+COVER_EXTENSIONS = [".png", ".jpg", ".jpeg", ".webp"]
+
 
 # --------------------------------------------------------------------------
 # theme
@@ -384,28 +393,38 @@ class LauncherView(QWidget):
     def cover(self, game_id: str) -> QPixmap | None:
         """Panel art for a cart, most specific source first:
 
-        1. ``covers/<id>.png`` next to the binary  -- the user's own, and
+        1. ``covers/<id>.png`` next to the binary -- one machine's own art,
            gitignored, so scans and key art stay off the repo
-        2. ``art/covers/<id>.png`` in the project -- art shipped with the
-           project itself
+        2. ``art/covers/<id>.png`` in the project -- art shipped with it
         3. neither: the caller falls back to the procedural motif
+
+        Friendly aliases (``ages.png`` / ``seasons.png``) are accepted
+        alongside the cart ids, because ``tlozooa`` is not a name anybody
+        would guess when dragging a file into GitHub's upload box. Several
+        extensions are tried for the same reason.
         """
         if game_id in self._covers:
             return self._covers[game_id]
 
-        candidates = [
-            self.runner.root / "covers" / f"{game_id}.png",
-            PROJECT_ROOT / "art" / "covers" / f"{game_id}.png",
-        ]
+        stems = [game_id] + COVER_ALIASES.get(game_id, [])
+        dirs = [self.runner.root / "covers", PROJECT_ROOT / "art" / "covers"]
+
         chosen = None
-        for path in candidates:
-            if not path.is_file():
-                continue
-            pm = QPixmap(str(path))
-            if not pm.isNull():
-                chosen = pm
+        for directory in dirs:
+            for stem in stems:
+                for ext in COVER_EXTENSIONS:
+                    path = directory / f"{stem}{ext}"
+                    if not path.is_file():
+                        continue
+                    pm = QPixmap(str(path))
+                    if not pm.isNull():
+                        chosen = pm
+                        break
+                    print(f"[launcher] could not decode {path}", file=sys.stderr)
+                if chosen:
+                    break
+            if chosen:
                 break
-            print(f"[launcher] could not decode {path}", file=sys.stderr)
 
         self._covers[game_id] = chosen
         return chosen
