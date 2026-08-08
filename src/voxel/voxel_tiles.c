@@ -203,11 +203,39 @@ bool vox_scrape(GBContext* ctx, VoxTileGrid* grid, VoxSpriteList* sprites) {
      * exactly as before. */
     VoxOracleState oracle;
     bool use_oracle = vox_oracle_read(ctx, &oracle) && oracle.valid;
-    grid->flat = use_oracle && oracle.menu_open;
+    /* An Oracles cart whose frame can't be trusted right now (room scroll,
+     * cinematic): hold the diorama flat and steady rather than handing the
+     * screen to the colour classifier, whose guessed terrain flickers for
+     * the half-second of every room walk. */
+    bool oracle_cart = oracle.profile_matched;
+    /* Hand the screen back untouched whenever the cart is showing
+     * something that isn't terrain: a menu, a dialog box (textboxes are
+     * drawn into the BG tilemap -- extruding one garbles the words), or
+     * no room at all (title, file select, cutscenes). */
+    grid->flat = oracle_cart &&
+                 (oracle.menu_open || oracle.text_active || oracle.no_room);
+
+    /* The hud_rows walk above assumes the HUD strip wraps in at the TOP of
+     * the window, which is only half the story on the Oracles carts: they
+     * double-buffer rooms between two halves of the BG map. Rooms at map
+     * row 0 latch scy=240 (HUD rows 30-31 wrap in above the world); rooms
+     * at map row 14 latch scy=112 (the HUD strip trails BELOW the world).
+     * On hardware a mid-frame raster split pins the HUD to the top 16
+     * scanlines either way -- invisible to a single latched scy, which put
+     * those rooms 16px too high with no HUD and mis-anchored every sprite.
+     * When the game state is readable the layout is exact: HUD is the top
+     * 16px, world row 0 sits at whichever map row the scy half points at. */
+    int world_row0 = -1;   /* <0: generic scy mapping */
+    if (use_oracle) {
+        unsigned r = (scy >> 3) & 31;
+        world_row0 = (int)((r >= VOX_HUD_MAP_ROW) ? (r + 2) & 31 : r);
+        grid->hud_rows = 16;
+    }
 
     /* Backdrop sky from live game state. Outdoors only: groups 0-1 are
      * the overworlds (Ages present/past; Seasons overworld/Subrosia),
      * everything else is interior and keeps the neutral backdrop. */
+    static int s_last_sky = VOX_SKY_NONE;
     grid->sky = VOX_SKY_NONE;
     if (use_oracle && oracle.active_group <= 1) {
         if (oracle.is_seasons) {
@@ -225,6 +253,13 @@ bool vox_scrape(GBContext* ctx, VoxTileGrid* grid, VoxSpriteList* sprites) {
             grid->sky = (oracle.active_group == 1) ? VOX_SKY_AGES_PAST
                                                    : VOX_SKY_AGES_PRESENT;
         }
+    }
+    if (use_oracle) {
+        s_last_sky = grid->sky;
+    } else if (oracle_cart) {
+        /* Mid-transition: keep whatever sky the last good frame had, so
+         * walking between two outdoor rooms doesn't blink the sky off. */
+        grid->sky = s_last_sky;
     }
 
     /* Link's screen position, from his room position and the camera. His
@@ -262,7 +297,11 @@ bool vox_scrape(GBContext* ctx, VoxTileGrid* grid, VoxSpriteList* sprites) {
     for (int ty = 0; ty < VOX_TILES_H; ty++) {
         for (int tx = 0; tx < VOX_TILES_W; tx++) {
             unsigned map_x = ((scx / 8) + tx) & 31;
-            unsigned map_y = ((scy / 8) + ty) & 31;
+            /* Tile rows 0-1 under the fixed HUD are never sampled by the
+             * renderer; the wrapped index they get is harmless. */
+            unsigned map_y = (world_row0 >= 0)
+                ? (unsigned)((world_row0 + ty - 2) & 31)
+                : ((scy / 8) + ty) & 31;
             unsigned map_off = map_base + map_y * 32 + map_x;
 
             uint8_t tile = ctx->vram[map_off];
@@ -272,6 +311,33 @@ bool vox_scrape(GBContext* ctx, VoxTileGrid* grid, VoxSpriteList* sprites) {
 
             const uint8_t* pat = tile_pattern(ctx, tile, signed_tiles, bank);
             uint8_t by_colour = classify_tile(ctx, pat, pal);
+
+            /* Decode this tile's pixels into the sprite-free terrain
+             * texture. The composed frame can't be the ground texture:
+             * sprites are baked into it, so the column march used to warp
+             * a flattened copy of every character into the terrain right
+             * under their upright billboard. CGB BG tiles flip via the
+             * same attr bits OBJs use. */
+            {
+                GBPPU* ppu = (GBPPU*)ctx->ppu;
+                bool xf = (attr & 0x20) != 0;
+                bool yf = (attr & 0x40) != 0;
+                uint32_t pal_rgb[4];
+                for (int i = 0; i < 4; i++) {
+                    pal_rgb[i] = cgb_color(ppu->bg_palette_ram, pal, i);
+                }
+                for (int row = 0; row < 8; row++) {
+                    int src = yf ? 7 - row : row;
+                    uint8_t lo = pat[src * 2];
+                    uint8_t hi = pat[src * 2 + 1];
+                    uint32_t* dst = &grid->tex[(ty * 8 + row) * VOX_TEX_W + tx * 8];
+                    for (int c = 0; c < 8; c++) {
+                        int bit = xf ? c : 7 - c;
+                        int idx = ((lo >> bit) & 1) | (((hi >> bit) & 1) << 1);
+                        dst[c] = pal_rgb[idx];
+                    }
+                }
+            }
 
             if (use_oracle) {
                 /* Sample this tile's centre in room space. Screen origin of
@@ -294,7 +360,8 @@ bool vox_scrape(GBContext* ctx, VoxTileGrid* grid, VoxSpriteList* sprites) {
                 continue;
             }
 
-            grid->height[ty][tx] = by_colour;
+            /* Oracles cart, untrusted frame: flat slab, no colour noise. */
+            grid->height[ty][tx] = oracle_cart ? VOX_H_FLOOR : by_colour;
         }
     }
 

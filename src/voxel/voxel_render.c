@@ -7,10 +7,12 @@
  * front wall. Painter's order per column — near rows overdraw far rows —
  * so no depth buffer is needed.
  *
- * The terrain texture is the game's own composed background frame, which
- * keeps every palette, season tint and animation exactly as the cart drew
- * it. Sprites are re-decoded from OAM/VRAM and stood upright as billboards
- * so characters rise out of the ground instead of lying flat on it.
+ * The terrain texture is decoded straight from the BG tilemap (see
+ * VoxTileGrid::tex), which keeps every palette, season tint and animation
+ * exactly as the cart drew it -- without the sprites the composed frame
+ * bakes in. Sprites are re-decoded from OAM/VRAM and stood upright as
+ * billboards, interleaved with the terrain rows in painter's order so a
+ * wall in front of a character actually hides them.
  */
 #include "voxel.h"
 #include "voxel_internal.h"
@@ -193,45 +195,61 @@ void vox_render(GBContext* ctx, const VoxTileGrid* grid,
         }
     }
 
-    for (int x = 0; x < GB_SCREEN_WIDTH; x++) {
-        int prev_sy = -1;
-        uint32_t prev_tex = 0;
-        for (int wy = world_top; wy < GB_SCREEN_HEIGHT; wy++) {
-            float h = height_at(grid, x, wy);
-            int sy = (int)(y_off + (float)(wy - world_top) * cam.squash
-                           - h * cam.lift + 0.5f);
-            uint32_t tex = fb[wy * GB_SCREEN_WIDTH + x];
+    /* Water animates: a slow ripple in the shading, driven by a frame
+     * counter that nothing needs to persist or reset. */
+    static int water_t = 0;
+    water_t++;
 
-            if (h < 0.0f) {
-                /* Water: tint toward deep blue so sunk cells read as
-                 * liquid rather than as a hole in the table. */
-                tex = shade(tex, 190);
-                tex = (tex & 0xFFFFFF00u) | 0x00000050u;
-            }
+    /* One pass over world rows, far to near, terrain and sprites together
+     * in painter's order. Terrain needs per-column memory of the previous
+     * row's projection for the front-wall fills; sprites drawn on a row are
+     * naturally overdrawn by anything nearer that projects higher -- which
+     * is exactly the occlusion a wall in front of a character should give. */
+    static int prev_sy[GB_SCREEN_WIDTH];
+    static uint32_t prev_tex[GB_SCREEN_WIDTH];
+    for (int x = 0; x < GB_SCREEN_WIDTH; x++) prev_sy[x] = -1;
 
-            if (prev_sy >= 0 && sy > prev_sy + 1) {
-                /* Height dropped toward the viewer: the far cell's front
-                 * wall is exposed. Shade it darker with a little vertical
-                 * falloff so tall faces read as faces. */
-                int span = sy - prev_sy - 1;
-                for (int fy = prev_sy + 1; fy < sy; fy++) {
-                    if (fy < world_top || fy >= GB_SCREEN_HEIGHT) continue;
-                    int t = (fy - prev_sy) * 52 / (span + 1);
-                    out[fy * GB_SCREEN_WIDTH + x] = shade(prev_tex, 198 - t);
+    for (int wy = world_top; wy < GB_SCREEN_HEIGHT + 16; wy++) {
+        if (wy < GB_SCREEN_HEIGHT) {
+            for (int x = 0; x < GB_SCREEN_WIDTH; x++) {
+                float h = height_at(grid, x, wy);
+                int sy = (int)(y_off + (float)(wy - world_top) * cam.squash
+                               - h * cam.lift + 0.5f);
+                uint32_t tex = grid->tex[(wy + grid->fine_y) * VOX_TEX_W
+                                         + (x + grid->fine_x)];
+
+                if (h < 0.0f) {
+                    /* Water: tint toward deep blue so sunk cells read as
+                     * liquid, with a slow moving shimmer on top. */
+                    int rip = (int)(12.0f * sinf((float)x * 0.42f
+                                                 + (float)wy * 0.27f
+                                                 + (float)water_t * 0.09f));
+                    tex = shade(tex, 190 + rip);
+                    tex = (tex & 0xFFFFFF00u) | 0x00000050u;
                 }
-            }
 
-            if (sy >= world_top && sy < GB_SCREEN_HEIGHT) {
-                /* Slight top-light on raised ground helps height pop. */
-                out[sy * GB_SCREEN_WIDTH + x] = (h > 0.0f) ? shade(tex, 272) : tex;
+                if (prev_sy[x] >= 0 && sy > prev_sy[x] + 1) {
+                    /* Height dropped toward the viewer: the far cell's front
+                     * wall is exposed. Shade it darker with a little vertical
+                     * falloff so tall faces read as faces. */
+                    int span = sy - prev_sy[x] - 1;
+                    for (int fy = prev_sy[x] + 1; fy < sy; fy++) {
+                        if (fy < world_top || fy >= GB_SCREEN_HEIGHT) continue;
+                        int t = (fy - prev_sy[x]) * 52 / (span + 1);
+                        out[fy * GB_SCREEN_WIDTH + x] = shade(prev_tex[x], 198 - t);
+                    }
+                }
+
+                if (sy >= world_top && sy < GB_SCREEN_HEIGHT) {
+                    /* Slight top-light on raised ground helps height pop. */
+                    out[sy * GB_SCREEN_WIDTH + x] = (h > 0.0f) ? shade(tex, 272) : tex;
+                }
+                prev_sy[x] = sy;
+                prev_tex[x] = tex;
             }
-            prev_sy = sy;
-            prev_tex = tex;
         }
-    }
 
-    /* Sprites as upright billboards, far-to-near so overlaps sort. */
-    for (int pass_y = world_top; pass_y < GB_SCREEN_HEIGHT + 16; pass_y++) {
+        /* Sprites standing on this row. */
         for (int i = 0; i < sprites->count; i++) {
             const VoxSprite* s = &sprites->entries[i];
             int sh = s->tall ? 16 : 8;
@@ -251,7 +269,7 @@ void vox_render(GBContext* ctx, const VoxTileGrid* grid,
                 air = grid->link_jump;
                 feet = grid->link_feet_sy;
             }
-            if (feet != pass_y) continue;
+            if (feet != wy) continue;
             if (feet < world_top) continue;   /* lives in the HUD band */
 
             int fy = feet >= GB_SCREEN_HEIGHT ? GB_SCREEN_HEIGHT - 1 : feet;

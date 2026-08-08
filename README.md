@@ -133,11 +133,17 @@ at the addresses named by
   Colours only break ties (tree vs fence, grass vs path)
 - on anything else, tiles are classified per 8×8 by colour — water sinks,
   paths lie flat, bushes and rocks rise, trees and walls rise highest
-- each screen column is marched far-to-near, projecting cell tops and filling
-  the exposed front wall where height steps down
-- terrain is textured with the game's *own* composed frame, so palettes,
-  season tints and tile animation carry through untouched
-- sprites are re-decoded from VRAM and stood upright as billboards
+- the world is marched far-to-near, projecting cell tops and filling the
+  exposed front wall where height steps down
+- terrain is textured from the game's *own* BG tilemap — palettes, season
+  tints and tile animation carry through untouched, and because sprites are
+  not part of the tilemap, nobody leaves a flattened ghost of themselves in
+  the ground
+- sprites are re-decoded from VRAM and stood upright as billboards, drawn in
+  the same painter's order as the terrain — walk behind a tree and the tree
+  actually hides you
+- water ripples; room-to-room walks keep the sky up and slide the rooms
+  through flat rather than flickering guessed terrain
 - **the sky follows the game**: season-tinted in Seasons (spring through
   winter, ember-red in Subrosia), day blue in Ages' present, golden dusk in
   the past — with slow procedural clouds. Interiors keep a neutral backdrop
@@ -157,8 +163,13 @@ Colour-only vs the game's own collision data, same frame:
   relief rather than a correct one. Thresholds are tunable at the top of
   [`voxel_tiles.c`](src/voxel/voxel_tiles.c).
 - During room-to-room scroll transitions the collision grid describes the
-  *next* room while the screen still shows both, so those half-seconds use the
-  colour classifier. `VOXEL_NO_ORACLE=1` forces it everywhere, for A/B tests.
+  *next* room while the screen still shows both, so those half-seconds render
+  as a flat slide — calm, but flat. `VOXEL_NO_ORACLE=1` forces the colour
+  classifier everywhere, for A/B tests.
+- The trusted-frame gate accepts exactly `wScrollMode == 1`. If some corner
+  of the game uses another value during normal play (candidates: large
+  scrolling dungeon rooms), those rooms fall back to the flat slide too —
+  wrong-but-calm, never wrong-and-extruded.
 - Fixed pitch ladder. No free-roam or first-person camera — moving the player
   off the grid would mean fighting the game's own movement code.
 - Native 160×144, so it's chunky by construction. Deliberate.

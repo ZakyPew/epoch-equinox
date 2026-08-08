@@ -41,11 +41,15 @@ endif()
 # guest frame -- the voxel renderer uses it. PATCH_COMMAND re-runs on
 # re-configures, so idempotence lives in a -P script.
 # ---------------------------------------------------------------------------
-set(GBRT_REF "main" CACHE STRING "git ref of GB-Recomp/gb-recompiled to use")
+# Pinned: tracking upstream main let a runtime change (SDL 2.24+ controller
+# enums) break release builds without any change on our side. Bump this sha
+# deliberately, after a local build against it. Not GIT_SHALLOW because
+# shallow clones cannot check out an arbitrary commit hash.
+set(GBRT_REF "6581880fce60e6f139901a5942fc984e9c1db8ab" CACHE STRING
+    "git ref of GB-Recomp/gb-recompiled to use")
 FetchContent_Declare(gb_recompiled
     GIT_REPOSITORY https://github.com/GB-Recomp/gb-recompiled.git
     GIT_TAG ${GBRT_REF}
-    GIT_SHALLOW TRUE
     PATCH_COMMAND ${CMAKE_COMMAND}
         -DPATCH_FILE=${CMAKE_CURRENT_SOURCE_DIR}/patches/gbrt-frame-hook.patch
         -P ${CMAKE_CURRENT_SOURCE_DIR}/patches/apply_gbrt_patch.cmake
