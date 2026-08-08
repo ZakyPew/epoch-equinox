@@ -36,6 +36,9 @@ typedef struct {
     int  off_y, off_x;          /* wScreenOffsetY/X, transient draw offset */
     int  link_y, link_x;        /* w1Link whole-pixel position (room space) */
     int  link_z;                /* w1Link zh: 0 on the ground, negative airborne */
+    bool is_seasons;            /* which cart the profile matched */
+    int  active_group;          /* wActiveGroup: 0/1 outdoors, 2+ interiors */
+    int  room_state;            /* wRoomStateModifier: the season, in Seasons */
     uint8_t collisions[16 * 12]; /* wRoomCollisions, stride 16 */
 } VoxOracleState;
 
@@ -60,6 +63,9 @@ typedef struct {
     int  link_sx;               /* centre x */
     int  link_feet_sy;          /* feet row at z=0 (his shadow's row) */
     int  link_jump;             /* pixels airborne, >= 0 */
+    /* Backdrop sky, from live game state. VOX_SKY_NONE keeps the neutral
+     * dark gradient (indoors, dungeons, non-Oracles carts). */
+    int  sky;
     uint8_t scx, scy;          /* latched scroll for this frame */
     /* Sub-tile scroll remainder, so the height grid can be sampled in
      * screen space. */
@@ -81,6 +87,18 @@ typedef struct {
     uint8_t attr;
     bool    tall;              /* 8x16 mode */
 } VoxSprite;
+
+/* Sky kinds for VoxTileGrid.sky. */
+enum {
+    VOX_SKY_NONE = -1,
+    VOX_SKY_AGES_PRESENT = 0,
+    VOX_SKY_AGES_PAST,
+    VOX_SKY_SPRING,
+    VOX_SKY_SUMMER,
+    VOX_SKY_AUTUMN,
+    VOX_SKY_WINTER,
+    VOX_SKY_SUBROSIA,
+};
 
 #define VOX_MAX_SPRITES 40
 
