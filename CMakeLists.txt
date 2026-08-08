@@ -82,6 +82,7 @@ if(EPOCH_WITH_VOXEL)
     list(APPEND EPOCH_SUPPORT_SOURCES
         src/voxel/voxel_tiles.c
         src/voxel/voxel_oracle.c
+        src/voxel/voxel_overrides.c
         src/voxel/voxel_render.c
         src/voxel/voxel_menu.cpp)
 endif()

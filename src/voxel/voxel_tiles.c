@@ -466,7 +466,19 @@ bool vox_scrape(GBContext* ctx, const uint32_t* fb, VoxTileGrid* grid,
 
                 if (row >= 0 && row < 12 && col >= 0 && col < 16) {
                     uint8_t coll = oracle.collisions[row * 16 + col];
-                    grid->height[ty][tx] = vox_oracle_height(coll, by_colour);
+                    uint8_t hcls = vox_oracle_height(coll, by_colour);
+                    /* Hand-authored room overrides get the final word --
+                     * for props the player can walk past (statue rows,
+                     * gates) that read as "should be 3D" to a human and
+                     * as $00 to the collision map. */
+                    const uint8_t* ov = vox_override_lookup(
+                        oracle.is_seasons, oracle.active_group,
+                        oracle.active_room, oracle.collisions);
+                    if (ov && row < 8 && col < 10 &&
+                        ov[row * 10 + col] != 0xFF) {
+                        hcls = ov[row * 10 + col];
+                    }
+                    grid->height[ty][tx] = hcls;
                     continue;
                 }
                 /* Above the HUD line or outside the room: flat. */

@@ -162,6 +162,25 @@ at the addresses named by
 Output is a normal 160×144 frame handed back through the runtime's present
 path, so shaders, scaling and screenshots all still apply.
 
+### Sculpting rooms by hand
+
+Collision decides what rises — which is right until a room decorates itself
+with props you can walk past (statue rows, gates, cave mouths): solid to the
+eye, `$00` to the collision map, flat in the diorama. Plain text files get
+the final word, per room:
+
+```
+voxel/overrides/ages-0-6a.txt     # game, group, room (hex), next to the binary
+```
+
+8 rows × 10 characters, one per 16×16 room cell: `.` keep, `_` flat,
+`w` water, `l` low, `m` mid, `h` high. Comments with `#`.
+
+Run with `VOXEL_EDIT=1` and every room you enter that has no override file
+gets a ready-to-edit template written for it — including the
+collision-derived heights as a comment, so you can see what you're
+overriding. Edit the file, leave the room, walk back in: it reloads.
+
 Colour-only vs the game's own collision data, same frame:
 
 <p align="center"><img src="docs/voxel-ab.png" alt="left: colour heuristic, right: collision data" width="820"></p>
