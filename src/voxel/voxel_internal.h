@@ -34,6 +34,8 @@ typedef struct {
     bool menu_open;
     int  cam_y, cam_x;          /* hCameraY/X, room pixels */
     int  off_y, off_x;          /* wScreenOffsetY/X, transient draw offset */
+    int  link_y, link_x;        /* w1Link whole-pixel position (room space) */
+    int  link_z;                /* w1Link zh: 0 on the ground, negative airborne */
     uint8_t collisions[16 * 12]; /* wRoomCollisions, stride 16 */
 } VoxOracleState;
 
@@ -51,6 +53,13 @@ typedef struct {
     /* True while a full-screen menu owns the display: render the frame
      * flat instead of extruding inventory screens. */
     bool flat;
+    /* Link in screen space, when the oracle state was readable. The renderer
+     * uses it to anchor his billboard to the ground he jumped FROM rather
+     * than to wherever his sprite happens to be drawn mid-air. */
+    bool link_known;
+    int  link_sx;               /* centre x */
+    int  link_feet_sy;          /* feet row at z=0 (his shadow's row) */
+    int  link_jump;             /* pixels airborne, >= 0 */
     uint8_t scx, scy;          /* latched scroll for this frame */
     /* Sub-tile scroll remainder, so the height grid can be sampled in
      * screen space. */

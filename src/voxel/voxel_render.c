@@ -170,6 +170,21 @@ void vox_render(GBContext* ctx, const VoxTileGrid* grid,
             const VoxSprite* s = &sprites->entries[i];
             int sh = s->tall ? 16 : 8;
             int feet = s->y + sh;          /* sprites stand on their bottom edge */
+
+            /* Link mid-jump: the game draws his sprite higher, but his
+             * shadow -- and therefore his billboard's anchor -- stays on
+             * the ground he jumped from. w1Link gives both. Re-anchor any
+             * of his OAM sprites to the ground row and lift the body
+             * instead, so a jump reads as height above the terrain rather
+             * than a slide toward the horizon. */
+            int air = 0;
+            if (grid->link_known && grid->link_jump > 0 &&
+                s->x + 4 >= grid->link_sx - 10 && s->x + 4 <= grid->link_sx + 10 &&
+                feet >= grid->link_feet_sy - grid->link_jump - 4 &&
+                feet <= grid->link_feet_sy - grid->link_jump + 4) {
+                air = grid->link_jump;
+                feet = grid->link_feet_sy;
+            }
             if (feet != pass_y) continue;
             if (feet < world_top) continue;   /* lives in the HUD band */
 
@@ -179,10 +194,15 @@ void vox_render(GBContext* ctx, const VoxTileGrid* grid,
             int base = (int)(y_off + (float)(fy - world_top) * cam.squash
                              - ground * cam.lift + 0.5f);
 
+            /* Airborne pixels rise like terrain does: 16 world px of jump
+             * equals one HIGH block of extrusion. */
+            int body_lift = (int)((float)air * (VOX_UNITS[VOX_H_HIGH] / 16.0f)
+                                  * cam.lift + 0.5f) + air;
+
             for (int row = 0; row < sh; row++) {
                 uint32_t px[8];
                 vox_decode_sprite_row(ctx, s, row, px);
-                int sy = base - (sh - row);
+                int sy = base - body_lift - (sh - row);
                 if (sy < world_top || sy >= GB_SCREEN_HEIGHT) continue;
                 for (int c = 0; c < 8; c++) {
                     int sx = s->x + c;
