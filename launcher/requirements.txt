@@ -1,0 +1,12 @@
+# Oracles launcher dependencies.
+#
+#   pip install -r launcher/requirements.txt
+#
+# PySide6-Essentials is the trimmed Qt distribution -- the full PySide6
+# package also works if you already have it.
+PySide6-Essentials>=6.5
+
+# Optional: controller navigation in the launcher menus. The game handles
+# its own gamepad input either way, so leaving this out costs you nothing
+# except pad support on this screen.
+pygame>=2.5

@@ -29,7 +29,31 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from PySide6.QtCore import QPointF, QRectF, Qt, QTimer, Signal
+BOOTSTRAP_HELP = """\
+The Oracles launcher needs PySide6.
+
+    pip install -r launcher/requirements.txt
+
+(or: pip install PySide6-Essentials, plus pygame for controller support)
+"""
+
+try:
+    from PySide6.QtCore import QPointF, QRectF, Qt, QTimer, Signal
+except ImportError:
+    # Reaching the user matters more than tidiness here: someone who
+    # double-clicked this file has no terminal to read a traceback in.
+    sys.stderr.write(BOOTSTRAP_HELP)
+    try:
+        import tkinter
+        from tkinter import messagebox
+
+        root = tkinter.Tk()
+        root.withdraw()
+        messagebox.showerror("Oracles launcher - missing dependency", BOOTSTRAP_HELP)
+    except Exception:
+        pass
+    raise SystemExit(1)
+
 from PySide6.QtGui import (
     QBrush,
     QColor,
@@ -490,17 +514,36 @@ class LauncherView(QWidget):
 
         cover = self.cover(game.id)
         if cover is not None:
+            # Scale to cover the *panel*, not the whole window. The panel is
+            # the widest slice the diagonal leaves (about 0.62 of the width),
+            # so its aspect is roughly 1.1:1 -- which is why the art guidance
+            # in covers/README.md asks for a square image.
+            panel_w = w * max(SEAM_TOP, 1.0 - SEAM_BOTTOM)
             scaled = cover.scaled(
-                int(w),
+                int(panel_w),
                 int(h),
                 Qt.AspectRatioMode.KeepAspectRatioByExpanding,
                 Qt.TransformationMode.SmoothTransformation,
             )
-            pr.setOpacity(0.42 if active else 0.16)
+            pr.setOpacity(0.78 if active else 0.24)
             pr.drawPixmap(
                 int(cx - scaled.width() / 2), int(h / 2 - scaled.height() / 2), scaled
             )
             pr.setOpacity(1.0)
+
+            # Scrim under the text side. Custom art is drawn bright enough to
+            # actually look at, so the title and menu need their own contrast
+            # rather than relying on the art being dim.
+            scrim = QLinearGradient(0, 0, w, 0)
+            dark = QColor(0, 0, 0, 205)
+            clear = QColor(0, 0, 0, 0)
+            if index == 0:
+                scrim.setColorAt(0.0, dark)
+                scrim.setColorAt(0.55, clear)
+            else:
+                scrim.setColorAt(0.45, clear)
+                scrim.setColorAt(1.0, dark)
+            pr.fillPath(path, QBrush(scrim))
         else:
             pr.setOpacity(1.0 if active else 0.45)
             motif = QColor(theme.accent)
@@ -773,17 +816,35 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    runner_path = args.runner or default_runner_path()
-    if not runner_path.is_file():
-        print(
-            f"[launcher] game binary not found at {runner_path}\n"
-            "  build it with:  cmake --build build -j",
-            file=sys.stderr,
-        )
-        return 1
-
     app = QApplication(sys.argv)
     app.setApplicationName("Oracles: Recompiled")
+
+    runner_path = args.runner or default_runner_path()
+    if not runner_path.is_file():
+        # This is the single most likely first-run failure: source downloaded,
+        # nothing built yet. It used to print to stderr and exit, which looks
+        # exactly like "the launcher didn't start" if you double-clicked it.
+        message = (
+            f"No game binary at:\n{runner_path}\n\n"
+            "The games have to be compiled once before the launcher can run "
+            "them. From the project folder:\n\n"
+            "    cmake -S . -B build -G Ninja\n"
+            "    cmake --build build -j\n\n"
+            "That fetches Oracle of Seasons and the runtime, then builds both "
+            "carts. It takes a while the first time and needs CMake, Ninja, "
+            "SDL2 and libcurl installed.\n\n"
+            "Already built somewhere else? Point at it with:\n"
+            "    python3 launcher/oracles_launcher.py --runner /path/to/oracles"
+        )
+        print(f"[launcher] {message}", file=sys.stderr)
+        box = QMessageBox()
+        box.setIcon(QMessageBox.Icon.Warning)
+        box.setWindowTitle("Oracles - not built yet")
+        box.setText("The games haven't been built yet.")
+        box.setInformativeText(message)
+        box.exec()
+        return 1
+
     window = MainWindow(Runner(runner_path))
     window.show()
     return app.exec()

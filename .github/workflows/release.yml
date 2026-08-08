@@ -1,0 +1,107 @@
+name: Build release
+
+# Produces a ready-to-run bundle so people don't have to compile ~170 MB of
+# generated C themselves. Runs on a version tag, or on demand.
+#
+# No ROM data is ever produced or published by this workflow -- the bundle is
+# the runner binary plus the launcher, and users supply their own dumps.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            name: linux-x64
+          - os: macos-14
+            name: macos-arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build libsdl2-dev libcurl4-openssl-dev
+
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ninja sdl2 curl
+
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=MinSizeRel
+
+      # Both carts are ~50 large translation units each, so this is the slow
+      # step by a wide margin.
+      - name: Build
+        run: cmake --build build -j$(getconf _NPROCESSORS_ONLN)
+
+      - name: Smoke test
+        run: |
+          test -x build/oracles
+          ./build/oracles --list-games
+          ./build/oracles --games-json
+
+      - name: Stage bundle
+        run: |
+          staging="oracles-${{ matrix.name }}"
+          mkdir -p "$staging"
+          cp build/oracles "$staging/"
+          cp -r launcher "$staging/"
+          cp README.md "$staging/"
+          mkdir -p "$staging/roms" "$staging/covers" "$staging/mods"
+          cp examples/covers/README.md "$staging/covers/"
+          cp examples/mods/README.md "$staging/mods/"
+          cat > "$staging/roms/README.txt" <<'EOF'
+          Drop your own ROM dumps here, named exactly:
+
+            tlozooa.gbc    Oracle of Ages   (USA, Australia)
+            tlozoos.gbc    Oracle of Seasons (USA, Australia)
+
+          Hashes are verified on first boot; any other dump is refused.
+          You can also use "Install ROM" in the launcher.
+          EOF
+          cat > "$staging/RUN.txt" <<'EOF'
+          1. pip install -r launcher/requirements.txt
+          2. put your ROMs in roms/  (see roms/README.txt)
+          3. python3 launcher/oracles_launcher.py
+
+          Or run ./oracles --game tlozooa to skip the launcher.
+          EOF
+          tar czf "$staging.tar.gz" "$staging"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: oracles-${{ matrix.name }}
+          path: oracles-${{ matrix.name }}.tar.gz
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: "*.tar.gz"
+          generate_release_notes: true
+          body: |
+            Bundled runner + launcher. **No ROM data is included** — supply
+            your own dumps of Oracle of Ages and Oracle of Seasons
+            (USA, Australia); hashes are verified on first boot.
+
+            1. `pip install -r launcher/requirements.txt`
+            2. put your ROMs in `roms/`
+            3. `python3 launcher/oracles_launcher.py`
