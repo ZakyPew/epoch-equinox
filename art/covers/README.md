@@ -21,6 +21,15 @@ The launcher looks in three places, most specific first:
 So anything here is a default, and any user can still override it locally
 without touching the repo.
 
+## Installing
+
+```sh
+python3 tools/install_cover_art.py --ages ages.png --seasons seasons.png
+```
+
+That names, centre-crops and resizes both correctly. Add `--local` to write
+to `build/covers/` (gitignored) instead, for anything that shouldn't ship.
+
 **Size: 1600 × 1600 PNG, square. Minimum 1000 × 1000.** Keep the subject in
 the middle 70%. Full reasoning in [`../../examples/covers/README.md`](../../examples/covers/README.md).
 
