@@ -1,4 +1,4 @@
-/* Oracles game runner.
+/* Epoch & Equinox game runner.
  *
  * This binary only runs carts. Game selection, cover art, mod toggles and
  * settings live in the separate launcher app (see launcher/), the way
@@ -7,7 +7,7 @@
  * launcher down with it.
  *
  * The cart table isn't written here. cmake/GenerateCarts.cmake emits
- * oracles_games.h describing exactly the ROMs that were recompiled, and this
+ * epoch_games.h describing exactly the ROMs that were recompiled, and this
  * file expands it. Drop a different ROM in roms/, reconfigure, and it appears
  * with no C to edit.
  *
@@ -31,19 +31,19 @@ extern "C" {
 #include "gb_sha256.h"
 #include "gb_asset_loader.h"
 #include "mod_loader.h"
-#if ORACLES_HAVE_VOXEL
+#if EPOCH_HAVE_VOXEL
 #include "voxel/voxel.h"
 #endif
 }
 
 #include "platform_sdl.h"
-#include "oracles_games.h"
+#include "epoch_games.h"
 
 /* Each generated cart exposes <id>_main() and its own manifest header. */
-#define ORACLES_GAME(sym, id, title, rom, size, sha256, sha1) \
+#define EPOCH_GAME(sym, id, title, rom, size, sha256, sha1) \
     extern "C" int sym##_main(int argc, char* argv[]);
-ORACLES_GAME_LIST
-#undef ORACLES_GAME
+EPOCH_GAME_LIST
+#undef EPOCH_GAME
 
 typedef int (*GBRunnerMainFn)(int argc, char* argv[]);
 
@@ -71,10 +71,10 @@ static bool hex_to_bytes(const char* hex, uint8_t* out, size_t out_len) {
 }
 
 static GBRunnerGame g_games[] = {
-#define ORACLES_GAME(sym, id, title, rom, size, sha256, sha1) \
+#define EPOCH_GAME(sym, id, title, rom, size, sha256, sha1) \
     {id, title, rom, sym##_main, sha256, sha1, size},
-    ORACLES_GAME_LIST
-#undef ORACLES_GAME
+    EPOCH_GAME_LIST
+#undef EPOCH_GAME
 };
 
 static const size_t g_game_count = sizeof(g_games) / sizeof(g_games[0]);
@@ -124,7 +124,7 @@ static void print_usage(const char* program) {
             "       [--list-games] [cart arguments...]\n"
             "\n"
             "Game selection and mod management live in the launcher app;\n"
-            "run `python3 launcher/oracles_launcher.py` for the UI.\n",
+            "run `python3 launcher/epoch_launcher.py` for the UI.\n",
             program);
 }
 
@@ -218,7 +218,7 @@ int main(int argc, char* argv[]) {
             g_mods_disabled = true;
             continue;
         }
-#if ORACLES_HAVE_VOXEL
+#if EPOCH_HAVE_VOXEL
         if (strcmp(argv[i], "--voxel") == 0 && i + 1 < argc) {
             voxel_set_mode((int)strtol(argv[++i], NULL, 10));
             continue;
@@ -260,7 +260,7 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-#if ORACLES_HAVE_VOXEL
+#if EPOCH_HAVE_VOXEL
     voxel_install();
 #endif
 

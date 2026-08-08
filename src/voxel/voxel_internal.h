@@ -1,6 +1,6 @@
 /* Shared internals between voxel_tiles.c and voxel_render.c. */
-#ifndef ORACLES_VOXEL_INTERNAL_H
-#define ORACLES_VOXEL_INTERNAL_H
+#ifndef EPOCH_VOXEL_INTERNAL_H
+#define EPOCH_VOXEL_INTERNAL_H
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -77,4 +77,4 @@ void vox_render(GBContext* ctx, const VoxTileGrid* grid,
                 const VoxSpriteList* sprites, const uint32_t* fb,
                 int mode, uint32_t* out);
 
-#endif /* ORACLES_VOXEL_INTERNAL_H */
+#endif /* EPOCH_VOXEL_INTERNAL_H */

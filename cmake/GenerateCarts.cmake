@@ -12,8 +12,8 @@
 
 include_guard(GLOBAL)
 
-# Configure + build gbrecomp once, into the build tree. Sets ORACLES_GBRECOMP.
-function(oracles_build_recompiler source_dir)
+# Configure + build gbrecomp once, into the build tree. Sets EPOCH_GBRECOMP.
+function(epoch_build_recompiler source_dir)
     set(tool_build "${CMAKE_BINARY_DIR}/_gbrecomp")
     set(tool_exe "${tool_build}/bin/gbrecomp${CMAKE_EXECUTABLE_SUFFIX}")
 
@@ -29,7 +29,7 @@ function(oracles_build_recompiler source_dir)
         endif()
         execute_process(
             COMMAND ${CMAKE_COMMAND} --build "${tool_build}" --target gbrecomp
-                    --parallel ${ORACLES_JOBS}
+                    --parallel ${EPOCH_JOBS}
             RESULT_VARIABLE rc
         )
         if(NOT rc EQUAL 0 OR NOT EXISTS "${tool_exe}")
@@ -37,11 +37,11 @@ function(oracles_build_recompiler source_dir)
         endif()
     endif()
 
-    set(ORACLES_GBRECOMP "${tool_exe}" PARENT_SCOPE)
+    set(EPOCH_GBRECOMP "${tool_exe}" PARENT_SCOPE)
 endfunction()
 
 # Recompile one ROM. Sets <out_prefix>_SOURCES and <out_prefix>_DIR.
-function(oracles_generate_cart rom_path id out_prefix)
+function(epoch_generate_cart rom_path id out_prefix)
     set(gen_dir "${CMAKE_BINARY_DIR}/generated/${id}")
     set(stamp "${gen_dir}/.stamp")
 
@@ -51,7 +51,7 @@ function(oracles_generate_cart rom_path id out_prefix)
     if(EXISTS "${stamp}")
         file(READ "${stamp}" prev_hash)
         file(SHA256 "${rom_path}" rom_hash)
-        if(prev_hash STREQUAL rom_hash AND "${stamp}" IS_NEWER_THAN "${ORACLES_GBRECOMP}")
+        if(prev_hash STREQUAL rom_hash AND "${stamp}" IS_NEWER_THAN "${EPOCH_GBRECOMP}")
             set(needs_gen FALSE)
         endif()
     endif()
@@ -64,7 +64,7 @@ function(oracles_generate_cart rom_path id out_prefix)
         # --emit-asset-loader + --bss-rom-data keep ROM bytes out of the
         # binary's data section; the loader fills them from the user's own
         # copy at first boot.
-        set(args "${rom_path}" -o "${gen_dir}" -j ${ORACLES_JOBS}
+        set(args "${rom_path}" -o "${gen_dir}" -j ${EPOCH_JOBS}
                  --prefix-symbols --emit-asset-loader --bss-rom-data)
 
         # Optional symbol names, e.g. from Stewmath/oracles-disasm. Purely
@@ -75,7 +75,7 @@ function(oracles_generate_cart rom_path id out_prefix)
             list(APPEND args --symbols "${rom_dir}/${id}.sym")
         endif()
 
-        execute_process(COMMAND "${ORACLES_GBRECOMP}" ${args}
+        execute_process(COMMAND "${EPOCH_GBRECOMP}" ${args}
                         RESULT_VARIABLE rc OUTPUT_QUIET)
         if(NOT rc EQUAL 0)
             message(FATAL_ERROR "gbrecomp failed on ${rom_path}")
@@ -129,7 +129,7 @@ endfunction()
 # Write the game table the runner compiles against, describing exactly the
 # carts that were actually generated. Nothing about the cart list is hardcoded
 # in C -- drop a different ROM in roms/ and it appears here.
-function(oracles_write_game_table ids titles rom_paths out_header)
+function(epoch_write_game_table ids titles rom_paths out_header)
     set(entries "")
     list(LENGTH ids count)
     math(EXPR last "${count} - 1")
@@ -148,7 +148,7 @@ function(oracles_write_game_table ids titles rom_paths out_header)
         # `{0x88, 0x03, ...}` initialiser makes the preprocessor read each
         # byte as its own macro argument, and the X-macro stops expanding.
         string(APPEND entries
-            "    ORACLES_GAME(${id}, \"${id}\", \"${title}\", \"roms/${rom_name}\", \\\n"
+            "    EPOCH_GAME(${id}, \"${id}\", \"${title}\", \"roms/${rom_name}\", \\\n"
             "                 ${rom_size}u, \"${sha256_hex}\", \"${sha1_hex}\") \\\n")
     endforeach()
 
@@ -159,16 +159,16 @@ function(oracles_write_game_table ids titles rom_paths out_header)
  * time. Hashes are of your own dumps, so verification is self-consistent
  * with the code that was generated from them.
  *
- * Consumed as an X-macro: define ORACLES_GAME(sym, id, title, rom, size,
- * sha256_hex, sha1_hex) and expand ORACLES_GAME_LIST. Both hashes are
+ * Consumed as an X-macro: define EPOCH_GAME(sym, id, title, rom, size,
+ * sha256_hex, sha1_hex) and expand EPOCH_GAME_LIST. Both hashes are
  * lowercase hex strings.
  */
-#ifndef ORACLES_GAMES_H
-#define ORACLES_GAMES_H
+#ifndef EPOCH_GAMES_H
+#define EPOCH_GAMES_H
 
-#define ORACLES_GAME_COUNT ${count}
+#define EPOCH_GAME_COUNT ${count}
 
-#define ORACLES_GAME_LIST \\
+#define EPOCH_GAME_LIST \\
 ${entries}
 
 #endif

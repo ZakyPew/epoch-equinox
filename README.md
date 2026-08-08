@@ -1,4 +1,6 @@
-# oracles-recompiled
+# Epoch & Equinox
+
+*Oracle of Ages and Oracle of Seasons, recompiled from your own ROMs.*
 
 **The Legend of Zelda: Oracle of Ages** and **Oracle of Seasons**, statically
 recompiled to native C and wrapped in a modern launcher, with mod support and
@@ -26,8 +28,8 @@ roms/tlozoos.gbc     The Legend of Zelda: Oracle of Seasons (USA, Australia)
 Then:
 
 ```sh
-git clone https://github.com/ZakyPew/oracles-recompiled.git
-cd oracles-recompiled
+git clone https://github.com/ZakyPew/epoch-equinox.git
+cd epoch-equinox
 ./setup.sh
 ```
 
@@ -57,7 +59,7 @@ cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=MinSizeRel
 cmake --build build -j$(nproc)
 
 pip install -r launcher/requirements.txt
-python3 launcher/oracles_launcher.py
+python3 launcher/epoch_launcher.py
 ```
 
 If your Python is "externally managed" and pip refuses:
@@ -65,16 +67,16 @@ If your Python is "externally managed" and pip refuses:
 ```sh
 python3 -m venv .venv && . .venv/bin/activate
 pip install -r launcher/requirements.txt
-python launcher/oracles_launcher.py
+python launcher/epoch_launcher.py
 ```
 
 ### CMake options
 
 | option | default | effect |
 |---|---|---|
-| `ORACLES_ROM_DIR` | `./roms` | where your ROMs live |
-| `ORACLES_WITH_VOXEL` | `ON` | build the voxel diorama renderer |
-| `ORACLES_JOBS` | auto | parallelism for recompilation |
+| `EPOCH_ROM_DIR` | `./roms` | where your ROMs live |
+| `EPOCH_WITH_VOXEL` | `ON` | build the voxel diorama renderer |
+| `EPOCH_JOBS` | auto | parallelism for recompilation |
 | `GBRECOMP_SHRINK` | `ON` | dead-strip + symbol-strip the binary |
 | `GBRT_REF` | `main` | pin a git ref for the fetched runtime |
 
@@ -95,7 +97,7 @@ voxel classifier is tuned for top-down overworlds.
 
 ## Run
 
-`./build/oracles --game tlozooa` runs a cart directly, `--list-games` prints
+`./build/epoch --game tlozooa` runs a cart directly, `--list-games` prints
 the ids, `--no-mods` boots stock. Esc opens the runtime menu in game
 (savestates, palette, shaders, borders, input remapping, audio).
 
@@ -231,7 +233,7 @@ cmake/GenerateCarts.cmake       build-time recompilation from your own ROM
 runner_main.cpp                 game runner: --game / --games-json / --voxel
 src/mod_loader.{h,c}            manifest parsing, IPS/BPS, overlays
 src/voxel/                      voxel diorama renderer
-launcher/oracles_launcher.py    the launcher app
+launcher/epoch_launcher.py    the launcher app
 launcher/gamepad.py             optional pad navigation
 patches/                        frame-hook patch for the fetched runtime
 tools/make_test_patches.py      generates IPS/BPS patches to test the loader
