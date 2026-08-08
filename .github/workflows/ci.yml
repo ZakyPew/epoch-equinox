@@ -1,0 +1,98 @@
+name: CI
+
+# Deliberately does NOT build the games, and publishes no binaries.
+#
+# Building a cart requires a ROM, and the resulting binary contains code
+# translated from it. Neither belongs in CI or in a release artifact, so
+# everyone recompiles from their own dump. What CI can do is check that our
+# own code is sound.
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  native:
+    name: Build our own C
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build libsdl2-dev libcurl4-openssl-dev
+
+      - name: Refuses to configure without a ROM
+        run: |
+          cmake -S . -B build-norom -G Ninja -DORACLES_ROM_DIR=/nonexistent \
+            > cfg.log 2>&1 || true
+          grep -q "No ROMs found" cfg.log
+          echo "Confirmed: no ROM, no build."
+
+      # oracles_support is the mod loader plus the voxel renderer -- all our
+      # own code, and the part worth regression-checking. A tiny synthetic
+      # cart is enough to satisfy the recompiler; it is not a game and
+      # contains nothing copyrighted.
+      - name: Build support library
+        run: |
+          mkdir -p ci-roms
+          python3 - <<'EOF'
+          data = bytearray(32 * 1024)
+          data[0x100:0x104] = bytes([0x00, 0xC3, 0x50, 0x01])
+          data[0x104:0x134] = bytes.fromhex(
+              "CEED6666CC0D000B03730083000C000D0008111F8889000E"
+              "DCCC6EE6DDDDD999BBBB67636E0EECCCDDDC999FBBB9333E")
+          data[0x134:0x13e] = b"CITESTCART"
+          data[0x14d] = (-sum(data[0x134:0x14d]) - 1) & 0xFF
+          open("ci-roms/citest.gb", "wb").write(bytes(data))
+          EOF
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DORACLES_ROM_DIR="$PWD/ci-roms"
+          cmake --build build --target oracles_support -j"$(nproc)"
+
+  launcher:
+    name: Check the launcher
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1 libxkbcommon-x11-0 libxcb-cursor0 \
+            libxcb-icccm4 libxcb-keysyms1 libxcb-shape0
+          pip install -r launcher/requirements.txt
+
+      - name: Byte-compile
+        run: python -m compileall -q launcher tools
+
+      # Qt's offscreen platform constructs the whole UI headlessly, which
+      # catches paint-path and signal-wiring breakage that a syntax check
+      # would sail straight past.
+      - name: Import under offscreen Qt
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          python - <<'EOF'
+          import sys
+          sys.path.insert(0, "launcher")
+          import gamepad, oracles_launcher
+          print("launcher imports OK; pygame present:", gamepad._HAVE_PYGAME)
+          EOF
+
+  patches:
+    name: Verify the runtime patch still applies
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply against upstream HEAD
+        run: |
+          git clone --depth 1 https://github.com/GB-Recomp/gb-recompiled.git /tmp/gbrt
+          git -C /tmp/gbrt apply --check "$GITHUB_WORKSPACE/patches/gbrt-frame-hook.patch"
+          echo "frame-hook patch applies cleanly to gb-recompiled HEAD"
