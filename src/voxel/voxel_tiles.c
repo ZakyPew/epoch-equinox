@@ -122,8 +122,10 @@ static TileFeatures tile_features(GBContext* ctx, const uint8_t* pat, int pal) {
     return f;
 }
 
-static uint8_t classify_tile(GBContext* ctx, const uint8_t* pat, int pal) {
+static uint8_t classify_tile(GBContext* ctx, const uint8_t* pat, int pal,
+                             bool* leafy_out) {
     TileFeatures f = tile_features(ctx, pat, pal);
+    if (leafy_out) *leafy_out = f.green_bias > 12;
 
     /* Water: strongly blue, mid luma. Sinks. */
     if (f.blue_bias > 28 && f.luma < 190) return VOX_H_WATER;
@@ -310,7 +312,9 @@ bool vox_scrape(GBContext* ctx, VoxTileGrid* grid, VoxSpriteList* sprites) {
             int bank = (attr >> 3) & 1;
 
             const uint8_t* pat = tile_pattern(ctx, tile, signed_tiles, bank);
-            uint8_t by_colour = classify_tile(ctx, pat, pal);
+            bool leafy = false;
+            uint8_t by_colour = classify_tile(ctx, pat, pal, &leafy);
+            grid->leafy[ty][tx] = leafy ? 1 : 0;
 
             /* Decode this tile's pixels into the sprite-free terrain
              * texture. The composed frame can't be the ground texture:
