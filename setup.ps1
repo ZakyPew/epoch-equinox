@@ -64,6 +64,16 @@ if ($python -and $python.Source -like '*WindowsApps*') {
     $python = $null
 }
 if (-not $python) {
+    $py = Get-Command py -ErrorAction SilentlyContinue
+    if ($py) {
+        $pythonPath = (& $py.Source -3 -c 'import sys; print(sys.executable)' 2>$null |
+                       Select-Object -First 1)
+        if ($LASTEXITCODE -eq 0 -and $pythonPath -and (Test-Path $pythonPath)) {
+            $python = Get-Item $pythonPath
+        }
+    }
+}
+if (-not $python) {
     Fail @'
 Python 3 not found (or only the Microsoft Store stub is on PATH).
 
@@ -105,14 +115,14 @@ During install, tick "Desktop development with C++".
 # --------------------------------------------------------------------------
 # 2. SDL2 + libcurl via vcpkg
 # --------------------------------------------------------------------------
-Say 'Checking SDL2 and libcurl'
+Say 'Checking SDL2, libcurl, and GLEW'
 
 $toolchain = $null
 if ($env:VCPKG_ROOT -and (Test-Path "$env:VCPKG_ROOT\scripts\buildsystems\vcpkg.cmake")) {
     $toolchain = "$env:VCPKG_ROOT\scripts\buildsystems\vcpkg.cmake"
     Write-Host "    vcpkg: $env:VCPKG_ROOT"
-    & "$env:VCPKG_ROOT\vcpkg.exe" install sdl2:x64-windows curl:x64-windows
-    if ($LASTEXITCODE -ne 0) { Fail 'vcpkg could not install SDL2/libcurl' }
+    & "$env:VCPKG_ROOT\vcpkg.exe" install sdl2:x64-windows curl:x64-windows glew:x64-windows
+    if ($LASTEXITCODE -ne 0) { Fail 'vcpkg could not install SDL2/libcurl/GLEW' }
 } else {
     Fail @'
 vcpkg not found (VCPKG_ROOT is unset or wrong).
@@ -121,8 +131,8 @@ vcpkg not found (VCPKG_ROOT is unset or wrong).
     C:\vcpkg\bootstrap-vcpkg.bat
     setx VCPKG_ROOT C:\vcpkg
 
-Then open a new terminal and re-run this script. It will install SDL2 and
-libcurl for you.
+Then open a new terminal and re-run this script. It will install SDL2,
+libcurl, and GLEW for you.
 '@
 }
 

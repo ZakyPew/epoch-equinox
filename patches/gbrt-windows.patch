@@ -1,0 +1,567 @@
+diff --git "a/runtime/CMakeLists.txt" "b/runtime/CMakeLists.txt"
+index e09fd1d..ff9e989 100644
+--- "a/runtime/CMakeLists.txt"
++++ "b/runtime/CMakeLists.txt"
+@@ -1,7 +1,7 @@
+ # runtime/CMakeLists.txt
+ # GameBoy Runtime Library
+ 
+-add_library(gbrt STATIC
++set(GBRT_SOURCES
+     src/gbrt.c
+     src/differential.c
+     src/interpreter.c
+@@ -9,25 +9,36 @@ add_library(gbrt STATIC
+     src/audio.c
+     src/audio_stats.c
+     src/platform_sdl.cpp
+-    src/serial_link.c
+-    src/network_discovery.c
+     src/sgb.c
+     src/ir.c
+     src/pokemon/mock_ir.c
+     src/pokemon/mock_gen1.c
+     src/pokemon/mock_gen2.c
+-    src/pokemon/mock_inject_file.c
+     src/pokemon/mock_evolve_patch.c
+     src/pokemon/mock_wild_5050.c
+-    src/cheats.c
+     src/relay_client.c
+     src/shader_pipeline.cpp
+-    src/gb_printer.c
+     src/gb_asset_loader.c
+     src/gb_sha1.c
+     src/gb_sha256.c
+ )
+ 
++# These optional modules currently use POSIX-only pthread/socket/dirent APIs.
++# Keep the core player buildable on Windows and expose graceful no-op versions
++# until their native implementations are portable.
++if(WIN32)
++    list(APPEND GBRT_SOURCES src/windows_optional_stubs.c)
++else()
++    list(APPEND GBRT_SOURCES
++        src/serial_link.c
++        src/network_discovery.c
++        src/pokemon/mock_inject_file.c
++        src/cheats.c
++        src/gb_printer.c)
++endif()
++
++add_library(gbrt STATIC ${GBRT_SOURCES})
++
+ # pthread for the BGB link recv thread
+ find_package(Threads REQUIRED)
+ target_link_libraries(gbrt PUBLIC Threads::Threads)
+@@ -78,10 +89,12 @@ if(SDL2_FOUND)
+     # imgui_impl_opengl3 is dialect-selected at compile time. Force the
+     # GLES 2.0 path so one binary covers desktop Mesa, Mali, Adreno,
+     # everything we care about.
+-    set_source_files_properties(
+-        vendor/imgui/backends/imgui_impl_opengl3.cpp
+-        PROPERTIES COMPILE_DEFINITIONS "IMGUI_IMPL_OPENGL_ES2"
+-    )
++    if(NOT WIN32)
++        set_source_files_properties(
++            vendor/imgui/backends/imgui_impl_opengl3.cpp
++            PROPERTIES COMPILE_DEFINITIONS "IMGUI_IMPL_OPENGL_ES2"
++        )
++    endif()
+     target_include_directories(gbrt PUBLIC
+         ${CMAKE_CURRENT_SOURCE_DIR}/vendor/imgui
+     )
+@@ -133,6 +146,11 @@ if(SDL2_FOUND)
+     target_link_libraries(gbrt PUBLIC SDL2::SDL2)
+     target_compile_definitions(gbrt PUBLIC GB_HAS_SDL2)
+ 
++    if(WIN32)
++        find_package(GLEW CONFIG REQUIRED)
++        target_link_libraries(gbrt PUBLIC GLEW::GLEW)
++    endif()
++
+     # GL stack for the post-process shader pipeline + ImGui's opengl3
+     # backend. We compile against the GLES 2.0 subset so the same code
+     # runs on desktop Mesa and embedded GLES (Mali on Orange Pi).
+diff --git "a/runtime/src/gb_asset_loader.c" "b/runtime/src/gb_asset_loader.c"
+index 2f094ed..1b94262 100644
+--- "a/runtime/src/gb_asset_loader.c"
++++ "b/runtime/src/gb_asset_loader.c"
+@@ -11,6 +11,13 @@
+ #include <sys/stat.h>
+ #include <sys/types.h>
+ 
++#if defined(_WIN32)
++#include <direct.h>
++#define GBRT_MKDIR(path, mode) _mkdir(path)
++#else
++#define GBRT_MKDIR(path, mode) mkdir(path, mode)
++#endif
++
+ #if defined(__linux__) || defined(__APPLE__)
+ #include <libgen.h>
+ #include <unistd.h>
+@@ -36,14 +43,14 @@ static bool ensure_dir(const char* path) {
+     for (char* p = buf + 1; *p; p++) {
+         if (*p == '/') {
+             *p = '\0';
+-            if (mkdir(buf, 0755) != 0 && errno != EEXIST) {
++            if (GBRT_MKDIR(buf, 0755) != 0 && errno != EEXIST) {
+                 LOG("mkdir(%s) failed: %s", buf, strerror(errno));
+                 return false;
+             }
+             *p = '/';
+         }
+     }
+-    if (mkdir(buf, 0755) != 0 && errno != EEXIST) {
++    if (GBRT_MKDIR(buf, 0755) != 0 && errno != EEXIST) {
+         LOG("mkdir(%s) failed: %s", buf, strerror(errno));
+         return false;
+     }
+diff --git "a/runtime/src/platform_sdl.cpp" "b/runtime/src/platform_sdl.cpp"
+index 01ec645..7c0af82 100644
+--- "a/runtime/src/platform_sdl.cpp"
++++ "b/runtime/src/platform_sdl.cpp"
+@@ -32,7 +32,12 @@ void gb_platform_set_frame_hook(GBFrameHookFn fn) { g_frame_hook = fn; }
+ 
+ #ifdef GB_HAS_SDL2
+ #include <SDL.h>
++#if defined(_WIN32)
++#include <GL/glew.h>
++#include <SDL_opengl.h>
++#else
+ #include <SDL_opengles2.h>
++#endif
+ #include <algorithm>
+ #include <atomic>
+ #include <cctype>
+@@ -42,7 +47,6 @@ void gb_platform_set_frame_hook(GBFrameHookFn fn) { g_frame_hook = fn; }
+ #include <vector>
+ #include "imgui.h"
+ #include "backends/imgui_impl_sdl2.h"
+-#define IMGUI_IMPL_OPENGL_ES2
+ #include "backends/imgui_impl_opengl3.h"
+ 
+ #include "shader_pipeline.h"
+@@ -4814,9 +4818,15 @@ bool gb_platform_init(int scale) {
+     /* Request a GLES 2.0 context — same code path on desktop Mesa
+      * (which advertises a compatible profile) and embedded Mali / Adreno
+      * GPUs. SDL_WINDOW_OPENGL must be set BEFORE SDL_CreateWindow. */
++#if defined(_WIN32)
++    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
++    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
++    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 2);
++#else
+     SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
+     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
+     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
++#endif
+     SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
+     SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 0);
+ 
+@@ -4847,6 +4857,20 @@ bool gb_platform_init(int scale) {
+         return false;
+     }
+     SDL_GL_MakeCurrent(g_window, g_gl_context);
++#if defined(_WIN32)
++    glewExperimental = GL_TRUE;
++    GLenum glew_error = glewInit();
++    glGetError();
++    if (glew_error != GLEW_OK) {
++        fprintf(stderr, "[SDL] GLEW initialization failed: %s\n",
++                glewGetErrorString(glew_error));
++        SDL_GL_DeleteContext(g_gl_context);
++        g_gl_context = NULL;
++        SDL_DestroyWindow(g_window);
++        SDL_Quit();
++        return false;
++    }
++#endif
+     /* No vsync — we drive timing in wall-clock to hit 59.7 FPS exactly,
+      * including on non-60Hz monitors. */
+     SDL_GL_SetSwapInterval(0);
+@@ -4867,7 +4891,11 @@ bool gb_platform_init(int scale) {
+ 
+     /* GLES 2 backend — `#version 100` GLSL, no VAOs, runs anywhere. */
+     ImGui_ImplSDL2_InitForOpenGL(g_window, g_gl_context);
++#if defined(_WIN32)
++    ImGui_ImplOpenGL3_Init("#version 150");
++#else
+     ImGui_ImplOpenGL3_Init("#version 100");
++#endif
+ 
+     /* Build the post-process shader pipeline now that GL is current. */
+     g_shader_pipeline = gb_shader_pipeline_create();
+@@ -5772,14 +5800,13 @@ static void set_active_game_pref_int(const char* key, int value) {
+ 
+ void gb_platform_register_context(GBContext* ctx) {
+     g_registered_ctx = ctx;
+-    GBPlatformCallbacks callbacks = {
+-        .on_audio_sample = on_audio_sample,
+-        .on_serial_byte = platform_on_serial_byte,
+-        .load_battery_ram = sdl_load_battery_ram,
+-        .save_battery_ram = sdl_save_battery_ram,
+-        .load_rtc_data = sdl_load_rtc_data,
+-        .save_rtc_data = sdl_save_rtc_data
+-    };
++    GBPlatformCallbacks callbacks = {};
++    callbacks.on_audio_sample = on_audio_sample;
++    callbacks.on_serial_byte = platform_on_serial_byte;
++    callbacks.load_battery_ram = sdl_load_battery_ram;
++    callbacks.save_battery_ram = sdl_save_battery_ram;
++    callbacks.load_rtc_data = sdl_load_rtc_data;
++    callbacks.save_rtc_data = sdl_save_rtc_data;
+     gb_set_platform_callbacks(ctx, &callbacks);
+ 
+     /* Spin up the printer once. The actual output path/prefix is
+diff --git "a/runtime/src/shader_pipeline.cpp" "b/runtime/src/shader_pipeline.cpp"
+index 3390e22..2706914 100644
+--- "a/runtime/src/shader_pipeline.cpp"
++++ "b/runtime/src/shader_pipeline.cpp"
+@@ -9,7 +9,11 @@
+ #include "shader_pipeline.h"
+ 
+ #include <SDL.h>
++#if defined(_WIN32)
++#include <GL/glew.h>
++#else
+ #include <SDL_opengles2.h>
++#endif
+ 
+ #include <stdio.h>
+ #include <stdlib.h>
+@@ -23,12 +27,13 @@
+ namespace {
+ 
+ /* Vertex shader, shared by every effect. */
++#if defined(_WIN32)
+ constexpr const char* VS_SRC = R"GLSL(
+-#version 100
+-attribute vec2 a_pos;
+-attribute vec2 a_uv;
++#version 150
++in vec2 a_pos;
++in vec2 a_uv;
+ uniform vec2 u_viewport;
+-varying vec2 v_uv;
++out vec2 v_uv;
+ void main() {
+     /* SDL-style top-left origin → GL clip space. */
+     vec2 clip = (a_pos / u_viewport) * 2.0 - 1.0;
+@@ -41,6 +46,66 @@ void main() {
+ /* Fragment shaders — GLSL ES 1.00 (`#version 100`, attribute/varying,
+  * texture2D, mediump precision). Authored to look right at 3-6× upscale. */
+ 
++constexpr const char* FS_SHARP = R"GLSL(
++#version 150
++uniform sampler2D u_tex;
++in vec2 v_uv;
++out vec4 frag_color;
++void main() {
++    frag_color = texture(u_tex, v_uv);
++}
++)GLSL";
++
++constexpr const char* FS_SMOOTH = R"GLSL(
++#version 150
++uniform sampler2D u_tex;
++in vec2 v_uv;
++out vec4 frag_color;
++void main() {
++    /* Identical fragment code to "sharp" — the difference is the
++     * texture filter binding (sharp = NEAREST, smooth = LINEAR). */
++    frag_color = texture(u_tex, v_uv);
++}
++)GLSL";
++
++/* Dot-matrix LCD: visible grid between cells + slight olive cast. */
++constexpr const char* FS_LCD = R"GLSL(
++#version 150
++uniform sampler2D u_tex;
++uniform vec2 u_src_size;
++uniform vec2 u_dst_size;
++in vec2 v_uv;
++out vec4 frag_color;
++void main() {
++    vec3 color = texture(u_tex, v_uv).rgb;
++    /* Distance from the nearest cell edge, normalized to upscale. */
++    vec2 cell = fract(v_uv * u_src_size);
++    vec2 scale = u_dst_size / u_src_size;
++    vec2 edge = min(cell, vec2(1.0) - cell) * scale;
++    float line = smoothstep(0.0, 1.0, min(edge.x, edge.y));
++    color *= mix(0.78, 1.0, line);
++    color = mix(color, color * vec3(0.96, 1.00, 0.92), 0.18);
++    frag_color = vec4(color, 1.0);
++}
++)GLSL";
++
++#else
++
++constexpr const char* VS_SRC = R"GLSL(
++#version 100
++attribute vec2 a_pos;
++attribute vec2 a_uv;
++uniform vec2 u_viewport;
++varying vec2 v_uv;
++void main() {
++    /* SDL-style top-left origin -> GL clip space. */
++    vec2 clip = (a_pos / u_viewport) * 2.0 - 1.0;
++    clip.y = -clip.y;
++    v_uv = a_uv;
++    gl_Position = vec4(clip, 0.0, 1.0);
++}
++)GLSL";
++
+ constexpr const char* FS_SHARP = R"GLSL(
+ #version 100
+ precision mediump float;
+@@ -57,13 +122,10 @@ precision mediump float;
+ uniform sampler2D u_tex;
+ varying vec2 v_uv;
+ void main() {
+-    /* Identical fragment code to "sharp" — the difference is the
+-     * texture filter binding (sharp = NEAREST, smooth = LINEAR). */
+     gl_FragColor = texture2D(u_tex, v_uv);
+ }
+ )GLSL";
+ 
+-/* Dot-matrix LCD: visible grid between cells + slight olive cast. */
+ constexpr const char* FS_LCD = R"GLSL(
+ #version 100
+ precision mediump float;
+@@ -73,7 +135,6 @@ uniform vec2 u_dst_size;
+ varying vec2 v_uv;
+ void main() {
+     vec3 color = texture2D(u_tex, v_uv).rgb;
+-    /* Distance from the nearest cell edge, normalized to upscale. */
+     vec2 cell = fract(v_uv * u_src_size);
+     vec2 scale = u_dst_size / u_src_size;
+     vec2 edge = min(cell, vec2(1.0) - cell) * scale;
+@@ -84,6 +145,8 @@ void main() {
+ }
+ )GLSL";
+ 
++#endif
++
+ 
+ struct ShaderEntry {
+     std::string name;
+@@ -184,6 +247,9 @@ struct GBShaderPipeline {
+     std::vector<ShaderEntry> shaders;
+     int    active = -1;
+     GLuint quad_vbo = 0;
++#if defined(_WIN32)
++    GLuint quad_vao = 0;
++#endif
+     std::string override_dir;
+ };
+ 
+@@ -192,6 +258,9 @@ GBShaderPipeline* gb_shader_pipeline_create(void) {
+     p->shaders.push_back({"sharp",  FS_SHARP,  0, -1, -1, -1, -1, -1, -1, -1, true,  false});
+     p->shaders.push_back({"smooth", FS_SMOOTH, 0, -1, -1, -1, -1, -1, -1, -1, false, false});
+     p->shaders.push_back({"lcd",    FS_LCD,    0, -1, -1, -1, -1, -1, -1, -1, false, false});
++#if defined(_WIN32)
++    glGenVertexArrays(1, &p->quad_vao);
++#endif
+     glGenBuffers(1, &p->quad_vbo);
+     p->active = 0;
+     return p;
+@@ -203,6 +272,9 @@ void gb_shader_pipeline_destroy(GBShaderPipeline* p) {
+         if (e.program) glDeleteProgram(e.program);
+     }
+     if (p->quad_vbo) glDeleteBuffers(1, &p->quad_vbo);
++#if defined(_WIN32)
++    if (p->quad_vao) glDeleteVertexArrays(1, &p->quad_vao);
++#endif
+     delete p;
+ }
+ 
+@@ -277,6 +349,9 @@ void gb_shader_pipeline_draw(GBShaderPipeline* p,
+         x0, y1, 0.0f, 1.0f,
+     };
+ 
++#if defined(_WIN32)
++    glBindVertexArray(p->quad_vao);
++#endif
+     glBindBuffer(GL_ARRAY_BUFFER, p->quad_vbo);
+     glBufferData(GL_ARRAY_BUFFER, sizeof(verts), verts, GL_STREAM_DRAW);
+ 
+@@ -309,4 +384,7 @@ void gb_shader_pipeline_draw(GBShaderPipeline* p,
+ 
+     if (e.a_pos >= 0) glDisableVertexAttribArray(e.a_pos);
+     if (e.a_uv  >= 0) glDisableVertexAttribArray(e.a_uv);
++#if defined(_WIN32)
++    glBindVertexArray(0);
++#endif
+ }
+diff --git "a/runtime/src/windows_optional_stubs.c" "b/runtime/src/windows_optional_stubs.c"
+new file mode 100644
+index 0000000..23188f6
+--- /dev/null
++++ "b/runtime/src/windows_optional_stubs.c"
+@@ -0,0 +1,165 @@
++/* Windows fallbacks for optional runtime modules that are still POSIX-only.
++ * The emulator/player, video, audio, input, saves, mods, and voxel renderer do
++ * not depend on these features. Keeping their public APIs present lets the
++ * normal SDL UI run while clearly reporting the features as unavailable. */
++
++#include "serial_link.h"
++#include "network_discovery.h"
++#include "pokemon/mock_inject_file.h"
++#include "cheats.h"
++#include "gb_printer.h"
++
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++
++/* gb_printer.c normally owns this implementation. The Windows test build
++ * stubs the printer, but the SDL layer still uses PNG writing for borders. */
++#define STB_IMAGE_WRITE_IMPLEMENTATION
++#include "stb_image_write.h"
++
++/* BGB link cable --------------------------------------------------------- */
++bool gb_serial_link_start_listen(uint16_t port) {
++    (void)port;
++    return false;
++}
++
++bool gb_serial_link_start_connect(const char* host, uint16_t port) {
++    (void)host;
++    (void)port;
++    return false;
++}
++
++void gb_serial_link_shutdown(void) {}
++void gb_serial_link_init_from_env(void) {}
++bool gb_serial_link_is_active(void) { return false; }
++bool gb_serial_link_is_ready(void) { return false; }
++const char* gb_serial_link_peer_ip(void) { return ""; }
++void gb_serial_link_on_serial_byte(struct GBContext* ctx, uint8_t outgoing) {
++    (void)ctx;
++    (void)outgoing;
++}
++void gb_serial_link_tick(struct GBContext* ctx) { (void)ctx; }
++
++/* LAN discovery --------------------------------------------------------- */
++static char g_lan_uuid[GB_LAN_UUID_LEN] = "windows-offline";
++static char g_lan_nickname[GB_LAN_NICKNAME_LEN] = "Player";
++static uint16_t g_lan_port = 8765;
++static GBLanPrefsHooks g_lan_hooks;
++static bool g_lan_hooks_set = false;
++
++void gb_lan_set_prefs_hooks(const GBLanPrefsHooks* hooks) {
++    if (hooks) {
++        g_lan_hooks = *hooks;
++        g_lan_hooks_set = true;
++    } else {
++        memset(&g_lan_hooks, 0, sizeof(g_lan_hooks));
++        g_lan_hooks_set = false;
++    }
++}
++
++void gb_lan_init(void) {
++    if (g_lan_hooks_set && g_lan_hooks.load_string) {
++        g_lan_hooks.load_string("lan.uuid", g_lan_uuid, sizeof(g_lan_uuid));
++        g_lan_hooks.load_string("lan.nickname", g_lan_nickname,
++                                sizeof(g_lan_nickname));
++    }
++}
++
++void gb_lan_shutdown(void) {}
++void gb_lan_set_enabled(bool enabled) { (void)enabled; }
++bool gb_lan_is_enabled(void) { return false; }
++const char* gb_lan_self_uuid(void) { return g_lan_uuid; }
++const char* gb_lan_self_nickname(void) { return g_lan_nickname; }
++void gb_lan_set_self_nickname(const char* name) {
++    if (!name) return;
++    snprintf(g_lan_nickname, sizeof(g_lan_nickname), "%s", name);
++    if (g_lan_hooks_set && g_lan_hooks.save_string) {
++        g_lan_hooks.save_string("lan.nickname", g_lan_nickname);
++    }
++}
++void gb_lan_set_advertised_port(uint16_t port) { g_lan_port = port; }
++uint16_t gb_lan_advertised_port(void) { return g_lan_port; }
++size_t gb_lan_get_peers(GBLanPeer* out, size_t max) {
++    (void)out;
++    (void)max;
++    return 0;
++}
++
++/* Pokemon event-file injection ----------------------------------------- */
++int gb_inject_file_scan(const GBContext* ctx, const char* game_id,
++                        GBInjectFileEntry* out, int max) {
++    (void)ctx;
++    (void)game_id;
++    (void)out;
++    (void)max;
++    return 0;
++}
++
++bool gb_inject_file_describe(const GBContext* ctx,
++                             const GBInjectFileEntry* entry,
++                             char* out, size_t out_size) {
++    (void)ctx;
++    (void)entry;
++    if (out && out_size) snprintf(out, out_size, "Unavailable on this build");
++    return false;
++}
++
++bool gb_inject_file_apply(GBContext* ctx, const GBInjectFileEntry* entry,
++                          char* out_err, size_t err_size) {
++    (void)ctx;
++    (void)entry;
++    if (out_err && err_size) {
++        snprintf(out_err, err_size, "Unavailable on this build");
++    }
++    return false;
++}
++
++/* Cheat files ----------------------------------------------------------- */
++int gb_cheats_load(const char* game_id) {
++    (void)game_id;
++    return 0;
++}
++int gb_cheats_count(void) { return 0; }
++const GBCheat* gb_cheats_get(int idx) {
++    (void)idx;
++    return NULL;
++}
++void gb_cheats_set_enabled(GBContext* ctx, int idx, bool on) {
++    (void)ctx;
++    (void)idx;
++    (void)on;
++}
++void gb_cheats_set_op_value(GBContext* ctx, int cheat_idx,
++                            int op_idx, uint8_t value) {
++    (void)ctx;
++    (void)cheat_idx;
++    (void)op_idx;
++    (void)value;
++}
++void gb_cheats_disable_all(GBContext* ctx) { (void)ctx; }
++void gb_cheats_tick(GBContext* ctx) { (void)ctx; }
++
++/* Game Boy Printer ------------------------------------------------------ */
++struct GBPrinter { uint32_t print_count; };
++
++GBPrinter* gb_printer_create(void) {
++    return (GBPrinter*)calloc(1, sizeof(GBPrinter));
++}
++void gb_printer_destroy(GBPrinter* p) { free(p); }
++void gb_printer_set_output(GBPrinter* p, const char* dir,
++                           const char* prefix) {
++    (void)p;
++    (void)dir;
++    (void)prefix;
++}
++bool gb_printer_on_serial_byte(GBPrinter* p, GBContext* ctx,
++                               uint8_t outgoing) {
++    (void)p;
++    (void)ctx;
++    (void)outgoing;
++    return false;
++}
++uint32_t gb_printer_print_count(const GBPrinter* p) {
++    return p ? p->print_count : 0;
++}
+

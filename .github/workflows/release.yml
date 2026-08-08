@@ -51,7 +51,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Dependencies (vcpkg is preinstalled on the runner)
         run: |
-          & "$env:VCPKG_INSTALLATION_ROOT\vcpkg.exe" install sdl2:x64-windows curl:x64-windows
+          & "$env:VCPKG_INSTALLATION_ROOT\vcpkg.exe" install sdl2:x64-windows curl:x64-windows glew:x64-windows
       - name: Build
         run: |
           cmake -S . -B build `
@@ -63,6 +63,12 @@ jobs:
           $exe = Get-ChildItem -Path build -Recurse -Filter epoch.exe | Select-Object -First 1
           & $exe.FullName --list-games
           if ($LASTEXITCODE -ne 0) { exit 1 }
+      - name: Build graphical launcher
+        run: |
+          python -m pip install PyInstaller PySide6-Essentials
+          python -m PyInstaller --noconfirm --clean --onefile --windowed `
+            --name "Epoch & Equinox Launcher" --paths launcher `
+            launcher/epoch_launcher.py
       - name: Package
         run: |
           $exe = Get-ChildItem -Path build -Recurse -Filter epoch.exe | Select-Object -First 1
@@ -70,10 +76,15 @@ jobs:
           New-Item -ItemType Directory -Force -Path "$staging/roms","$staging/mods","$staging/covers" | Out-Null
           # vcpkg applocal deployment puts the needed DLLs beside the exe.
           Copy-Item "$($exe.DirectoryName)\*" -Include *.exe,*.dll -Destination $staging
+          Copy-Item "dist\Epoch & Equinox Launcher.exe" $staging
           Copy-Item -Recurse launcher "$staging/launcher"
           Copy-Item README.md,LICENSE,CREDITS.md $staging
           Copy-Item examples/mods/README.md "$staging/mods/"
           Set-Content "$staging/roms/README.txt" "Drop your ROMs here:`n  tlozooa.gbc  Oracle of Ages (USA, Australia)`n  tlozoos.gbc  Oracle of Seasons (USA, Australia)`nAny other .gb/.gbc works too."
+          $launcherTest = Start-Process `
+            -FilePath "$staging\Epoch & Equinox Launcher.exe" `
+            -ArgumentList '--smoke-test' -Wait -PassThru
+          if ($launcherTest.ExitCode -ne 0) { exit 1 }
           Compress-Archive -Path $staging -DestinationPath "$staging.zip"
       - uses: actions/upload-artifact@v4
         with:

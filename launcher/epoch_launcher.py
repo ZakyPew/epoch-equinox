@@ -27,9 +27,14 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-# The repo root, for art bundled with the project itself. The launcher lives
-# in launcher/, so its parent is the checkout.
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+# PyInstaller extracts Python modules to a temporary directory. The player,
+# ROMs, mods, and covers remain beside the launcher executable.
+FROZEN = bool(getattr(sys, "frozen", False))
+PROJECT_ROOT = (
+    Path(sys.executable).resolve().parent
+    if FROZEN
+    else Path(__file__).resolve().parent.parent
+)
 
 BOOTSTRAP_HELP = """\
 The Epoch & Equinox launcher needs PySide6.
@@ -845,10 +850,15 @@ class MainWindow(QWidget):
 def default_runner_path() -> Path:
     here = Path(__file__).resolve().parent
     exe = "epoch.exe" if os.name == "nt" else "epoch"
-    for candidate in (here.parent / "build" / exe, here.parent / exe, Path.cwd() / exe):
+    candidates = (
+        (PROJECT_ROOT / exe, Path.cwd() / exe)
+        if FROZEN
+        else (here.parent / "build" / exe, here.parent / exe, Path.cwd() / exe)
+    )
+    for candidate in candidates:
         if candidate.is_file():
             return candidate
-    return here.parent / "build" / exe
+    return PROJECT_ROOT / exe if FROZEN else here.parent / "build" / exe
 
 
 def main() -> int:
@@ -856,6 +866,7 @@ def main() -> int:
     parser.add_argument(
         "--runner", type=Path, default=None, help="path to the oracles game binary"
     )
+    parser.add_argument("--smoke-test", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
 
     app = QApplication(sys.argv)
@@ -887,7 +898,12 @@ def main() -> int:
         box.exec()
         return 1
 
-    window = MainWindow(Runner(runner_path))
+    runner = Runner(runner_path)
+    if args.smoke_test:
+        runner.query_games()
+        return 0
+
+    window = MainWindow(runner)
     window.show()
     return app.exec()
 
