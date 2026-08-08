@@ -202,6 +202,38 @@ bool vox_scrape(GBContext* ctx, VoxTileGrid* grid, VoxSpriteList* sprites) {
     bool use_oracle = vox_oracle_read(ctx, &oracle) && oracle.valid;
     grid->flat = use_oracle && oracle.menu_open;
 
+    /* Link's screen position, from his room position and the camera. His
+     * feet row is where his shadow falls -- z does not move it. */
+    grid->link_known = use_oracle;
+    if (use_oracle) {
+        grid->link_sx = oracle.link_x - oracle.cam_x + oracle.off_x;
+        /* +8 calibrated against live OAM: w1Link.y sits 8px above the
+         * sprite's bottom edge (feet=80 for link_y=56 with a 16px HUD). */
+        grid->link_feet_sy = oracle.link_y - oracle.cam_y + oracle.off_y
+                             + grid->hud_rows + 8;
+        grid->link_jump = oracle.link_z < 0 ? -oracle.link_z : 0;
+        if (getenv("VOXEL_DEBUG")) {
+            static int n = 0;
+            if ((n++ % 30) == 0) {
+                fprintf(stderr,
+                        "[VOXEL] link room(%3d,%3d) z=%3d -> screen(%3d,%3d)\n",
+                        oracle.link_x, oracle.link_y, oracle.link_z,
+                        grid->link_sx, grid->link_feet_sy);
+                /* Ground truth: the OAM entries whose x is near Link's
+                 * computed centre. Their feet rows calibrate the anchor. */
+                bool tall = (io_reg(ctx, 0x40) & 0x04) != 0;
+                for (int i = 0; i < 40; i++) {
+                    const uint8_t* e = ctx->oam + i * 4;
+                    int sy = (int)e[0] - 16, sx = (int)e[1] - 8;
+                    if (sy <= -16 || sy >= 144) continue;
+                    if (sx < grid->link_sx - 16 || sx > grid->link_sx + 8) continue;
+                    fprintf(stderr, "[VOXEL]   oam#%02d x=%3d feet=%3d\n",
+                            i, sx, sy + (tall ? 16 : 8));
+                }
+            }
+        }
+    }
+
     for (int ty = 0; ty < VOX_TILES_H; ty++) {
         for (int tx = 0; tx < VOX_TILES_W; tx++) {
             unsigned map_x = ((scx / 8) + tx) & 31;

@@ -43,6 +43,7 @@
 #define A_wScreenOffsetY  0xCD08
 #define A_wScreenOffsetX  0xCD09
 #define A_wRoomCollisions 0xCE00
+#define A_w1Link          0xD000   /* SpecialObjectStruct, WRAM bank 1 */
 
 #define COLL_W 16
 #define COLL_H 12
@@ -113,6 +114,16 @@ bool vox_oracle_read(GBContext* ctx, VoxOracleState* st) {
     st->off_y = (int8_t)wram0(ctx, A_wScreenOffsetY);
     st->off_x = (int8_t)wram0(ctx, A_wScreenOffsetX);
 
+    /* w1Link lives in WRAM bank 1 regardless of the currently-mapped bank:
+     * index the backing store directly. Offsets are SpecialObjectStruct's
+     * yh/xh/zh -- whole pixels; z is signed and negative while airborne. */
+    {
+        const uint8_t* link = ctx->wram + 1 * WRAM_BANK_SIZE + (A_w1Link - 0xD000);
+        st->link_y = link[0x0B];
+        st->link_x = link[0x0D];
+        st->link_z = (int8_t)link[0x0F];
+    }
+
     /* Copy the room's collision grid, and require it to be populated:
      * during boot cinematics it's all zero, and one distinct value means
      * "not a room". */
@@ -140,11 +151,18 @@ uint8_t vox_oracle_height(uint8_t collision, uint8_t colour_class) {
     if (collision >= 0x11 && collision <= 0x1F) return VOX_H_FLOOR;  /* bridges, stairs */
     if (collision == 0xFE || collision == 0xFF) return VOX_H_FLOOR;  /* boundary fill */
 
-    if (collision >= 0x01 && collision <= 0x0F) {
-        /* Solid. The colour classifier is good at telling a tree from a
-         * fence once it KNOWS the thing is solid -- its failure mode was
-         * calling flat things tall, not mis-ranking tall things. */
+    if (collision == 0x0F) {
+        /* Full solid block. The colour classifier is good at telling a
+         * tree from a fence once it KNOWS the thing is solid -- its
+         * failure mode was calling flat things tall, not mis-ranking
+         * tall things. */
         return (colour_class >= VOX_H_HIGH) ? VOX_H_HIGH : VOX_H_MID;
+    }
+    if (collision >= 0x01 && collision <= 0x0E) {
+        /* Partial shapes: diagonal cliff corners and edges. Rendering them
+         * at full height turns every diagonal into a hard staircase; a low
+         * bevel keeps the slope readable. */
+        return VOX_H_LOW;
     }
 
     /* Walkable ($00): flat by default; keep grass texture if the colours
