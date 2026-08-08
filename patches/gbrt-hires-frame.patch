@@ -1,0 +1,173 @@
+diff --git a/runtime/include/platform_sdl.h b/runtime/include/platform_sdl.h
+--- a/runtime/include/platform_sdl.h
++++ b/runtime/include/platform_sdl.h
+@@ -125,6 +125,22 @@
+ void gb_platform_set_frame_hook(GBFrameHookFn fn);
+ 
+ /**
++ * @brief Scaled frame hook: like GBFrameHookFn, but the substitute frame
++ * may be LARGER than the GB screen.
++ *
++ * Write the substitute's dimensions to out_w/out_h. Returning exactly
++ * GB_SCREEN_WIDTH x GB_SCREEN_HEIGHT behaves like the plain hook; any
++ * larger size is uploaded to its own texture and drawn through the same
++ * shader/viewport path, so a host renderer can present sub-GB-pixel
++ * geometry (tilted edges, domes) without the 160x144 staircase. Return
++ * NULL to leave the guest frame untouched.
++ */
++typedef const uint32_t* (*GBFrameHookScaledFn)(GBContext* ctx,
++                                               const uint32_t* framebuffer,
++                                               int* out_w, int* out_h);
++void gb_platform_set_frame_hook_scaled(GBFrameHookScaledFn fn);
++
++/**
+  * @brief Render frame to screen
+  */
+ void gb_platform_render_frame(const uint32_t* framebuffer);
+diff --git a/runtime/src/platform_sdl.cpp b/runtime/src/platform_sdl.cpp
+--- a/runtime/src/platform_sdl.cpp
++++ b/runtime/src/platform_sdl.cpp
+@@ -30,6 +30,18 @@
+ 
+ void gb_platform_set_frame_hook(GBFrameHookFn fn) { g_frame_hook = fn; }
+ 
++/* Scaled variant: the substitute frame may be larger than the GB screen.
++ * The source pointer and dimensions live here (common region); the GL
++ * texture that presents them is SDL-side. */
++static GBFrameHookScaledFn g_frame_hook_scaled = NULL;
++static const uint32_t* g_hires_src = NULL;
++static int g_hires_w = 0;
++static int g_hires_h = 0;
++
++void gb_platform_set_frame_hook_scaled(GBFrameHookScaledFn fn) {
++    g_frame_hook_scaled = fn;
++}
++
+ #ifdef GB_HAS_SDL2
+ #include <SDL.h>
+ #if defined(_WIN32)
+@@ -2547,6 +2559,54 @@
+     g_lcd_off_framebuffer_initialized = true;
+ }
+ 
++/* Host-supplied high-resolution frame: swizzle ARGB->RGBA into a staging
++ * buffer sized on demand and keep it in its own texture. Palette override
++ * and colour correction don't apply -- this frame is host-composed, not
++ * PPU output. */
++static GLuint g_hires_tex = 0;
++static int g_hires_tex_w = 0;
++static int g_hires_tex_h = 0;
++
++static void upload_hires_frame(void) {
++    static uint32_t* staging = NULL;
++    static size_t staging_px = 0;
++    size_t need = (size_t)g_hires_w * (size_t)g_hires_h;
++    if (need > staging_px) {
++        free(staging);
++        staging = (uint32_t*)malloc(need * sizeof(uint32_t));
++        staging_px = staging ? need : 0;
++    }
++    if (!staging) {
++        g_hires_src = NULL;
++        return;
++    }
++    for (size_t i = 0; i < need; i++) {
++        uint32_t c = g_hires_src[i];
++        uint32_t a = c & 0xFF000000u;
++        uint32_t r = (c >> 16) & 0xFFu;
++        uint32_t g2 = (c >> 8) & 0xFFu;
++        uint32_t b = c & 0xFFu;
++        staging[i] = a | (b << 16) | (g2 << 8) | r;
++    }
++    if (!g_hires_tex) {
++        glGenTextures(1, &g_hires_tex);
++    }
++    glBindTexture(GL_TEXTURE_2D, g_hires_tex);
++    if (g_hires_tex_w != g_hires_w || g_hires_tex_h != g_hires_h) {
++        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, g_hires_w, g_hires_h, 0,
++                     GL_RGBA, GL_UNSIGNED_BYTE, NULL);
++        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
++        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
++        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
++        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
++        g_hires_tex_w = g_hires_w;
++        g_hires_tex_h = g_hires_h;
++    }
++    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, g_hires_w, g_hires_h,
++                    GL_RGBA, GL_UNSIGNED_BYTE, staging);
++    glBindTexture(GL_TEXTURE_2D, 0);
++}
++
+ static void render_frame_internal(const uint32_t* framebuffer, bool count_guest_frame) {
+     if (!framebuffer) {
+         DBG_FRAME("Platform render_frame: SKIPPED (null: tex=%d, gl=%d, fb=%d)",
+@@ -2639,6 +2699,9 @@
+      * override (Original / Pocket / Plasma) is applied during the same
+      * pass since we're touching every pixel anyway. */
+     double upload_start_ms = sdl_now_ms();
++    if (g_hires_src) {
++        upload_hires_frame();
++    } else {
+     static uint32_t s_upload_buf[GB_FRAMEBUFFER_SIZE];
+     {
+         const uint32_t* src = framebuffer;
+@@ -2707,6 +2770,7 @@
+                     GB_SCREEN_WIDTH, GB_SCREEN_HEIGHT,
+                     GL_RGBA, GL_UNSIGNED_BYTE, s_upload_buf);
+     glBindTexture(GL_TEXTURE_2D, 0);
++    }
+     g_last_timing.upload_ms = sdl_now_ms() - upload_start_ms;
+ 
+     /* Clear + compose. */
+@@ -2719,6 +2783,12 @@
+     glEnable(GL_BLEND);
+     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+ 
++    /* The game's source texture for this frame: the streaming GB-sized
++     * texture, or the host's high-resolution substitute. */
++    GLuint game_src_tex = g_hires_src ? g_hires_tex : g_game_tex;
++    const int game_src_w = g_hires_src ? g_hires_w : GB_SCREEN_WIDTH;
++    const int game_src_h = g_hires_src ? g_hires_h : GB_SCREEN_HEIGHT;
++
+     refresh_sgb_cart_border_texture();
+     GLuint active_border = 0;
+     if (sgb_cart_border_active()) {
+@@ -2761,14 +2831,14 @@
+                 gb_shader_pipeline_set_active(g_shader_pipeline, active_shader);
+             }
+             gb_shader_pipeline_draw(g_shader_pipeline,
+-                                    g_game_tex,
+-                                    GB_SCREEN_WIDTH, GB_SCREEN_HEIGHT,
++                                    game_src_tex,
++                                    game_src_w, game_src_h,
+                                     gb_x, gb_y, gb_w, gb_h,
+                                     draw_w, draw_h);
+         } else {
+             gb_shader_pipeline_draw(g_shader_pipeline,
+-                                    g_game_tex,
+-                                    GB_SCREEN_WIDTH, GB_SCREEN_HEIGHT,
++                                    game_src_tex,
++                                    game_src_w, game_src_h,
+                                     vp_x, vp_y, vp_w, vp_h,
+                                     draw_w, draw_h);
+         }
+@@ -5315,6 +5385,19 @@
+ 
+ 
+ void gb_platform_render_frame(const uint32_t* framebuffer) {
++    g_hires_src = NULL;
++    if (g_frame_hook_scaled) {
++        int w = 0, h = 0;
++        const uint32_t* sub =
++            g_frame_hook_scaled(g_registered_ctx, framebuffer, &w, &h);
++        if (sub && w == GB_SCREEN_WIDTH && h == GB_SCREEN_HEIGHT) {
++            framebuffer = sub;   /* GB-sized: behaves like the plain hook */
++        } else if (sub && w > 0 && h > 0) {
++            g_hires_w = w;
++            g_hires_h = h;
++            g_hires_src = sub;
++        }
++    }
+     if (g_frame_hook) {
+         const uint32_t* substitute = g_frame_hook(g_registered_ctx, framebuffer);
+         if (substitute) framebuffer = substitute;

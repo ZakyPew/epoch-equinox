@@ -7,6 +7,12 @@
  * front wall. Painter's order per column — near rows overdraw far rows —
  * so no depth buffer is needed.
  *
+ * The whole scene is rendered at an integer SCALE above the GB screen
+ * (default 3x, VOXEL_SCALE=1..4 to override) and handed to the runtime
+ * through the scaled frame hook. Texels stay chunky -- that is the pixel
+ * art -- but silhouettes, domes and the camera tilt resolve at sub-GB
+ * precision instead of a 160x144 staircase.
+ *
  * The terrain texture is decoded straight from the BG tilemap (see
  * VoxTileGrid::tex), which keeps every palette, season tint and animation
  * exactly as the cart drew it -- without the sprites the composed frame
@@ -19,6 +25,7 @@
 
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "platform_sdl.h"
@@ -27,12 +34,15 @@
 #include <SDL.h>
 #endif
 
+#define VOX_MAX_SCALE 4
+
 /* ------------------------------------------------------------------ */
 /* state                                                               */
 /* ------------------------------------------------------------------ */
 
 static int g_mode = VOXEL_MODE_OFF;
-static uint32_t g_out[GB_FRAMEBUFFER_SIZE];
+static int g_scale = 3;
+static uint32_t g_out[GB_FRAMEBUFFER_SIZE * VOX_MAX_SCALE * VOX_MAX_SCALE];
 static VoxTileGrid g_grid;
 static VoxSpriteList g_sprites;
 
@@ -77,12 +87,13 @@ static inline uint32_t shade(uint32_t c, int mul /* 0..256 */) {
     return 0xFF000000u | (b << 16) | (g << 8) | r;
 }
 
-/* Height in extrusion units at a world (screen-space) pixel. */
-static inline float height_at(const VoxTileGrid* grid, int x, int y) {
-    int px = x + grid->fine_x;
-    int py = y + grid->fine_y;
-    int tx = px >> 3;
-    int ty = py >> 3;
+/* Height in extrusion units at a world (screen-space) position. Float in,
+ * so at render scale the dome profiles resolve smoothly. */
+static inline float height_at(const VoxTileGrid* grid, float x, float y) {
+    float px = x + (float)grid->fine_x;
+    float py = y + (float)grid->fine_y;
+    int tx = (int)px >> 3;
+    int ty = (int)py >> 3;
     if (tx < 0) tx = 0;
     if (tx >= VOX_TILES_W) tx = VOX_TILES_W - 1;
     if (ty < 0) ty = 0;
@@ -94,8 +105,10 @@ static inline float height_at(const VoxTileGrid* grid, int x, int y) {
      * read as canopies instead of flat-topped crates. Everything
      * non-leafy (walls, cliffs, fences) stays architectural and flat. */
     if (h >= VOX_UNITS[VOX_H_MID] && grid->leafy[ty][tx]) {
-        float dx = ((float)(px & 15) - 7.5f) / 8.0f;
-        float dy = ((float)(py & 15) - 7.5f) / 8.0f;
+        float cx = px - 16.0f * floorf(px / 16.0f);
+        float cy = py - 16.0f * floorf(py / 16.0f);
+        float dx = (cx - 7.5f) / 8.0f;
+        float dy = (cy - 7.5f) / 8.0f;
         float k = 1.0f - 0.22f * (dx * dx + dy * dy);
         if (k < 0.62f) k = 0.62f;
         h *= k;
@@ -107,8 +120,6 @@ static inline float height_at(const VoxTileGrid* grid, int x, int y) {
 /* sky                                                                 */
 /* ------------------------------------------------------------------ */
 
-/* Zenith / horizon colours per sky kind (0xAABBGGRR). The horizon sits
- * behind the diorama's top edge, so most of what shows is the upper band. */
 typedef struct { uint32_t zenith, horizon, cloud; } VoxSkyPalette;
 
 /* 0xFFRRGGBB, matching the framebuffer. */
@@ -128,10 +139,11 @@ static inline uint32_t lerp_color(uint32_t a, uint32_t b, int t /*0..256*/) {
     return 0xFF000000u | (rb & 0x00FF00FFu) | (g & 0x0000FF00u);
 }
 
-/* Cheap smooth value noise for the clouds: two octaves of cosine bumps. */
-static inline int cloud_density(int x, int y, int t) {
-    float fx = (float)(x + t) * 0.045f;
-    float fy = (float)y * 0.11f;
+/* Cheap smooth value noise for the clouds: two octaves of cosine bumps.
+ * Coordinates in GB pixels (floats, so the sky stays smooth at scale). */
+static inline int cloud_density(float x, float y, int t) {
+    float fx = (x + (float)t) * 0.045f;
+    float fy = y * 0.11f;
     float v = cosf(fx) * cosf(fy * 0.7f + 1.7f)
             + 0.5f * cosf(fx * 2.3f + 0.9f) * cosf(fy * 1.6f);
     int d = (int)((v - 0.55f) * 190.0f);
@@ -140,8 +152,10 @@ static inline int cloud_density(int x, int y, int t) {
     return d;
 }
 
-static void vox_paint_sky(int kind, uint32_t* out) {
+static void vox_paint_sky(int kind, uint32_t* out, int S) {
     const VoxSkyPalette* p = &VOX_SKIES[kind];
+    const int OW = GB_SCREEN_WIDTH * S;
+    const int OH = GB_SCREEN_HEIGHT * S;
 
     /* Slow drift; wraps harmlessly. Subrosia's "clouds" are ember glow and
      * drift faster. */
@@ -149,14 +163,14 @@ static void vox_paint_sky(int kind, uint32_t* out) {
     t += (kind == VOX_SKY_SUBROSIA) ? 3 : 1;
     int drift = t >> 3;
 
-    for (int y = 0; y < GB_SCREEN_HEIGHT; y++) {
+    for (int Y = 0; Y < OH; Y++) {
+        float gy = (float)Y / (float)S;
         /* Horizon low on the screen, where the diorama's far edge sits. */
-        int g = y * 256 / (GB_SCREEN_HEIGHT + 24);
+        int g = (int)(gy * 256.0f / (float)(GB_SCREEN_HEIGHT + 24));
         uint32_t base = lerp_color(p->zenith, p->horizon, g);
-        for (int x = 0; x < GB_SCREEN_WIDTH; x++) {
-            int d = cloud_density(x, y, drift);
-            out[y * GB_SCREEN_WIDTH + x] =
-                d ? lerp_color(base, p->cloud, d * 2) : base;
+        for (int X = 0; X < OW; X++) {
+            int d = cloud_density((float)X / (float)S, gy, drift);
+            out[Y * OW + X] = d ? lerp_color(base, p->cloud, d * 2) : base;
         }
     }
 }
@@ -167,14 +181,23 @@ static void vox_paint_sky(int kind, uint32_t* out) {
 
 void vox_render(GBContext* ctx, const VoxTileGrid* grid,
                 const VoxSpriteList* sprites, const uint32_t* fb,
-                int mode, uint32_t* out) {
+                int mode, int scale, uint32_t* out) {
     const VoxCam cam = VOX_CAMS[mode];
+    if (scale < 1) scale = 1;
+    if (scale > VOX_MAX_SCALE) scale = VOX_MAX_SCALE;
+    const int S = scale;
+    const float fS = (float)S;
+    const int OW = GB_SCREEN_WIDTH * S;
+    const int OH = GB_SCREEN_HEIGHT * S;
 
-    /* A full-screen menu owns the display: pass the frame through flat
-     * rather than extruding an inventory screen. The mode stays armed, so
-     * closing the menu drops straight back into the diorama. */
+    /* A full-screen menu owns the display: pass the frame through (the
+     * live hook returns NULL before ever calling here; this path serves
+     * direct callers like vox_shot). */
     if (grid->flat) {
-        memcpy(out, fb, GB_FRAMEBUFFER_SIZE * sizeof(uint32_t));
+        for (int Y = 0; Y < OH; Y++) {
+            const uint32_t* src = fb + (Y / S) * GB_SCREEN_WIDTH;
+            for (int X = 0; X < OW; X++) out[Y * OW + X] = src[X / S];
+        }
         return;
     }
 
@@ -183,7 +206,10 @@ void vox_render(GBContext* ctx, const VoxTileGrid* grid,
     const int world_top = grid->hud_rows;
     const int world_h = GB_SCREEN_HEIGHT - world_top;
     if (world_h <= 0) {
-        memcpy(out, fb, GB_FRAMEBUFFER_SIZE * sizeof(uint32_t));
+        for (int Y = 0; Y < OH; Y++) {
+            const uint32_t* src = fb + (Y / S) * GB_SCREEN_WIDTH;
+            for (int X = 0; X < OW; X++) out[Y * OW + X] = src[X / S];
+        }
         return;
     }
 
@@ -194,24 +220,20 @@ void vox_render(GBContext* ctx, const VoxTileGrid* grid,
     y_off += headroom * 0.55f;
 
     /* Backdrop. Outdoors on the Oracles carts this is a sky that follows
-     * the game's own state -- the season in Seasons, present/past in Ages,
-     * Subrosia's furnace glow -- with slow procedural clouds. Anywhere
-     * else (interiors, other carts) it stays the quiet dark fade, so the
-     * diorama reads as a model on a table. */
+     * the game's own state; anywhere else it stays the quiet dark fade. */
     if (grid->sky != VOX_SKY_NONE) {
-        vox_paint_sky(grid->sky, out);
+        vox_paint_sky(grid->sky, out, S);
     } else {
-        for (int y = 0; y < GB_SCREEN_HEIGHT; y++) {
-            int l = 26 + y * 20 / GB_SCREEN_HEIGHT;
+        for (int Y = 0; Y < OH; Y++) {
+            int l = 26 + (Y / S) * 20 / GB_SCREEN_HEIGHT;
             uint32_t c = 0xFF000000u
                          | ((uint32_t)(l - 8 > 0 ? l - 8 : 0) << 16)
                          | ((uint32_t)l << 8) | (uint32_t)(l + 6);
-            for (int x = 0; x < GB_SCREEN_WIDTH; x++) out[y * GB_SCREEN_WIDTH + x] = c;
+            for (int X = 0; X < OW; X++) out[Y * OW + X] = c;
         }
     }
 
-    /* Water animates: a slow ripple in the shading, driven by a frame
-     * counter that nothing needs to persist or reset. */
+    /* Water animates: a slow ripple in the shading. */
     static int water_t = 0;
     water_t++;
 
@@ -241,7 +263,7 @@ void vox_render(GBContext* ctx, const VoxTileGrid* grid,
         int fy = grid->link_feet_sy;
         if (fy < world_top) fy = world_top;
         if (fy >= GB_SCREEN_HEIGHT) fy = GB_SCREEN_HEIGHT - 1;
-        float now = height_at(grid, grid->link_sx, fy);
+        float now = height_at(grid, (float)grid->link_sx, (float)fy);
         if (now < 0.0f) now = 0.0f;
         if (!link_ease_live) {
             link_ground_ease = now;
@@ -252,65 +274,63 @@ void vox_render(GBContext* ctx, const VoxTileGrid* grid,
         link_ease_live = false;
     }
 
-    /* One pass over world rows, far to near, terrain and sprites together
-     * in painter's order. Terrain needs per-column memory of the previous
-     * row's projection for the front-wall fills; sprites drawn on a row are
-     * naturally overdrawn by anything nearer that projects higher -- which
-     * is exactly the occlusion a wall in front of a character should give. */
-    static int prev_sy[GB_SCREEN_WIDTH];
-    static uint32_t prev_tex[GB_SCREEN_WIDTH];
-    for (int x = 0; x < GB_SCREEN_WIDTH; x++) prev_sy[x] = -1;
+    /* One pass over output rows, far to near, terrain and sprites together
+     * in painter's order. Per-output-column memory of the previous row's
+     * projection drives the front-wall fills. */
+    static int prev_sy[GB_SCREEN_WIDTH * VOX_MAX_SCALE];
+    for (int X = 0; X < OW; X++) prev_sy[X] = -1;
 
-    for (int wy = world_top; wy < GB_SCREEN_HEIGHT + 16; wy++) {
-        if (wy < GB_SCREEN_HEIGHT) {
-            for (int x = 0; x < GB_SCREEN_WIDTH; x++) {
-                float h = height_at(grid, x, wy);
-                int sy = (int)(y_off + (float)(wy - world_top) * cam.squash
-                               - h * lift + 0.5f);
-                uint32_t tex = grid->tex[(wy + grid->fine_y) * VOX_TEX_W
-                                         + (x + grid->fine_x)];
+    for (int J = world_top * S; J < (GB_SCREEN_HEIGHT + 16) * S; J++) {
+        const float wy = (float)J / fS;
+        if (J < OH) {
+            const int tex_row = (int)(wy + (float)grid->fine_y);
+            for (int X = 0; X < OW; X++) {
+                const float wx = (float)X / fS;
+                float h = height_at(grid, wx, wy);
+                int sy = (int)((y_off + (wy - (float)world_top) * cam.squash
+                                - h * lift) * fS + 0.5f);
+                const int tex_col = (int)(wx + (float)grid->fine_x);
+                uint32_t tex = grid->tex[tex_row * VOX_TEX_W + tex_col];
 
                 if (h < 0.0f) {
                     /* Water: tint toward deep blue so sunk cells read as
                      * liquid, with a slow moving shimmer on top. */
-                    int rip = (int)(12.0f * sinf((float)x * 0.42f
-                                                 + (float)wy * 0.27f
+                    int rip = (int)(12.0f * sinf(wx * 0.42f + wy * 0.27f
                                                  + (float)water_t * 0.09f));
                     tex = shade(tex, 190 + rip);
                     tex = (tex & 0xFFFFFF00u) | 0x00000050u;
                 }
 
-                if (prev_sy[x] >= 0 && sy > prev_sy[x] + 1) {
+                if (prev_sy[X] >= 0 && sy > prev_sy[X] + 1) {
                     /* Height dropped toward the viewer: the far cell's front
                      * wall is exposed. Texture it by tiling that cell's own
-                     * 8px artwork down the face -- stretching a single texel
-                     * turned every tall tree line into a vertical smear --
-                     * and darken with a little falloff so faces read as
-                     * faces. */
-                    int span = sy - prev_sy[x] - 1;
-                    int src_py = (wy - 1) + grid->fine_y;
+                     * 8px artwork down the face, darkening with a little
+                     * falloff so faces read as faces. */
+                    int span = sy - prev_sy[X] - 1;
+                    int src_py = (int)(wy - 1.0f + (float)grid->fine_y);
                     if (src_py < 0) src_py = 0;
                     int tile_top = src_py & ~7;
-                    for (int fy = prev_sy[x] + 1; fy < sy; fy++) {
-                        if (fy < world_top || fy >= GB_SCREEN_HEIGHT) continue;
-                        int d = fy - prev_sy[x];
-                        uint32_t wall = grid->tex[(tile_top + (d & 7)) * VOX_TEX_W
-                                                  + (x + grid->fine_x)];
+                    for (int fy = prev_sy[X] + 1; fy < sy; fy++) {
+                        if (fy < world_top * S || fy >= OH) continue;
+                        int d = fy - prev_sy[X];
+                        uint32_t wall = grid->tex[(tile_top + ((d / S) & 7))
+                                                      * VOX_TEX_W + tex_col];
                         int t = d * 52 / (span + 1);
-                        out[fy * GB_SCREEN_WIDTH + x] = shade(wall, 186 - t);
+                        out[fy * OW + X] = shade(wall, 186 - t);
                     }
                 }
 
-                if (sy >= world_top && sy < GB_SCREEN_HEIGHT) {
+                if (sy >= world_top * S && sy < OH) {
                     /* Slight top-light on raised ground helps height pop. */
-                    out[sy * GB_SCREEN_WIDTH + x] = (h > 0.0f) ? shade(tex, 272) : tex;
+                    out[sy * OW + X] = (h > 0.0f) ? shade(tex, 272) : tex;
                 }
-                prev_sy[x] = sy;
-                prev_tex[x] = tex;
+                prev_sy[X] = sy;
             }
         }
 
-        /* Sprites standing on this row. */
+        /* Sprites standing on this world row (once per GB row). */
+        if (J % S != 0) continue;
+        const int wy_i = J / S;
         for (int i = 0; i < sprites->count; i++) {
             const VoxSprite* s = &sprites->entries[i];
             int sh = s->tall ? 16 : 8;
@@ -318,10 +338,8 @@ void vox_render(GBContext* ctx, const VoxTileGrid* grid,
 
             /* Link mid-jump: the game draws his sprite higher, but his
              * shadow -- and therefore his billboard's anchor -- stays on
-             * the ground he jumped from. w1Link gives both. Re-anchor any
-             * of his OAM sprites to the ground row and lift the body
-             * instead, so a jump reads as height above the terrain rather
-             * than a slide toward the horizon. */
+             * the ground he jumped from. Re-anchor his OAM sprites to the
+             * ground row and lift the body instead. */
             int air = 0;
             if (grid->link_known && grid->link_jump > 0 &&
                 s->x + 4 >= grid->link_sx - 10 && s->x + 4 <= grid->link_sx + 10 &&
@@ -330,11 +348,11 @@ void vox_render(GBContext* ctx, const VoxTileGrid* grid,
                 air = grid->link_jump;
                 feet = grid->link_feet_sy;
             }
-            if (feet != wy) continue;
+            if (feet != wy_i) continue;
             if (feet < world_top) continue;   /* lives in the HUD band */
 
             int fy = feet >= GB_SCREEN_HEIGHT ? GB_SCREEN_HEIGHT - 1 : feet;
-            float ground = height_at(grid, s->x + 4, fy);
+            float ground = height_at(grid, (float)(s->x + 4), (float)fy);
             if (ground < 0.0f) ground = 0.0f;   /* stand on the water surface */
             /* Link rides the eased ground instead of the raw cell sample,
              * so stepping across a height boundary ramps instead of pops. */
@@ -343,42 +361,50 @@ void vox_render(GBContext* ctx, const VoxTileGrid* grid,
                 feet >= grid->link_feet_sy - 6 && feet <= grid->link_feet_sy + 6) {
                 ground = link_ground_ease;
             }
-            int base = (int)(y_off + (float)(fy - world_top) * cam.squash
-                             - ground * lift + 0.5f);
+            int base = (int)((y_off + (float)(fy - world_top) * cam.squash
+                              - ground * lift) * fS + 0.5f);
 
             /* Airborne pixels rise like terrain does: 16 world px of jump
              * equals one HIGH block of extrusion. */
-            int body_lift = (int)((float)air * (VOX_UNITS[VOX_H_HIGH] / 16.0f)
-                                  * lift + 0.5f) + air;
+            int body_lift = (int)(((float)air * (VOX_UNITS[VOX_H_HIGH] / 16.0f)
+                                   * lift + (float)air) * fS + 0.5f);
 
             for (int row = 0; row < sh; row++) {
                 uint32_t px[8];
                 vox_decode_sprite_row(ctx, s, row, px);
-                int sy = base - body_lift - (sh - row);
-                if (sy < world_top || sy >= GB_SCREEN_HEIGHT) continue;
-                for (int c = 0; c < 8; c++) {
-                    int sx = s->x + c;
-                    if (!px[c] || sx < 0 || sx >= GB_SCREEN_WIDTH) continue;
-                    out[sy * GB_SCREEN_WIDTH + sx] = px[c];
+                int sy0 = base - body_lift - (sh - row) * S;
+                for (int sub = 0; sub < S; sub++) {
+                    int SY = sy0 + sub;
+                    if (SY < world_top * S || SY >= OH) continue;
+                    for (int c = 0; c < 8; c++) {
+                        if (!px[c]) continue;
+                        int sx = s->x + c;
+                        if (sx < 0 || sx >= GB_SCREEN_WIDTH) continue;
+                        uint32_t* dst = &out[SY * OW + sx * S];
+                        for (int k = 0; k < S; k++) dst[k] = px[c];
+                    }
                 }
             }
 
             /* A soft contact shadow sells the billboard standing on the
              * ground instead of floating over it. */
-            if (base >= world_top && base < GB_SCREEN_HEIGHT) {
+            for (int sub = 0; sub < S; sub++) {
+                int SY = base + sub;
+                if (SY < world_top * S || SY >= OH) continue;
                 for (int c = 1; c < 7; c++) {
                     int sx = s->x + c;
                     if (sx < 0 || sx >= GB_SCREEN_WIDTH) continue;
-                    uint32_t* p = &out[base * GB_SCREEN_WIDTH + sx];
-                    *p = shade(*p, 170);
+                    uint32_t* p = &out[SY * OW + sx * S];
+                    for (int k = 0; k < S; k++) p[k] = shade(p[k], 170);
                 }
             }
         }
     }
 
     /* The status bar comes back exactly as the game drew it. */
-    if (world_top > 0) {
-        memcpy(out, fb, (size_t)world_top * GB_SCREEN_WIDTH * sizeof(uint32_t));
+    for (int Y = 0; Y < world_top * S; Y++) {
+        const uint32_t* src = fb + (Y / S) * GB_SCREEN_WIDTH;
+        for (int X = 0; X < OW; X++) out[Y * OW + X] = src[X / S];
     }
 }
 
@@ -401,17 +427,30 @@ static void poll_toggle_key(void) {
 }
 
 /* Returning NULL leaves the guest frame completely untouched, which is what
- * happens whenever voxel mode is off -- the default. The game plays exactly
- * as it always did unless you ask for the diorama. */
-static const uint32_t* voxel_frame_hook(GBContext* ctx, const uint32_t* fb) {
+ * happens whenever voxel mode is off -- the default -- and whenever the
+ * cart is showing something that should stay flat (menus, dialog,
+ * cutscenes). The game plays exactly as it always did unless you ask for
+ * the diorama. */
+static const uint32_t* voxel_frame_hook(GBContext* ctx, const uint32_t* fb,
+                                        int* out_w, int* out_h) {
     poll_toggle_key();
     if (g_mode == VOXEL_MODE_OFF || !ctx || !fb) return NULL;
     if (!vox_scrape(ctx, &g_grid, &g_sprites)) return NULL;
-    vox_render(ctx, &g_grid, &g_sprites, fb, g_mode, g_out);
+    if (g_grid.flat) return NULL;
+    vox_render(ctx, &g_grid, &g_sprites, fb, g_mode, g_scale, g_out);
+    *out_w = GB_SCREEN_WIDTH * g_scale;
+    *out_h = GB_SCREEN_HEIGHT * g_scale;
     return g_out;
 }
 
 void voxel_install(void) {
-    gb_platform_set_frame_hook(voxel_frame_hook);
-    fprintf(stderr, "[VOXEL] available (off by default; F3 cycles OFF/15/30/45)\n");
+    const char* s = getenv("VOXEL_SCALE");
+    if (s) {
+        int v = atoi(s);
+        if (v >= 1 && v <= VOX_MAX_SCALE) g_scale = v;
+    }
+    gb_platform_set_frame_hook_scaled(voxel_frame_hook);
+    fprintf(stderr,
+            "[VOXEL] available at %dx internal scale "
+            "(off by default; F3 cycles OFF/15/30/45)\n", g_scale);
 }

@@ -182,7 +182,10 @@ Colour-only vs the game's own collision data, same frame:
   wrong-but-calm, never wrong-and-extruded.
 - Fixed pitch ladder. No free-roam or first-person camera — moving the player
   off the grid would mean fighting the game's own movement code.
-- Native 160×144, so it's chunky by construction. Deliberate.
+- The diorama renders at 3× internal resolution (`VOXEL_SCALE=1`–`4` to
+  change): texels stay chunky — that's the pixel art — but silhouettes,
+  domes and the camera tilt resolve at sub-GB precision instead of a
+  160×144 staircase. Flat (non-voxel) play is still native 160×144.
 - On the Oracles carts, menus and boot cinematics now render flat
   automatically. Interiors extrude by their real collision, which reads well.
   On other carts the classifier only sees tiles, so menus extrude — `F3` off.

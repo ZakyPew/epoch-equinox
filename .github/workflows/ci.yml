@@ -107,7 +107,7 @@ jobs:
           git init -q /tmp/gbrt
           git -C /tmp/gbrt fetch --depth 1 https://github.com/GB-Recomp/gb-recompiled.git "$sha"
           git -C /tmp/gbrt checkout -q FETCH_HEAD
-          for p in gbrt-frame-hook gbrt-windows gbrt-host-menu gbrt-display-menu; do
+          for p in gbrt-frame-hook gbrt-windows gbrt-host-menu gbrt-display-menu gbrt-hires-frame; do
             git -C /tmp/gbrt apply "$GITHUB_WORKSPACE/patches/$p.patch"
             echo "$p applies cleanly to $sha"
           done

@@ -19,11 +19,11 @@
 #include <stdlib.h>
 #include <string.h>
 
-static void write_ppm(const char* path, const uint32_t* fb) {
+static void write_ppm(const char* path, const uint32_t* fb, int w, int h) {
     FILE* f = fopen(path, "wb");
     if (!f) { perror(path); return; }
-    fprintf(f, "P6\n%d %d\n255\n", GB_SCREEN_WIDTH, GB_SCREEN_HEIGHT);
-    for (int i = 0; i < GB_SCREEN_WIDTH * GB_SCREEN_HEIGHT; i++) {
+    fprintf(f, "P6\n%d %d\n255\n", w, h);
+    for (int i = 0; i < w * h; i++) {
         uint32_t c = fb[i];
         uint8_t px[3] = { (uint8_t)(c >> 16), (uint8_t)(c >> 8), (uint8_t)c };
         fwrite(px, 1, 3, f);
@@ -76,7 +76,15 @@ int main(int argc, char* argv[]) {
 
     static VoxTileGrid grid;
     static VoxSpriteList sprites;
-    static uint32_t out[GB_FRAMEBUFFER_SIZE];
+    int shot_scale = 3;
+    {
+        const char* sc = getenv("VOX_SHOT_SCALE");
+        if (sc) {
+            int v = atoi(sc);
+            if (v >= 1 && v <= 4) shot_scale = v;
+        }
+    }
+    static uint32_t out[GB_FRAMEBUFFER_SIZE * 16];
 
     for (unsigned long i = 0; i <= last; i++) {
         gb_reset_frame(ctx);
@@ -110,11 +118,12 @@ int main(int argc, char* argv[]) {
             }
             char path[512];
             snprintf(path, sizeof(path), "%s-%lu-flat.ppm", argv[4], i);
-            write_ppm(path, fb);
+            write_ppm(path, fb, GB_SCREEN_WIDTH, GB_SCREEN_HEIGHT);
             if (vox_scrape(ctx, &grid, &sprites)) {
-                vox_render(ctx, &grid, &sprites, fb, mode, out);
+                vox_render(ctx, &grid, &sprites, fb, mode, shot_scale, out);
                 snprintf(path, sizeof(path), "%s-%lu-vox.ppm", argv[4], i);
-                write_ppm(path, out);
+                write_ppm(path, out, GB_SCREEN_WIDTH * shot_scale,
+                          GB_SCREEN_HEIGHT * shot_scale);
             } else {
                 fprintf(stderr, "frame %lu: scrape declined (LCD off?)\n", i);
             }
