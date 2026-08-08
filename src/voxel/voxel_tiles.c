@@ -252,11 +252,62 @@ bool vox_scrape(GBContext* ctx, const uint32_t* fb, VoxTileGrid* grid,
      * the half-second of every room walk. */
     bool oracle_cart = oracle.profile_matched;
     /* Hand the screen back untouched whenever the cart is showing
-     * something that isn't terrain: a menu, a dialog box (textboxes are
-     * drawn into the BG tilemap -- extruding one garbles the words), or
-     * no room at all (title, file select, cutscenes). */
-    grid->flat = oracle_cart &&
-                 (oracle.menu_open || oracle.text_active || oracle.no_room);
+     * something that isn't terrain: a menu, or no room at all (title,
+     * file select, cutscenes). */
+    grid->flat = oracle_cart && (oracle.menu_open || oracle.no_room);
+    grid->text_overlay = false;
+
+    /* A dialog box over a live room: the box is drawn into the BG
+     * tilemap, so extruding it garbles the words and re-decoding the
+     * texture would paint the box into the terrain. The game is paused
+     * under dialog, so freeze the diorama exactly as it was, find the
+     * box by diffing the composed frame against the frozen texture, and
+     * let the renderer float it flat on top. (Without a frozen world to
+     * show -- dialog on the very first frames -- fall back to flat.) */
+    static bool s_have_world = false;
+    if (oracle_cart && oracle.text_active && !grid->flat) {
+        if (!s_have_world) {
+            grid->flat = true;
+        } else {
+            grid->text_overlay = true;
+            int y0 = GB_SCREEN_HEIGHT, y1 = -1, x0 = GB_SCREEN_WIDTH, x1 = -1;
+            for (int y = grid->hud_rows; y < GB_SCREEN_HEIGHT; y++) {
+                int miss = 0;
+                for (int x = 0; x < GB_SCREEN_WIDTH; x++) {
+                    if (fb[y * GB_SCREEN_WIDTH + x] !=
+                        grid->tex[(y + grid->fine_y) * VOX_TEX_W + x + grid->fine_x]) {
+                        miss++;
+                    }
+                }
+                if (miss > GB_SCREEN_WIDTH / 2) {
+                    if (y < y0) y0 = y;
+                    if (y > y1) y1 = y;
+                }
+            }
+            if (y1 >= y0) {
+                for (int y = y0; y <= y1; y++) {
+                    for (int x = 0; x < GB_SCREEN_WIDTH; x++) {
+                        if (fb[y * GB_SCREEN_WIDTH + x] !=
+                            grid->tex[(y + grid->fine_y) * VOX_TEX_W + x + grid->fine_x]) {
+                            if (x < x0) x0 = x;
+                            if (x > x1) x1 = x;
+                        }
+                    }
+                }
+                grid->box_x = x0;
+                grid->box_y = y0;
+                grid->box_w = x1 - x0 + 1;
+                grid->box_h = y1 - y0 + 1;
+            } else {
+                /* Box not on screen yet (opening frame): nothing to blit. */
+                grid->box_w = 0;
+                grid->box_h = 0;
+            }
+            /* Frozen world: skip the state/texture refresh entirely, but
+             * keep the sprite scan live so characters stay animated. */
+            goto scan_sprites;
+        }
+    }
 
     /* The hud_rows walk above assumes the HUD strip wraps in at the TOP of
      * the window, which the Oracles carts routinely violate: rooms are
@@ -428,6 +479,9 @@ bool vox_scrape(GBContext* ctx, const uint32_t* fb, VoxTileGrid* grid,
         }
     }
 
+    s_have_world = use_oracle;
+
+scan_sprites:
     /* OAM scrape: raw entries, decoded lazily at draw time. */
     sprites->count = 0;
     bool tall = (lcdc & 0x04) != 0;

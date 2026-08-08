@@ -439,6 +439,20 @@ void vox_render(GBContext* ctx, const VoxTileGrid* grid,
         }
     }
 
+    /* A dialog box floats flat over the frozen diorama, exactly as the
+     * game drew it -- the world stays voxel, the words stay words. */
+    if (grid->text_overlay && grid->box_w > 0) {
+        for (int y = grid->box_y; y < grid->box_y + grid->box_h; y++) {
+            const uint32_t* src = fb + y * GB_SCREEN_WIDTH;
+            for (int sub = 0; sub < S; sub++) {
+                uint32_t* dst = &out[(y * S + sub) * OW];
+                for (int x = grid->box_x; x < grid->box_x + grid->box_w; x++) {
+                    for (int k = 0; k < S; k++) dst[x * S + k] = src[x];
+                }
+            }
+        }
+    }
+
     /* The status bar comes back exactly as the game drew it. */
     for (int Y = 0; Y < world_top * S; Y++) {
         const uint32_t* src = fb + (Y / S) * GB_SCREEN_WIDTH;

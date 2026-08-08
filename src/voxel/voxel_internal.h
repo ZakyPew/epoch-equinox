@@ -83,6 +83,11 @@ typedef struct {
     /* True while a full-screen menu owns the display: render the frame
      * flat instead of extruding inventory screens. */
     bool flat;
+    /* Dialog box floating over a live room: the diorama renders from the
+     * FROZEN previous state (the game is paused under dialog), and the
+     * box rectangle is blitted flat on top from the composed frame. */
+    bool text_overlay;
+    int box_x, box_y, box_w, box_h;    /* GB pixels, screen space */
     /* Link in screen space, when the oracle state was readable. The renderer
      * uses it to anchor his billboard to the ground he jumped FROM rather
      * than to wherever his sprite happens to be drawn mid-air. */
