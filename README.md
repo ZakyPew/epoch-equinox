@@ -153,10 +153,60 @@ rejected with a message saying so, instead of silently producing garbage.
 
 ## Voxel mode
 
-See [`src/voxel/`](src/voxel). The overworld is re-rendered as a 3D diorama
-built from the PPU's own tilemap each frame. This is original code — it is not
-a port of any existing mod, and it works off emulated VRAM rather than an
-engine-level scene graph, because a static recompilation doesn't have one.
+**Off by default.** The game plays exactly as it always did unless you turn it
+on — the frame hook returns the guest frame untouched while the mode is OFF.
+
+Press **F3** in game to cycle `OFF -> 15 -> 30 -> 45` (camera pitch), or start
+on a rung with `--voxel 2`.
+
+The overworld is re-rendered as a tilted 3D diorama built from the PPU's own
+state every frame. A static recompilation has no scene graph, no entity list
+and no collision data — just the VRAM the game wrote — so that is what this
+reads:
+
+- the visible BG tilemap, decoded through the live CGB palettes, is classified
+  per 8x8 tile into a terrain height (water sinks, paths lie flat, bushes and
+  rocks rise, trees and walls rise highest);
+- each screen column is then marched far-to-near, projecting each cell's top
+  surface under the pitched camera and filling the exposed front wall wherever
+  the height steps down — painter's order per column, so no depth buffer;
+- the terrain texture is the game's own composed frame, so palettes, season
+  tints and tile animation carry through untouched;
+- OAM sprites are re-decoded from VRAM and stood upright as billboards with a
+  contact shadow, so characters rise out of the ground instead of lying on it;
+- the status bar stays flat and is composited back on top.
+
+Output is a normal 160x144 frame handed back through the runtime's present
+path, so shaders, scaling, screenshots and frame dumps all still apply.
+
+### How it hooks in
+
+The cart's generated `*_main.c` calls `gb_platform_render_frame()` directly and
+can't be edited — Ages' copy is generated, and Seasons' comes from upstream. So
+[`patches/gbrt-frame-hook.patch`](patches) adds a small hook to the fetched
+runtime, applied at configure time, letting a host substitute its own rendering
+for the guest frame. It's ~27 lines and useful well beyond this project.
+
+### Honest limits
+
+- Terrain height comes from what tiles *look like*, not from the game's real
+  collision data, so it's a plausible relief rather than a correct one. The
+  thresholds live at the top of
+  [`voxel_tiles.c`](src/voxel/voxel_tiles.c) and are worth tuning per area.
+- The camera is a fixed pitch ladder. There's no free-roam or first-person
+  camera, because moving the player off the grid would need the engine's own
+  collision — which a static recompilation doesn't expose.
+- It renders at the Game Boy's native 160x144, so the diorama is chunky by
+  construction. That's deliberate: it stays a Game Boy picture.
+- Menus, cinematics and interiors get extruded too, since the classifier only
+  sees tiles. Press F3 to drop back to OFF for those.
+
+This is original code. It is not a port of
+[DramaticShapeVoxelMod](https://github.com/DramaticShape/DramaticShapeVoxelMod),
+which targets a Lua/LOVE reimplementation with a real engine-level mod API and
+whose code is not redistributable — a completely different architecture from a
+static recompilation. The shared idea is only the obvious one: extrude the
+game's own tile and sprite data into a diorama.
 
 ## Layout
 

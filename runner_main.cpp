@@ -21,6 +21,9 @@ extern "C" {
 #include "gb_sha256.h"
 #include "gb_asset_loader.h"
 #include "mod_loader.h"
+#if ORACLES_HAVE_VOXEL
+#include "voxel/voxel.h"
+#endif
 }
 
 #include <SDL.h>
@@ -201,6 +204,12 @@ int main(int argc, char* argv[]) {
             g_mods_disabled = true;
             continue;
         }
+#if ORACLES_HAVE_VOXEL
+        if (strcmp(argv[i], "--voxel") == 0 && i + 1 < argc) {
+            voxel_set_mode((int)strtol(argv[++i], NULL, 10));
+            continue;
+        }
+#endif
         if (strcmp(argv[i], "--game") == 0) {
             if (i + 1 >= argc) {
                 fprintf(stderr, "Missing value for --game\n");
@@ -236,6 +245,10 @@ int main(int argc, char* argv[]) {
         free(forwarded_argv);
         return 1;
     }
+
+#if ORACLES_HAVE_VOXEL
+    voxel_install();
+#endif
 
     for (;;) {
         fprintf(stderr, "[RUN] Starting %s [%s]\n", selected->title, selected->id);

@@ -1,0 +1,56 @@
+diff --git a/runtime/include/platform_sdl.h b/runtime/include/platform_sdl.h
+index 025a738..7166d2c 100644
+--- a/runtime/include/platform_sdl.h
++++ b/runtime/include/platform_sdl.h
+@@ -107,6 +107,23 @@ void gb_platform_shutdown(void);
+  */
+ bool gb_platform_poll_events(GBContext* ctx);
+ 
++/**
++ * @brief Frame hook: substitute custom rendering for the guest's frame.
++ *
++ * Called from gb_platform_render_frame() with the emulator context and the
++ * finished guest framebuffer. Return a replacement buffer of the same
++ * GB_FRAMEBUFFER_SIZE dimensions to draw that instead, or NULL to let the
++ * normal frame through untouched.
++ *
++ * This exists so a host application can render something other than the flat
++ * tile blit without patching generated cart code -- the cart's main loop
++ * calls gb_platform_render_frame() directly and cannot be edited. The
++ * substituted buffer flows through the rest of the present path as usual, so
++ * shaders, scaling, screenshots and frame dumps all still apply to it.
++ */
++typedef const uint32_t* (*GBFrameHookFn)(GBContext* ctx, const uint32_t* framebuffer);
++void gb_platform_set_frame_hook(GBFrameHookFn fn);
++
+ /**
+  * @brief Render frame to screen
+  */
+diff --git a/runtime/src/platform_sdl.cpp b/runtime/src/platform_sdl.cpp
+index 24c87bb..01ec645 100644
+--- a/runtime/src/platform_sdl.cpp
++++ b/runtime/src/platform_sdl.cpp
+@@ -24,6 +24,12 @@
+ #endif
+ #include "gb_printer.h"
+ 
++/* Host-supplied frame hook. Declared in the common region so both the SDL2
++ * and headless builds define the setter. */
++static GBFrameHookFn g_frame_hook = NULL;
++
++void gb_platform_set_frame_hook(GBFrameHookFn fn) { g_frame_hook = fn; }
++
+ #ifdef GB_HAS_SDL2
+ #include <SDL.h>
+ #include <SDL_opengles2.h>
+@@ -5230,6 +5236,10 @@ bool gb_platform_poll_events(GBContext* ctx) {
+ 
+ 
+ void gb_platform_render_frame(const uint32_t* framebuffer) {
++    if (g_frame_hook) {
++        const uint32_t* substitute = g_frame_hook(g_registered_ctx, framebuffer);
++        if (substitute) framebuffer = substitute;
++    }
+     render_frame_internal(framebuffer, true);
+ }
+ 

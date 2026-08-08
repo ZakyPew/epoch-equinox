@@ -36,10 +36,17 @@ endif()
 # ---------------------------------------------------------------------------
 if(NOT TARGET gbrt)
     set(GBRT_REF "main" CACHE STRING "git ref of GB-Recomp/gb-recompiled to use")
+    # The frame-hook patch lets a host substitute its own rendering for the
+    # guest frame (the voxel renderer uses it). PATCH_COMMAND runs without a
+    # shell and re-runs on re-configures, so the idempotence logic lives in a
+    # -P script rather than a `--check || apply` one-liner.
     FetchContent_Declare(gb_recompiled
         GIT_REPOSITORY https://github.com/GB-Recomp/gb-recompiled.git
         GIT_TAG ${GBRT_REF}
         GIT_SHALLOW TRUE
+        PATCH_COMMAND ${CMAKE_COMMAND}
+            -DPATCH_FILE=${CMAKE_CURRENT_SOURCE_DIR}/patches/gbrt-frame-hook.patch
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/patches/apply_gbrt_patch.cmake
     )
     FetchContent_GetProperties(gb_recompiled)
     if(NOT gb_recompiled_POPULATED)
