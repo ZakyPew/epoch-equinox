@@ -68,6 +68,9 @@ bool vox_scrape(GBContext* ctx, VoxTileGrid* grid, VoxSpriteList* sprites);
 void vox_decode_sprite_row(GBContext* ctx, const VoxSprite* s, int row,
                            uint32_t out[8]);
 
+/* Debug: write the full 32x32 BG map as a PPM (see voxel_tiles.c). */
+void vox_dump_bg_map(GBContext* ctx, const char* path);
+
 /* Render the diorama into out (GB_FRAMEBUFFER_SIZE). fb is the game's own
  * composed frame, used as the terrain texture and for the HUD rows. */
 void vox_render(GBContext* ctx, const VoxTileGrid* grid,

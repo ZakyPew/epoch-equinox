@@ -10,23 +10,49 @@ Symbol names follow the [Stewmath/oracles-disasm](https://github.com/Stewmath/or
 WLA-DX disassembly, so labels like `tlozooa__sym_gfxRegisterStates` map back to
 the same names you'd see in the decomp.
 
-## Build
+## Quick start
 
 ```sh
+git clone https://github.com/ZakyPew/tlozooaPEWS.git
+cd tlozooaPEWS
+./setup.sh
+```
+
+`setup.sh` checks your toolchain, builds both games, installs the launcher's
+Python dependencies and opens it. It's safe to re-run — the build is
+incremental. Use `./setup.sh --no-run` to stop before launching.
+
+**The games have to be compiled before the launcher can do anything.** There
+is no prebuilt binary in the source download: this repo ships ~170 MB of
+generated C per cart, and that has to become an executable on your machine
+first. If you run the launcher before building, it now tells you so in a
+dialog instead of exiting silently.
+
+### Doing it by hand
+
+```sh
+sudo apt-get install -y build-essential cmake ninja-build \
+    libsdl2-dev libcurl4-openssl-dev python3-pip     # Debian/Ubuntu
+# brew install cmake ninja sdl2 curl                 # macOS
+
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=MinSizeRel
 cmake --build build -j$(nproc)
+
+pip install -r launcher/requirements.txt
+python3 launcher/oracles_launcher.py
 ```
 
-Needs CMake 3.16+, a C/C++ compiler, SDL2, libcurl and OpenGL ES 2. CMake
-fetches the runtime and the Seasons cart itself — no submodules. On a
-Debian/Ubuntu box:
+CMake fetches the runtime and the Seasons cart itself — no submodules. The
+first configure pulls ~200 MB and a cold build compiles ~100 large translation
+units, so expect it to take a while. The result is `build/oracles`.
+
+If your Python is "externally managed" and pip refuses, use a virtualenv:
 
 ```sh
-sudo apt-get install -y build-essential cmake ninja-build libsdl2-dev libcurl4-openssl-dev
+python3 -m venv .venv && . .venv/bin/activate
+pip install -r launcher/requirements.txt
+python launcher/oracles_launcher.py
 ```
-
-The first configure clones ~200 MB of generated Seasons sources, and a cold
-build compiles ~100 large translation units. Produces `build/oracles`.
 
 ### CMake options
 
@@ -95,9 +121,24 @@ back to keyboard and mouse — nothing about it is required.
 
 ### Cover art
 
-Each panel draws a procedural motif themed per cart. To use real art instead,
-drop `covers/tlozooa.png` and/or `covers/tlozoos.png` next to the binary.
-Keep those local; they don't belong in the repo.
+Each panel draws a procedural motif by default. To use your own art, drop PNGs
+next to the **game binary**:
+
+```
+build/covers/tlozooa.png     Oracle of Ages
+build/covers/tlozoos.png     Oracle of Seasons
+```
+
+**Recommended size: 1600 x 1600 (square). Minimum 1000 x 1000.** Each game gets
+a diagonal slice of the window that is roughly 1.1:1, so square art crops
+least; keep the subject inside the middle 70%, since the seam cuts the inner
+edge and the title sits over the outer one.
+
+Full guidance, including what happens to landscape and portrait art, is in
+[`examples/covers/README.md`](examples/covers/README.md).
+
+`covers/` is gitignored — scans and official key art aren't ours to
+redistribute, so they stay local.
 
 ## Mods
 
@@ -218,7 +259,10 @@ src/voxel/                      voxel diorama renderer
 launcher/oracles_launcher.py    the launcher app
 launcher/gamepad.py             optional pad navigation for the launcher
 tools/make_test_patches.py      generates IPS/BPS patches to test the loader
+patches/                        frame-hook patch applied to the fetched runtime
+setup.sh                        one-command build + launch
 examples/mods/                  sample mod manifest
+examples/covers/                cover art spec
 ```
 
 ## Credits

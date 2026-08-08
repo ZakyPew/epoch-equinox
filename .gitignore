@@ -1,20 +1,31 @@
-build/
+# Build output
+/build/
 *.o
 *.a
 *.so
 *.dylib
-roms/
-assets/
+
+# Runtime data that lives next to the binary. All anchored with a leading
+# slash so they only match at the repo root -- an unanchored `mods/` also
+# matches `examples/mods/`, which silently kept the sample mod out of the
+# repo until someone tried to follow the README link.
+/roms/
+/assets/
+/mods/
+/covers/
+/borders/
+/prints/
+/cheats/
+*.sav
+
+# Editor / tooling
 runtime_prefs.ini
 imgui.ini
 .vscode/
 .idea/
-
-# launcher / runtime data
-covers/
-mods/
-*.ppm
-*.png
-!examples/**/*.png
 __pycache__/
 .venv/
+
+# Local capture scratch
+*.ppm
+/*.png
