@@ -79,13 +79,28 @@ static inline uint32_t shade(uint32_t c, int mul /* 0..256 */) {
 
 /* Height in extrusion units at a world (screen-space) pixel. */
 static inline float height_at(const VoxTileGrid* grid, int x, int y) {
-    int tx = (x + grid->fine_x) >> 3;
-    int ty = (y + grid->fine_y) >> 3;
+    int px = x + grid->fine_x;
+    int py = y + grid->fine_y;
+    int tx = px >> 3;
+    int ty = py >> 3;
     if (tx < 0) tx = 0;
     if (tx >= VOX_TILES_W) tx = VOX_TILES_W - 1;
     if (ty < 0) ty = 0;
     if (ty >= VOX_TILES_H) ty = VOX_TILES_H - 1;
-    return VOX_UNITS[grid->height[ty][tx]];
+    float h = VOX_UNITS[grid->height[ty][tx]];
+
+    /* Raised foliage gets a domed top: height peaks at the centre of the
+     * 16px room cell and rounds off toward its edges, so trees and bushes
+     * read as canopies instead of flat-topped crates. Everything
+     * non-leafy (walls, cliffs, fences) stays architectural and flat. */
+    if (h >= VOX_UNITS[VOX_H_MID] && grid->leafy[ty][tx]) {
+        float dx = ((float)(px & 15) - 7.5f) / 8.0f;
+        float dy = ((float)(py & 15) - 7.5f) / 8.0f;
+        float k = 1.0f - 0.22f * (dx * dx + dy * dy);
+        if (k < 0.62f) k = 0.62f;
+        h *= k;
+    }
+    return h;
 }
 
 /* ------------------------------------------------------------------ */
@@ -200,6 +215,43 @@ void vox_render(GBContext* ctx, const VoxTileGrid* grid,
     static int water_t = 0;
     water_t++;
 
+    /* When real heights return after a transition's flat slide, grow the
+     * extrusion in over a few frames -- snapping from flat to full relief
+     * in one frame reads as a glitch, growing in reads as intent. */
+    bool extruded = false;
+    for (int ty = 0; ty < VOX_TILES_H && !extruded; ty++) {
+        for (int tx = 0; tx < VOX_TILES_W; tx++) {
+            if (VOX_UNITS[grid->height[ty][tx]] != 0.0f) { extruded = true; break; }
+        }
+    }
+    static float grow = 1.0f;
+    static bool was_extruded = false;
+    if (extruded && !was_extruded) grow = 0.0f;
+    was_extruded = extruded;
+    grow += (1.0f - grow) * 0.18f;
+    if (grow > 0.999f) grow = 1.0f;
+    const float lift = cam.lift * grow;
+
+    /* Link's ground height, eased over a few frames: point-sampling the
+     * cell under his feet made his billboard teleport a full step the
+     * instant he crossed onto raised or lowered ground. */
+    static float link_ground_ease = 0.0f;
+    static bool link_ease_live = false;
+    if (grid->link_known) {
+        int fy = grid->link_feet_sy;
+        if (fy < world_top) fy = world_top;
+        if (fy >= GB_SCREEN_HEIGHT) fy = GB_SCREEN_HEIGHT - 1;
+        float now = height_at(grid, grid->link_sx, fy);
+        if (now < 0.0f) now = 0.0f;
+        if (!link_ease_live) {
+            link_ground_ease = now;
+            link_ease_live = true;
+        }
+        link_ground_ease += (now - link_ground_ease) * 0.25f;
+    } else {
+        link_ease_live = false;
+    }
+
     /* One pass over world rows, far to near, terrain and sprites together
      * in painter's order. Terrain needs per-column memory of the previous
      * row's projection for the front-wall fills; sprites drawn on a row are
@@ -214,7 +266,7 @@ void vox_render(GBContext* ctx, const VoxTileGrid* grid,
             for (int x = 0; x < GB_SCREEN_WIDTH; x++) {
                 float h = height_at(grid, x, wy);
                 int sy = (int)(y_off + (float)(wy - world_top) * cam.squash
-                               - h * cam.lift + 0.5f);
+                               - h * lift + 0.5f);
                 uint32_t tex = grid->tex[(wy + grid->fine_y) * VOX_TEX_W
                                          + (x + grid->fine_x)];
 
@@ -230,13 +282,22 @@ void vox_render(GBContext* ctx, const VoxTileGrid* grid,
 
                 if (prev_sy[x] >= 0 && sy > prev_sy[x] + 1) {
                     /* Height dropped toward the viewer: the far cell's front
-                     * wall is exposed. Shade it darker with a little vertical
-                     * falloff so tall faces read as faces. */
+                     * wall is exposed. Texture it by tiling that cell's own
+                     * 8px artwork down the face -- stretching a single texel
+                     * turned every tall tree line into a vertical smear --
+                     * and darken with a little falloff so faces read as
+                     * faces. */
                     int span = sy - prev_sy[x] - 1;
+                    int src_py = (wy - 1) + grid->fine_y;
+                    if (src_py < 0) src_py = 0;
+                    int tile_top = src_py & ~7;
                     for (int fy = prev_sy[x] + 1; fy < sy; fy++) {
                         if (fy < world_top || fy >= GB_SCREEN_HEIGHT) continue;
-                        int t = (fy - prev_sy[x]) * 52 / (span + 1);
-                        out[fy * GB_SCREEN_WIDTH + x] = shade(prev_tex[x], 198 - t);
+                        int d = fy - prev_sy[x];
+                        uint32_t wall = grid->tex[(tile_top + (d & 7)) * VOX_TEX_W
+                                                  + (x + grid->fine_x)];
+                        int t = d * 52 / (span + 1);
+                        out[fy * GB_SCREEN_WIDTH + x] = shade(wall, 186 - t);
                     }
                 }
 
@@ -275,13 +336,20 @@ void vox_render(GBContext* ctx, const VoxTileGrid* grid,
             int fy = feet >= GB_SCREEN_HEIGHT ? GB_SCREEN_HEIGHT - 1 : feet;
             float ground = height_at(grid, s->x + 4, fy);
             if (ground < 0.0f) ground = 0.0f;   /* stand on the water surface */
+            /* Link rides the eased ground instead of the raw cell sample,
+             * so stepping across a height boundary ramps instead of pops. */
+            if (link_ease_live &&
+                s->x + 4 >= grid->link_sx - 10 && s->x + 4 <= grid->link_sx + 10 &&
+                feet >= grid->link_feet_sy - 6 && feet <= grid->link_feet_sy + 6) {
+                ground = link_ground_ease;
+            }
             int base = (int)(y_off + (float)(fy - world_top) * cam.squash
-                             - ground * cam.lift + 0.5f);
+                             - ground * lift + 0.5f);
 
             /* Airborne pixels rise like terrain does: 16 world px of jump
              * equals one HIGH block of extrusion. */
             int body_lift = (int)((float)air * (VOX_UNITS[VOX_H_HIGH] / 16.0f)
-                                  * cam.lift + 0.5f) + air;
+                                  * lift + 0.5f) + air;
 
             for (int row = 0; row < sh; row++) {
                 uint32_t px[8];

@@ -71,6 +71,9 @@ typedef struct {
     /* Per visible tile: height class and whether it's part of the window
      * layer (HUD) rather than the scrolling BG. */
     uint8_t height[VOX_TILES_H][VOX_TILES_W];
+    /* Foliage flag per tile (green-leaning pattern): raised leafy cells get
+     * domed tops in the renderer so trees read as canopies, not crates. */
+    uint8_t leafy[VOX_TILES_H][VOX_TILES_W];
     /* Terrain texture decoded straight from the BG tilemap -- the composed
      * frame has sprites baked into it, and using it as the ground texture
      * warped a flattened copy of every character into the terrain

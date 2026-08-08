@@ -140,7 +140,11 @@ at the addresses named by
 - on anything else, tiles are classified per 8×8 by colour — water sinks,
   paths lie flat, bushes and rocks rise, trees and walls rise highest
 - the world is marched far-to-near, projecting cell tops and filling the
-  exposed front wall where height steps down
+  exposed front wall where height steps down. Walls are textured by tiling
+  the cell's own art down the face; raised foliage gets a domed top so
+  trees read as canopies while cliffs and fences stay architectural
+- motion is eased: terrain grows in after a room change instead of
+  popping, and Link's ground height ramps across cell boundaries
 - terrain is textured from the game's *own* BG tilemap — palettes, season
   tints and tile animation carry through untouched, and because sprites are
   not part of the tilemap, nobody leaves a flattened ghost of themselves in
