@@ -146,10 +146,11 @@ void vox_decode_sprite_row(GBContext* ctx, const VoxSprite* s, int row,
 /* Debug: write the full 32x32 BG map as a PPM (see voxel_tiles.c). */
 void vox_dump_bg_map(GBContext* ctx, const char* path);
 
-/* Render the diorama into out (GB_FRAMEBUFFER_SIZE). fb is the game's own
- * composed frame, used as the terrain texture and for the HUD rows. */
+/* Render the diorama into out, at an integer scale above the GB screen
+ * (out must hold GB_FRAMEBUFFER_SIZE * scale^2 pixels). fb is the game's
+ * own composed frame, used for the HUD rows and flat passthrough. */
 void vox_render(GBContext* ctx, const VoxTileGrid* grid,
                 const VoxSpriteList* sprites, const uint32_t* fb,
-                int mode, uint32_t* out);
+                int mode, int scale, uint32_t* out);
 
 #endif /* EPOCH_VOXEL_INTERNAL_H */
