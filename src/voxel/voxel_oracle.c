@@ -177,7 +177,10 @@ uint8_t vox_oracle_height(uint8_t collision, uint8_t colour_class) {
         return VOX_H_LOW;
     }
 
-    /* Walkable ($00): flat by default; keep grass texture if the colours
-     * found some, but never let a walkable cell rise above LOW. */
-    return (colour_class == VOX_H_LOW) ? VOX_H_LOW : VOX_H_FLOOR;
+    /* Walkable ($00): flat, full stop. An earlier revision let "textured"
+     * grass rise one step, which turned every decorated meadow into a
+     * raised slab with walls around it -- the texture is what makes grass
+     * read as grass, not a ledge. */
+    (void)colour_class;
+    return VOX_H_FLOOR;
 }
