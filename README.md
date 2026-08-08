@@ -113,19 +113,27 @@ and mouse.
 
 ### Cover art
 
-Each panel draws a procedural motif by default. For your own art, drop PNGs
-next to the game binary:
+Each panel draws a procedural motif unless art is supplied. Two places to put
+it, most specific first:
 
-```
-build/covers/tlozooa.png
-build/covers/tlozoos.png
-```
+| where | for | in git? |
+|---|---|---|
+| `build/covers/<id>.png` | your own art, this machine only | no, gitignored |
+| `art/covers/<id>.png` | art shipped with the project | yes |
+
+Filenames are the game ids: `tlozooa.png`, `tlozoos.png`.
 
 **Recommended: 1600 × 1600 (square). Minimum 1000 × 1000.** Each game gets a
 diagonal slice of the window at roughly 1.1:1, so square art crops least; keep
 the subject inside the middle 70%, since the seam cuts the inner edge and the
 title sits over the outer one. Full spec in
 [`examples/covers/README.md`](examples/covers/README.md).
+
+Only art the project can redistribute belongs in `art/covers/` — original
+or abstract work. Anything derived from the games' own art stays local,
+**including AI-generated images of characters or logos**: what matters is what
+the picture shows, not what drew it. See
+[`art/covers/README.md`](art/covers/README.md).
 
 `covers/` is gitignored — scans and key art aren't ours to redistribute.
 

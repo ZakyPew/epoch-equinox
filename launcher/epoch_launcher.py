@@ -29,6 +29,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+# The repo root, for art bundled with the project itself. The launcher lives
+# in launcher/, so its parent is the checkout.
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
 BOOTSTRAP_HELP = """\
 The Epoch & Equinox launcher needs PySide6.
 
@@ -378,12 +382,33 @@ class LauncherView(QWidget):
         return self.games[self.active] if self.games else None
 
     def cover(self, game_id: str) -> QPixmap | None:
-        """covers/<id>.png next to the runner, if the user supplied one."""
-        if game_id not in self._covers:
-            path = self.runner.root / "covers" / f"{game_id}.png"
-            pm = QPixmap(str(path)) if path.is_file() else None
-            self._covers[game_id] = pm if pm and not pm.isNull() else None
-        return self._covers[game_id]
+        """Panel art for a cart, most specific source first:
+
+        1. ``covers/<id>.png`` next to the binary  -- the user's own, and
+           gitignored, so scans and key art stay off the repo
+        2. ``art/covers/<id>.png`` in the project -- art shipped with the
+           project itself
+        3. neither: the caller falls back to the procedural motif
+        """
+        if game_id in self._covers:
+            return self._covers[game_id]
+
+        candidates = [
+            self.runner.root / "covers" / f"{game_id}.png",
+            PROJECT_ROOT / "art" / "covers" / f"{game_id}.png",
+        ]
+        chosen = None
+        for path in candidates:
+            if not path.is_file():
+                continue
+            pm = QPixmap(str(path))
+            if not pm.isNull():
+                chosen = pm
+                break
+            print(f"[launcher] could not decode {path}", file=sys.stderr)
+
+        self._covers[game_id] = chosen
+        return chosen
 
     # -- input -----------------------------------------------------------
 
