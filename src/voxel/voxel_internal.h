@@ -56,6 +56,7 @@ typedef struct {
     int  link_z;                /* w1Link zh: 0 on the ground, negative airborne */
     bool is_seasons;            /* which cart the profile matched */
     int  active_group;          /* wActiveGroup: 0/1 outdoors, 2+ interiors */
+    int  active_room;           /* wActiveRoom: room index within the group */
     int  room_state;            /* wRoomStateModifier: the season, in Seasons */
     uint8_t collisions[16 * 12]; /* wRoomCollisions, stride 16 */
 } VoxOracleState;
@@ -66,6 +67,13 @@ bool vox_oracle_read(GBContext* ctx, VoxOracleState* st);
 
 /* Height for one room cell: collision decides, colour breaks ties. */
 uint8_t vox_oracle_height(uint8_t collision, uint8_t colour_class);
+
+/* Per-room hand-authored height overrides (voxel/overrides/*.txt next to
+ * the binary). Returns a 8x10 grid of height classes (0xFF = keep) or
+ * NULL. With VOXEL_EDIT=1 set, visiting a room with no file writes a
+ * ready-to-edit template. */
+const uint8_t* vox_override_lookup(bool is_seasons, int group, int room,
+                                   const uint8_t* collisions);
 
 typedef struct {
     /* Per visible tile: height class and whether it's part of the window

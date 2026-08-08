@@ -106,6 +106,13 @@ int main(int argc, char* argv[]) {
                     ctx->io[0x42], ctx->io[0x43],
                     ctx->hram[0x2B], ctx->hram[0x2A],
                     ctx->wram[0xCD01 - 0xC000]);
+            if (getenv("VOX_DUMP_CC")) {
+                fprintf(stderr, "  CC2C:");
+                for (int c = 0; c < 12; c++) {
+                    fprintf(stderr, " %02X", ctx->wram[0xCC2C + c - 0xC000]);
+                }
+                fprintf(stderr, "\n");
+            }
             if (getenv("VOX_DUMP_COLL")) {
                 for (int row = 0; row < 12; row++) {
                     fprintf(stderr, "  coll %2d:", row);
