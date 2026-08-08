@@ -94,7 +94,7 @@ cmake -S . -B build "${GENERATOR[@]}" -DCMAKE_BUILD_TYPE=MinSizeRel
 say "Compiling -- this is the slow part, 20-30 min cold. Go make tea."
 cmake --build build -j"$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)"
 
-[[ -x build/oracles ]] || fail "build finished but build/oracles is missing"
+[[ -x build/epoch ]] || fail "build finished but build/epoch is missing"
 
 # --------------------------------------------------------------------------
 # 4. launcher deps
@@ -109,8 +109,8 @@ environment" error), use a virtualenv:
     python3 -m venv .venv
     . .venv/bin/activate
     pip install -r launcher/requirements.txt
-    python launcher/oracles_launcher.py
+    python launcher/epoch_launcher.py
 EOF
 
-say "Done. Launcher:  $PY launcher/oracles_launcher.py"
-((RUN_LAUNCHER)) && exec "$PY" launcher/oracles_launcher.py
+say "Done. Launcher:  $PY launcher/epoch_launcher.py"
+((RUN_LAUNCHER)) && exec "$PY" launcher/epoch_launcher.py

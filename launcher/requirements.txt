@@ -1,4 +1,4 @@
-# Oracles launcher dependencies.
+# Epoch & Equinox launcher dependencies.
 #
 #   pip install -r launcher/requirements.txt
 #

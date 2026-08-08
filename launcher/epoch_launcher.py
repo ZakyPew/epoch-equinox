@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Oracles launcher.
+"""Epoch & Equinox launcher.
 
 A standalone launcher for the recompiled Oracle of Ages / Oracle of Seasons
 runner, in the shape Zelda64Recomp and Ship of Harkinian use: the launcher is
@@ -10,10 +10,10 @@ takes minutes to rebuild; the launcher is the part that actually changes, so it
 lives here where a restart costs nothing. It also means a crash in the cart
 can't take the launcher down with it.
 
-The game table is not duplicated here — it comes from `oracles --games-json`,
+The game table is not duplicated here — it comes from `epoch --games-json`,
 so the two stay in sync from one source.
 
-    python3 launcher/oracles_launcher.py [--runner path/to/oracles]
+    python3 launcher/epoch_launcher.py [--runner path/to/oracles]
 """
 from __future__ import annotations
 
@@ -29,8 +29,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+# The repo root, for art bundled with the project itself. The launcher lives
+# in launcher/, so its parent is the checkout.
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
 BOOTSTRAP_HELP = """\
-The Oracles launcher needs PySide6.
+The Epoch & Equinox launcher needs PySide6.
 
     pip install -r launcher/requirements.txt
 
@@ -49,7 +53,7 @@ except ImportError:
 
         root = tkinter.Tk()
         root.withdraw()
-        messagebox.showerror("Oracles launcher - missing dependency", BOOTSTRAP_HELP)
+        messagebox.showerror("Epoch & Equinox launcher - missing dependency", BOOTSTRAP_HELP)
     except Exception:
         pass
     raise SystemExit(1)
@@ -90,6 +94,15 @@ APP_VERSION = "1.0.0"
 # width; the seam runs from (TOP, 0) down to (BOTTOM, height).
 SEAM_TOP = 0.62
 SEAM_BOTTOM = 0.38
+
+# Cover art lookup. The cart ids are what the runner reports, but nobody
+# drops a file called "tlozooa.png" into a folder without being told to, so
+# each cart also answers to a plain-English name.
+COVER_ALIASES = {
+    "tlozooa": ["ages", "oracle-of-ages", "oracle_of_ages"],
+    "tlozoos": ["seasons", "oracle-of-seasons", "oracle_of_seasons"],
+}
+COVER_EXTENSIONS = [".png", ".jpg", ".jpeg", ".webp"]
 
 
 # --------------------------------------------------------------------------
@@ -378,12 +391,43 @@ class LauncherView(QWidget):
         return self.games[self.active] if self.games else None
 
     def cover(self, game_id: str) -> QPixmap | None:
-        """covers/<id>.png next to the runner, if the user supplied one."""
-        if game_id not in self._covers:
-            path = self.runner.root / "covers" / f"{game_id}.png"
-            pm = QPixmap(str(path)) if path.is_file() else None
-            self._covers[game_id] = pm if pm and not pm.isNull() else None
-        return self._covers[game_id]
+        """Panel art for a cart, most specific source first:
+
+        1. ``covers/<id>.png`` next to the binary -- one machine's own art,
+           gitignored, so scans and key art stay off the repo
+        2. ``art/covers/<id>.png`` in the project -- art shipped with it
+        3. neither: the caller falls back to the procedural motif
+
+        Friendly aliases (``ages.png`` / ``seasons.png``) are accepted
+        alongside the cart ids, because ``tlozooa`` is not a name anybody
+        would guess when dragging a file into GitHub's upload box. Several
+        extensions are tried for the same reason.
+        """
+        if game_id in self._covers:
+            return self._covers[game_id]
+
+        stems = [game_id] + COVER_ALIASES.get(game_id, [])
+        dirs = [self.runner.root / "covers", PROJECT_ROOT / "art" / "covers"]
+
+        chosen = None
+        for directory in dirs:
+            for stem in stems:
+                for ext in COVER_EXTENSIONS:
+                    path = directory / f"{stem}{ext}"
+                    if not path.is_file():
+                        continue
+                    pm = QPixmap(str(path))
+                    if not pm.isNull():
+                        chosen = pm
+                        break
+                    print(f"[launcher] could not decode {path}", file=sys.stderr)
+                if chosen:
+                    break
+            if chosen:
+                break
+
+        self._covers[game_id] = chosen
+        return chosen
 
     # -- input -----------------------------------------------------------
 
@@ -580,7 +624,7 @@ class LauncherView(QWidget):
         sub = QColor(theme.accent)
         sub.setAlphaF(0.85 if active else 0.35)
         pr.setPen(sub)
-        pr.drawText(QRectF(x, h * 0.13, box_w, 22), align, "ORACLES: RECOMPILED")
+        pr.drawText(QRectF(x, h * 0.13, box_w, 22), align, "EPOCH & EQUINOX")
 
         pr.setFont(title_font(30 if active else 27, QFont.Weight.Light))
         pr.setPen(ink)
@@ -717,7 +761,7 @@ class MainWindow(QWidget):
     def __init__(self, runner: Runner):
         super().__init__()
         self.runner = runner
-        self.setWindowTitle("Oracles: Recompiled")
+        self.setWindowTitle("Epoch & Equinox")
         self.resize(1180, 660)
 
         try:
@@ -802,7 +846,7 @@ class MainWindow(QWidget):
 
 def default_runner_path() -> Path:
     here = Path(__file__).resolve().parent
-    exe = "oracles.exe" if os.name == "nt" else "oracles"
+    exe = "epoch.exe" if os.name == "nt" else "epoch"
     for candidate in (here.parent / "build" / exe, here.parent / exe, Path.cwd() / exe):
         if candidate.is_file():
             return candidate
@@ -810,14 +854,14 @@ def default_runner_path() -> Path:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Oracles launcher")
+    parser = argparse.ArgumentParser(description="Epoch & Equinox launcher")
     parser.add_argument(
         "--runner", type=Path, default=None, help="path to the oracles game binary"
     )
     args = parser.parse_args()
 
     app = QApplication(sys.argv)
-    app.setApplicationName("Oracles: Recompiled")
+    app.setApplicationName("Epoch & Equinox")
 
     runner_path = args.runner or default_runner_path()
     if not runner_path.is_file():
@@ -834,7 +878,7 @@ def main() -> int:
             "carts. It takes a while the first time and needs CMake, Ninja, "
             "SDL2 and libcurl installed.\n\n"
             "Already built somewhere else? Point at it with:\n"
-            "    python3 launcher/oracles_launcher.py --runner /path/to/oracles"
+            "    python3 launcher/epoch_launcher.py --runner /path/to/oracles"
         )
         print(f"[launcher] {message}", file=sys.stderr)
         box = QMessageBox()

@@ -27,12 +27,12 @@ jobs:
 
       - name: Refuses to configure without a ROM
         run: |
-          cmake -S . -B build-norom -G Ninja -DORACLES_ROM_DIR=/nonexistent \
+          cmake -S . -B build-norom -G Ninja -DEPOCH_ROM_DIR=/nonexistent \
             > cfg.log 2>&1 || true
           grep -q "No ROMs found" cfg.log
           echo "Confirmed: no ROM, no build."
 
-      # oracles_support is the mod loader plus the voxel renderer -- all our
+      # epoch_support is the mod loader plus the voxel renderer -- all our
       # own code, and the part worth regression-checking. A tiny synthetic
       # cart is enough to satisfy the recompiler; it is not a game and
       # contains nothing copyrighted.
@@ -50,8 +50,8 @@ jobs:
           open("ci-roms/citest.gb", "wb").write(bytes(data))
           EOF
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
-            -DORACLES_ROM_DIR="$PWD/ci-roms"
-          cmake --build build --target oracles_support -j"$(nproc)"
+            -DEPOCH_ROM_DIR="$PWD/ci-roms"
+          cmake --build build --target epoch_support -j"$(nproc)"
 
   launcher:
     name: Check the launcher
@@ -82,7 +82,7 @@ jobs:
           python - <<'EOF'
           import sys
           sys.path.insert(0, "launcher")
-          import gamepad, oracles_launcher
+          import gamepad, epoch_launcher
           print("launcher imports OK; pygame present:", gamepad._HAVE_PYGAME)
           EOF
 

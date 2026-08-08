@@ -29,3 +29,4 @@ __pycache__/
 # Local capture scratch
 *.ppm
 /*.png
+shot_pylauncher.sh

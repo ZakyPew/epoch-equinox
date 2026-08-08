@@ -33,8 +33,8 @@
  * enabled with --voxel N. The HUD rows the game draws via the window layer
  * are composited back flat on top.
  */
-#ifndef ORACLES_VOXEL_H
-#define ORACLES_VOXEL_H
+#ifndef EPOCH_VOXEL_H
+#define EPOCH_VOXEL_H
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -63,4 +63,4 @@ void voxel_set_mode(int mode);
 }
 #endif
 
-#endif /* ORACLES_VOXEL_H */
+#endif /* EPOCH_VOXEL_H */
