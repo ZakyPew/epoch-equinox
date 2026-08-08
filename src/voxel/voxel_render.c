@@ -313,10 +313,23 @@ void vox_render(GBContext* ctx, const VoxTileGrid* grid,
                      * whatever the map wraps to there (HUD tiles). */
                     if (src_py < world_top) src_py = world_top;
                     int tile_top = src_py & ~7;
+                    /* Foliage faces stretch their art once down the wall;
+                     * tiling it made tall trees a busy stack of repeats.
+                     * Masonry and rock keep the tiling -- stacked courses
+                     * are exactly what a cliff face should look like. */
+                    bool leafy_wall =
+                        grid->leafy[tile_top >> 3][tex_col >> 3] != 0;
                     for (int fy = prev_sy[X] + 1; fy < sy; fy++) {
                         if (fy < world_top * S || fy >= OH) continue;
                         int d = fy - prev_sy[X];
-                        uint32_t wall = grid->tex[(tile_top + ((d / S) & 7))
+                        int art_row;
+                        if (leafy_wall) {
+                            art_row = (span > 0) ? ((d - 1) * 8 / (span + 1)) : 0;
+                            if (art_row > 7) art_row = 7;
+                        } else {
+                            art_row = (d / S) & 7;
+                        }
+                        uint32_t wall = grid->tex[(tile_top + art_row)
                                                       * VOX_TEX_W + tex_col];
                         int t = d * 52 / (span + 1);
                         out[fy * OW + X] = shade(wall, 186 - t);
@@ -355,7 +368,23 @@ void vox_render(GBContext* ctx, const VoxTileGrid* grid,
             if (feet < world_top) continue;   /* lives in the HUD band */
 
             int fy = feet >= GB_SCREEN_HEIGHT ? GB_SCREEN_HEIGHT - 1 : feet;
-            float ground = height_at(grid, (float)(s->x + 4), (float)fy);
+            /* Characters are drawn as runs of adjacent 8px OAM sprites.
+             * Anchoring each half to the ground under its own feet split
+             * them apart whenever a character straddled a height boundary,
+             * so find the horizontal run this sprite belongs to and anchor
+             * the whole run at its shared centre. */
+            int run_l = s->x, run_r = s->x;
+            for (bool moved = true; moved;) {
+                moved = false;
+                for (int j = 0; j < sprites->count; j++) {
+                    const VoxSprite* o = &sprites->entries[j];
+                    if (o->y != s->y) continue;
+                    if (o->x == run_l - 8) { run_l = o->x; moved = true; }
+                    if (o->x == run_r + 8) { run_r = o->x; moved = true; }
+                }
+            }
+            float anchor_x = (float)(run_l + run_r + 8) * 0.5f;
+            float ground = height_at(grid, anchor_x, (float)fy);
             if (ground < 0.0f) ground = 0.0f;   /* stand on the water surface */
             /* Link rides the eased ground instead of the raw cell sample,
              * so stepping across a height boundary ramps instead of pops. */
