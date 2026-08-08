@@ -254,6 +254,20 @@ class Runner:
     def run_log(self) -> Path:
         return self.root / "epoch-run.log"
 
+    @staticmethod
+    def _game_env() -> dict:
+        """Environment for the game process. The gamepad bridge points SDL
+        at its headless 'dummy' drivers so pygame can poll pads without a
+        window -- but those variables are set process-wide and a spawned
+        game inherits them, at which point SDL_CreateWindow fails with
+        'OpenGL support is either not configured in SDL or not available
+        in current SDL video driver (dummy)'. Strip them so the game gets
+        real video and audio."""
+        env = os.environ.copy()
+        env.pop("SDL_VIDEODRIVER", None)
+        env.pop("SDL_AUDIODRIVER", None)
+        return env
+
     def launch(self, game: Game) -> subprocess.Popen:
         # The runner's output goes to a log file, not a pipe: a pipe nobody
         # drains would eventually block the game, and when the launcher is a
@@ -270,6 +284,7 @@ class Runner:
             return subprocess.Popen(
                 [str(self.exe), "--game", game.id],
                 cwd=self.root,
+                env=self._game_env(),
                 stdin=subprocess.DEVNULL,
                 stdout=log,
                 stderr=subprocess.STDOUT,

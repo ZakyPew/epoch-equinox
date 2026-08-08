@@ -58,13 +58,16 @@ typedef struct {
     const char* id;
     const char* title;
     const char* sha256;
+    const char* header_title;   /* cartridge header at $134 */
 } EpochKnownGame;
 
 static const EpochKnownGame KNOWN[] = {
     {"tlozooa", "Oracle of Ages",
-     "0b56b78a9e45452e98c33edd111234931f1e034dc097f6f23082eb8db6055474"},
+     "0b56b78a9e45452e98c33edd111234931f1e034dc097f6f23082eb8db6055474",
+     "ZELDA NAYRU"},
     {"tlozoos", "Oracle of Seasons",
-     "862a51368fb30539279d336b3fe193b43876d2cb15c87a36f5da517804ab3971"},
+     "862a51368fb30539279d336b3fe193b43876d2cb15c87a36f5da517804ab3971",
+     "ZELDA DIN"},
 };
 
 static EpochGame g_games[EPOCH_MAX_GAMES];
@@ -74,6 +77,27 @@ static bool g_mods_disabled = false;
 static const EpochKnownGame* known_by_id(const char* id) {
     for (size_t i = 0; i < sizeof(KNOWN) / sizeof(KNOWN[0]); i++) {
         if (strcmp(KNOWN[i].id, id) == 0) return &KNOWN[i];
+    }
+    return NULL;
+}
+
+/* Identify a cart by the title its own header carries at $134. This is
+ * what makes "name the file whatever you like" true: a No-Intro-named
+ * dump is still Oracle of Seasons, and treating it as an anonymous ROM
+ * cost it its proper title and its cover art in the launcher. */
+static const EpochKnownGame* known_by_header(const char* rom_path) {
+    FILE* f = fopen(rom_path, "rb");
+    if (!f) return NULL;
+    uint8_t header[0x150];
+    size_t got = fread(header, 1, sizeof(header), f);
+    fclose(f);
+    if (got < sizeof(header)) return NULL;
+    for (size_t i = 0; i < sizeof(KNOWN) / sizeof(KNOWN[0]); i++) {
+        if (!KNOWN[i].header_title) continue;
+        size_t n = strlen(KNOWN[i].header_title);
+        if (n <= 16 && memcmp(header + 0x134, KNOWN[i].header_title, n) == 0) {
+            return &KNOWN[i];
+        }
     }
     return NULL;
 }
@@ -113,7 +137,16 @@ static void scan_games(void) {
         snprintf(g->rom_path, sizeof(g->rom_path), "roms/%s", name);
 
         const EpochKnownGame* k = known_by_id(g->id);
+        if (!k) k = known_by_header(g->rom_path);
+        /* First file claiming a known cart wins its identity; a second
+         * copy stays a plain ROM entry instead of a duplicate id. */
         if (k) {
+            for (size_t i = 0; i < sizeof(KNOWN) / sizeof(KNOWN[0]); i++) {
+                if (&KNOWN[i] == k && have_known[i]) k = NULL;
+            }
+        }
+        if (k) {
+            snprintf(g->id, sizeof(g->id), "%s", k->id);
             snprintf(g->title, sizeof(g->title), "%s", k->title);
             g->expected_sha256 = k->sha256;
             for (size_t i = 0; i < sizeof(KNOWN) / sizeof(KNOWN[0]); i++) {
