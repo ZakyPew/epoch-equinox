@@ -225,6 +225,8 @@ class Runner:
                     "patch": m.get("patch", ""),
                     "priority": m.get("priority", 100),
                     "enabled": state.get(mod_id, m.get("enabled", True)),
+                    "description": m.get("description", ""),
+                    "author": m.get("author", ""),
                     "dir": child,
                 }
             )
@@ -730,51 +732,90 @@ class ModsDialog(QDialog):
         )
 
         layout = QVBoxLayout(self)
-        mods = runner.scan_mods(game.id)
 
-        if not mods:
-            hint = QLabel(
-                f"Nothing in <code>mods/</code> applies to <b>{game.title}</b>.<br><br>"
-                "Drop a folder containing a <code>manifest.json</code> into "
-                f"<code>{runner.mods_dir}</code>.<br>"
-                "IPS and BPS patches both work - that is what Oracles "
-                "randomizers and romhacks already ship as."
-            )
-            hint.setWordWrap(True)
-            hint.setTextFormat(Qt.TextFormat.RichText)
-            layout.addWidget(hint)
-        else:
-            inner = QWidget()
-            box_layout = QVBoxLayout(inner)
-            for m in mods:
-                label = f"{m['name']}  ·  v{m['version']}"
-                if m["patch"]:
-                    label += f"  ·  {Path(m['patch']).suffix.lstrip('.').upper()}"
-                cb = QCheckBox(label)
-                cb.setChecked(bool(m["enabled"]))
-                box_layout.addWidget(cb)
-                self.boxes.append((m["id"], cb))
-            box_layout.addStretch(1)
-            scroll = QScrollArea()
-            scroll.setWidgetResizable(True)
-            scroll.setWidget(inner)
-            scroll.setStyleSheet("QScrollArea { border: 0; }")
-            layout.addWidget(scroll)
+        self.scroll = QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setStyleSheet("QScrollArea { border: 0; }")
+        layout.addWidget(self.scroll, 1)
 
-            note = QLabel(
-                "Changes apply on the next launch. The stock ROM is kept as a "
-                "pristine snapshot, so turning a mod off fully undoes it."
-            )
-            note.setWordWrap(True)
-            note.setStyleSheet("color: #8b97a2; font-size: 11px;")
-            layout.addWidget(note)
+        note = QLabel(
+            "Changes apply on the next launch. The stock ROM is kept as a "
+            "pristine snapshot, so turning a mod off fully undoes it."
+        )
+        note.setWordWrap(True)
+        note.setStyleSheet("color: #8b97a2; font-size: 11px;")
+        layout.addWidget(note)
 
+        row = QHBoxLayout()
+        open_btn = QPushButton("Open Mods Folder")
+        open_btn.clicked.connect(self.open_mods_folder)
+        refresh_btn = QPushButton("Refresh")
+        refresh_btn.clicked.connect(self.rebuild)
+        row.addWidget(open_btn)
+        row.addWidget(refresh_btn)
+        row.addStretch(1)
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel
         )
         buttons.accepted.connect(self.save)
         buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
+        row.addWidget(buttons)
+        layout.addLayout(row)
+
+        self.rebuild()
+
+    def open_mods_folder(self) -> None:
+        """Open mods/ in the system file manager, creating it first so the
+        window that appears is the right drop target rather than an error."""
+        d = self.runner.mods_dir
+        d.mkdir(parents=True, exist_ok=True)
+        if os.name == "nt":
+            os.startfile(str(d))  # noqa: S606 - opening our own folder
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", str(d)])
+        else:
+            subprocess.Popen(["xdg-open", str(d)])
+
+    def rebuild(self) -> None:
+        """(Re)scan mods/ and rebuild the list. Wired to Refresh so 'drop
+        folder in, click Refresh' works without reopening the dialog."""
+        self.boxes = []
+        inner = QWidget()
+        box_layout = QVBoxLayout(inner)
+        mods = self.runner.scan_mods(self.game.id)
+
+        if not mods:
+            hint = QLabel(
+                f"Nothing in <code>mods/</code> applies to <b>{self.game.title}</b>."
+                "<br><br>"
+                "Drop a folder containing a <code>manifest.json</code> into the "
+                "mods folder (button below), then hit Refresh.<br>"
+                "IPS and BPS patches both work - that is what Oracles "
+                "randomizers and romhacks already ship as."
+            )
+            hint.setWordWrap(True)
+            hint.setTextFormat(Qt.TextFormat.RichText)
+            box_layout.addWidget(hint)
+        else:
+            for m in mods:
+                label = f"{m['name']}  ·  v{m['version']}"
+                if m["patch"]:
+                    label += f"  ·  {Path(m['patch']).suffix.lstrip('.').upper()}"
+                if m["author"]:
+                    label += f"  ·  {m['author']}"
+                cb = QCheckBox(label)
+                cb.setChecked(bool(m["enabled"]))
+                box_layout.addWidget(cb)
+                if m["description"]:
+                    desc = QLabel(m["description"])
+                    desc.setWordWrap(True)
+                    desc.setStyleSheet(
+                        "color: #8b97a2; font-size: 11px; margin-left: 28px;"
+                    )
+                    box_layout.addWidget(desc)
+                self.boxes.append((m["id"], cb))
+        box_layout.addStretch(1)
+        self.scroll.setWidget(inner)
 
     def save(self) -> None:
         self.runner.write_state({mod_id: cb.isChecked() for mod_id, cb in self.boxes})
@@ -863,19 +904,30 @@ class MainWindow(QWidget):
         except OSError as exc:
             QMessageBox.warning(self, "Could not start the game", str(exc))
             return
+        # Stay hidden for as long as the game owns the screen. The old
+        # behaviour -- reappear on a fixed 1.5s timer -- put the launcher
+        # window on top of the running game, which read as a glitch.
         self.hide()
-        # Come back once the cart has had a moment to take the screen; the
-        # runner owns its own window from here.
-        QTimer.singleShot(1500, self.show_again)
+        self.watch = QTimer(self)
+        self.watch.setInterval(700)
+        self.watch.timeout.connect(self.check_game)
+        self.watch.start()
 
-    def show_again(self) -> None:
+    def check_game(self) -> None:
+        proc = getattr(self, "game_proc", None)
+        if proc is None:
+            self.watch.stop()
+            return
+        rc = proc.poll()
+        if rc is None:
+            return                       # still playing; stay out of the way
+        self.watch.stop()
+        self.game_proc = None
         self.reload_games()
         self.show()
-        # A game process that is already dead this soon never took the
-        # screen. Silently reappearing here is indistinguishable from "the
-        # launcher is broken", so say what the runner said instead.
-        proc = getattr(self, "game_proc", None)
-        if proc is not None and proc.poll() not in (None, 0):
+        if rc != 0:
+            # The runner never took (or lost) the screen -- surface what it
+            # said instead of silently reappearing.
             tail = ""
             try:
                 text = self.runner.run_log.read_text(
@@ -886,12 +938,11 @@ class MainWindow(QWidget):
                 pass
             QMessageBox.critical(
                 self,
-                "The game exited immediately",
-                f"{self.runner.exe.name} exited with code {proc.returncode}.\n\n"
+                "The game exited",
+                f"{self.runner.exe.name} exited with code {rc}.\n\n"
                 f"{tail or '(no output captured)'}\n\n"
                 f"Full log: {self.runner.run_log}",
             )
-            self.game_proc = None
 
 
 def default_runner_path() -> Path:
