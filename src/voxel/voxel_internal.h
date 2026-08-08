@@ -136,7 +136,8 @@ typedef struct {
 
 /* Scrape + classify the current PPU state. Returns false if the PPU isn't
  * in a state worth rendering (LCD off, mid-mode weirdness). */
-bool vox_scrape(GBContext* ctx, VoxTileGrid* grid, VoxSpriteList* sprites);
+bool vox_scrape(GBContext* ctx, const uint32_t* fb, VoxTileGrid* grid,
+                VoxSpriteList* sprites);
 
 /* Decode one 8x8 sprite row's pixels to RGBA (0 = transparent). Used by the
  * renderer to draw billboards straight from VRAM. */

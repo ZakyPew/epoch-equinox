@@ -119,7 +119,7 @@ int main(int argc, char* argv[]) {
             char path[512];
             snprintf(path, sizeof(path), "%s-%lu-flat.ppm", argv[4], i);
             write_ppm(path, fb, GB_SCREEN_WIDTH, GB_SCREEN_HEIGHT);
-            if (vox_scrape(ctx, &grid, &sprites)) {
+            if (vox_scrape(ctx, fb, &grid, &sprites)) {
                 vox_render(ctx, &grid, &sprites, fb, mode, shot_scale, out);
                 snprintf(path, sizeof(path), "%s-%lu-vox.ppm", argv[4], i);
                 write_ppm(path, out, GB_SCREEN_WIDTH * shot_scale,
