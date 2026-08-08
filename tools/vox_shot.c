@@ -98,6 +98,16 @@ int main(int argc, char* argv[]) {
                     ctx->io[0x42], ctx->io[0x43],
                     ctx->hram[0x2B], ctx->hram[0x2A],
                     ctx->wram[0xCD01 - 0xC000]);
+            if (getenv("VOX_DUMP_CB")) {
+                for (int row = 0; row < 8; row++) {
+                    fprintf(stderr, "  CB%X0:", 8 + row);
+                    for (int c = 0; c < 16; c++) {
+                        fprintf(stderr, " %02X",
+                                ctx->wram[0xCB80 + row * 16 + c - 0xC000]);
+                    }
+                    fprintf(stderr, "\n");
+                }
+            }
             char path[512];
             snprintf(path, sizeof(path), "%s-%lu-flat.ppm", argv[4], i);
             write_ppm(path, fb);

@@ -208,7 +208,12 @@ bool vox_scrape(GBContext* ctx, VoxTileGrid* grid, VoxSpriteList* sprites) {
      * screen to the colour classifier, whose guessed terrain flickers for
      * the half-second of every room walk. */
     bool oracle_cart = oracle.profile_matched;
-    grid->flat = use_oracle && oracle.menu_open;
+    /* Hand the screen back untouched whenever the cart is showing
+     * something that isn't terrain: a menu, a dialog box (textboxes are
+     * drawn into the BG tilemap -- extruding one garbles the words), or
+     * no room at all (title, file select, cutscenes). */
+    grid->flat = oracle_cart &&
+                 (oracle.menu_open || oracle.text_active || oracle.no_room);
 
     /* The hud_rows walk above assumes the HUD strip wraps in at the TOP of
      * the window, which is only half the story on the Oracles carts: they

@@ -38,6 +38,7 @@
 
 #define WRAM_BANK_SIZE 4096
 
+#define A_wTextIsActive   0xCBA0
 #define A_wOpenedMenuType 0xCBCB
 #define A_wScrollMode     0xCD00
 #define A_wScreenOffsetY  0xCD08
@@ -102,6 +103,7 @@ bool vox_oracle_read(GBContext* ctx, VoxOracleState* st) {
     st->profile_matched = true;
 
     st->menu_open = wram0(ctx, A_wOpenedMenuType) != 0;
+    st->text_active = wram0(ctx, A_wTextIsActive) != 0;
 
     /* wScrollMode is 1 in normal play. Anything else -- 0 (no room), bit 2
      * (scrolling), and the other transition values the disasm names -- means
@@ -111,6 +113,7 @@ bool vox_oracle_read(GBContext* ctx, VoxOracleState* st) {
      * several mid-scroll frames through), so accept exactly the one value
      * that means "one room, at rest". */
     uint8_t scroll = wram0(ctx, A_wScrollMode);
+    st->no_room = (scroll == 0);
     if (scroll != 0x01) return false;
 
     st->cam_y = (int)ctx->hram[prof->cam_y_off] |

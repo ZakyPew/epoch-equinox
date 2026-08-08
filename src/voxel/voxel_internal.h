@@ -42,6 +42,14 @@ typedef struct {
      * guesswork for half a second every room change. */
     bool profile_matched;
     bool menu_open;
+    /* wTextIsActive: a dialog box is on screen. Textboxes are drawn into
+     * the BG tilemap, so the diorama would squash and terrain-warp the
+     * words; the frame passes through flat instead, like menus. Verified
+     * live: $CBA0 is 1 exactly while text shows, 0 otherwise. */
+    bool text_active;
+    /* wScrollMode == 0: no room is active at all (title, file select,
+     * cutscenes). There is no terrain to extrude; pass through flat. */
+    bool no_room;
     int  cam_y, cam_x;          /* hCameraY/X, room pixels */
     int  off_y, off_x;          /* wScreenOffsetY/X, transient draw offset */
     int  link_y, link_x;        /* w1Link whole-pixel position (room space) */
