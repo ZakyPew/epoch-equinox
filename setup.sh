@@ -54,18 +54,50 @@ GENERATOR=()
 command -v ninja >/dev/null 2>&1 && GENERATOR=(-G Ninja)
 
 # --------------------------------------------------------------------------
-# 2. build
+# 2. ROMs -- required before anything can be built
 # --------------------------------------------------------------------------
-say "Configuring (this fetches the runtime and Oracle of Seasons -- ~200 MB)"
+say "Checking for ROMs"
+mkdir -p roms
+shopt -s nullglob
+found=(roms/*.gb roms/*.gbc roms/*.sgb)
+shopt -u nullglob
+
+if ((${#found[@]} == 0)); then
+    cat >&2 <<'EOF'
+
+  No ROMs in roms/.
+
+  This project ships no game code -- it recompiles the games from your own
+  dumps, so a ROM has to be there before anything can be built. Copy yours
+  in, named by game id:
+
+      roms/tlozooa.gbc     The Legend of Zelda: Oracle of Ages   (USA, Australia)
+      roms/tlozoos.gbc     The Legend of Zelda: Oracle of Seasons (USA, Australia)
+
+  Either one alone is fine -- you'll just get that game.
+
+  Optional: drop the matching .sym files from Stewmath/oracles-disasm beside
+  them (roms/tlozooa.sym) and generated functions get real names.
+
+EOF
+    exit 1
+fi
+printf '    found: %s\n' "${found[@]}"
+
+# --------------------------------------------------------------------------
+# 3. build
+# --------------------------------------------------------------------------
+say "Configuring -- builds the recompiler, then turns your ROMs into C"
+echo "    (first run: ~2 min for the recompiler, ~75s per game)"
 cmake -S . -B build "${GENERATOR[@]}" -DCMAKE_BUILD_TYPE=MinSizeRel
 
-say "Building both carts -- first run compiles ~100 large files, go make tea"
+say "Compiling -- this is the slow part, 20-30 min cold. Go make tea."
 cmake --build build -j"$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)"
 
 [[ -x build/oracles ]] || fail "build finished but build/oracles is missing"
 
 # --------------------------------------------------------------------------
-# 3. launcher deps
+# 4. launcher deps
 # --------------------------------------------------------------------------
 say "Installing launcher dependencies"
 PY=$(command -v python3 || command -v python) || fail "python3 not found"
@@ -79,22 +111,6 @@ environment" error), use a virtualenv:
     pip install -r launcher/requirements.txt
     python launcher/oracles_launcher.py
 EOF
-
-# --------------------------------------------------------------------------
-# 4. ROMs
-# --------------------------------------------------------------------------
-mkdir -p build/roms
-if [[ ! -f build/roms/tlozooa.gbc && ! -f build/roms/tlozoos.gbc ]]; then
-    cat <<'EOF'
-
-  No ROMs found yet. Drop your own dumps in:
-
-      build/roms/tlozooa.gbc     Oracle of Ages   (USA, Australia)
-      build/roms/tlozoos.gbc     Oracle of Seasons (USA, Australia)
-
-  Or use "Install ROM" in the launcher. Hashes are verified on first boot.
-EOF
-fi
 
 say "Done. Launcher:  $PY launcher/oracles_launcher.py"
 ((RUN_LAUNCHER)) && exec "$PY" launcher/oracles_launcher.py

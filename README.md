@@ -1,32 +1,50 @@
-# Oracles
+# oracles-recompiled
 
 **The Legend of Zelda: Oracle of Ages** and **Oracle of Seasons**, statically
-recompiled into portable C and built into a single binary on the
-[GB-Recomp/gb-recompiled](https://github.com/GB-Recomp/gb-recompiled) runtime.
+recompiled to native C and wrapped in a modern launcher, with mod support and
+an optional 3D diorama renderer.
 
-Ages' generated sources live in this repo; Seasons is pulled in from
-[GB-Recomp/tlozoos](https://github.com/GB-Recomp/tlozoos) at configure time.
-Symbol names follow the [Stewmath/oracles-disasm](https://github.com/Stewmath/oracles-disasm)
-WLA-DX disassembly, so labels like `tlozooa__sym_gfxRegisterStates` map back to
-the same names you'd see in the decomp.
+Both games in one binary. Savestates, shaders, controller remapping, IPS/BPS
+mod loading, and a voxel mode that rebuilds the overworld as a tilted diorama
+from the PPU's own tilemap.
+
+> **This project ships no game code.** The C that runs the games is generated
+> on your machine, from your own ROM, at build time — the same model
+> [Zelda64Recomp](https://github.com/Zelda64Recomp/Zelda64Recomp) and
+> [Ship of Harkinian](https://github.com/HarbourMasters/Shipwright) use.
+> Nothing derived from the ROMs enters this repository or any release.
 
 ## Quick start
 
+You need your own dumps of both games. Put them in `roms/`, named by game id:
+
+```
+roms/tlozooa.gbc     The Legend of Zelda: Oracle of Ages   (USA, Australia)
+roms/tlozoos.gbc     The Legend of Zelda: Oracle of Seasons (USA, Australia)
+```
+
+Then:
+
 ```sh
-git clone https://github.com/ZakyPew/tlozooaPEWS.git
-cd tlozooaPEWS
+git clone https://github.com/ZakyPew/tlozooaPEWS.git oracles-recompiled
+cd oracles-recompiled
 ./setup.sh
 ```
 
-`setup.sh` checks your toolchain, builds both games, installs the launcher's
-Python dependencies and opens it. It's safe to re-run — the build is
-incremental. Use `./setup.sh --no-run` to stop before launching.
+`setup.sh` checks your toolchain, builds the recompiler, turns your ROMs into
+C, compiles both games, installs the launcher's Python dependencies and opens
+it. Re-running is cheap — recompilation is cached against the ROM.
 
-**The games have to be compiled before the launcher can do anything.** There
-is no prebuilt binary in the source download: this repo ships ~170 MB of
-generated C per cart, and that has to become an executable on your machine
-first. If you run the launcher before building, it now tells you so in a
-dialog instead of exiting silently.
+Either game alone works fine; you'll just get the one.
+
+### What the first build does
+
+1. fetches [gb-recompiled](https://github.com/GB-Recomp/gb-recompiled) (MIT)
+   and builds `gbrecomp`, the recompiler — about 2 minutes
+2. runs it over each ROM, emitting ~48 C files per game — about 75 seconds each
+3. compiles all of it, which is the slow part
+
+Budget 20–30 minutes cold on four cores. After that, builds are incremental.
 
 ### Doing it by hand
 
@@ -42,11 +60,7 @@ pip install -r launcher/requirements.txt
 python3 launcher/oracles_launcher.py
 ```
 
-CMake fetches the runtime and the Seasons cart itself — no submodules. The
-first configure pulls ~200 MB and a cold build compiles ~100 large translation
-units, so expect it to take a while. The result is `build/oracles`.
-
-If your Python is "externally managed" and pip refuses, use a virtualenv:
+If your Python is "externally managed" and pip refuses:
 
 ```sh
 python3 -m venv .venv && . .venv/bin/activate
@@ -58,97 +72,67 @@ python launcher/oracles_launcher.py
 
 | option | default | effect |
 |---|---|---|
-| `ORACLES_WITH_SEASONS` | `ON` | fetch and link Oracle of Seasons |
+| `ORACLES_ROM_DIR` | `./roms` | where your ROMs live |
 | `ORACLES_WITH_VOXEL` | `ON` | build the voxel diorama renderer |
+| `ORACLES_JOBS` | auto | parallelism for recompilation |
 | `GBRECOMP_SHRINK` | `ON` | dead-strip + symbol-strip the binary |
-| `TLOZOOS_REF` / `GBRT_REF` | `main` | pin a git ref for the fetched repos |
+| `GBRT_REF` | `main` | pin a git ref for the fetched runtime |
 
-## Required ROMs
+### Better symbol names
 
-Both carts are locked to one revision each. Drop your own dumps next to the
-executable:
+Optional: drop the `.sym` files from
+[Stewmath/oracles-disasm](https://github.com/Stewmath/oracles-disasm) next to
+your ROMs as `roms/tlozooa.sym` / `roms/tlozoos.sym`. Generated functions then
+carry real names like `gfxRegisterStates` instead of addresses. Cosmetic, but
+it makes the output far easier to read.
 
-```sh
-mkdir -p build/roms
-cp 'Legend of Zelda, The - Oracle of Ages (USA, Australia).gbc'    build/roms/tlozooa.gbc
-cp 'Legend of Zelda, The - Oracle of Seasons (USA, Australia).gbc' build/roms/tlozoos.gbc
-./build/oracles
-```
+## Any GBC ROM works
 
-| game | id | SHA-1 |
-|---|---|---|
-| Oracle of Ages (USA/Australia) | `tlozooa` | `880374fb978b18af4aa529e2e32f7ffb4d7dd2f4` |
-| Oracle of Seasons (USA/Australia) | `tlozoos` | `ba1268290fb2b1b70505d2d7b5825fc8a4816a4b` |
-
-The loader verifies the hash on first launch and refuses to extract any other
-dump. After that first boot the ROM is decompressed into `assets/<id>/` and the
-source `.gbc` is no longer needed.
-
-No ROM data is committed to this repo, and none ever should be.
+Nothing about the cart list is hardcoded. Every ROM in `roms/` gets recompiled
+and added to the launcher — the two Oracles ids just get proper titles and
+theming. Drop another Game Boy Color game in and it builds too, though the
+voxel classifier is tuned for top-down overworlds.
 
 ## Run
 
-```sh
-pip install PySide6-Essentials pygame     # pygame is optional, for gamepads
-python3 launcher/oracles_launcher.py
-```
-
-The launcher is a **separate app**, the way Zelda64Recomp and Ship of Harkinian
-split theirs: the C binary only runs carts, and everything else — game
-selection, mods, ROM install — lives in Python. The runner links ~170 MB of
-generated C and takes minutes to rebuild; the launcher is the part that
-actually changes, so it lives where a restart costs nothing. A crash in the
-cart also can't take the launcher down with it.
-
-There is no duplicated game table: the launcher asks the runner for one with
-`oracles --games-json`.
-
-You can skip the launcher entirely — `./build/oracles --game tlozooa` runs a
-cart directly, `--list-games` prints the ids, `--no-mods` boots stock.
-
-Esc opens the runtime menu in game (savestates, palette, shaders, borders,
-input remapping, audio).
+`./build/oracles --game tlozooa` runs a cart directly, `--list-games` prints
+the ids, `--no-mods` boots stock. Esc opens the runtime menu in game
+(savestates, palette, shaders, borders, input remapping, audio).
 
 ### Controllers
 
-In game, the runtime binds SDL_GameController directly — remapping lives in the
-Esc menu, with per-brand button labels for Xbox, PlayStation, Switch Pro and
-Joy-Con.
+In game, the runtime binds SDL_GameController directly — remapping lives in
+the Esc menu, with per-brand button labels for Xbox, PlayStation, Switch Pro
+and Joy-Con.
 
-The launcher menus take a pad too, if `pygame` is installed: d-pad or left
-stick to move, A/Start to confirm, B to quit. Without pygame it silently falls
-back to keyboard and mouse — nothing about it is required.
+The launcher takes a pad too if `pygame` is installed: d-pad or left stick to
+move, A/Start to confirm, B to quit. Without pygame it falls back to keyboard
+and mouse.
 
 ### Cover art
 
-Each panel draws a procedural motif by default. To use your own art, drop PNGs
-next to the **game binary**:
+Each panel draws a procedural motif by default. For your own art, drop PNGs
+next to the game binary:
 
 ```
-build/covers/tlozooa.png     Oracle of Ages
-build/covers/tlozoos.png     Oracle of Seasons
+build/covers/tlozooa.png
+build/covers/tlozoos.png
 ```
 
-**Recommended size: 1600 x 1600 (square). Minimum 1000 x 1000.** Each game gets
-a diagonal slice of the window that is roughly 1.1:1, so square art crops
-least; keep the subject inside the middle 70%, since the seam cuts the inner
-edge and the title sits over the outer one.
-
-Full guidance, including what happens to landscape and portrait art, is in
+**Recommended: 1600 × 1600 (square). Minimum 1000 × 1000.** Each game gets a
+diagonal slice of the window at roughly 1.1:1, so square art crops least; keep
+the subject inside the middle 70%, since the seam cuts the inner edge and the
+title sits over the outer one. Full spec in
 [`examples/covers/README.md`](examples/covers/README.md).
 
-`covers/` is gitignored — scans and official key art aren't ours to
-redistribute, so they stay local.
+`covers/` is gitignored — scans and key art aren't ours to redistribute.
 
 ## Mods
 
-Mods are applied to `assets/<id>/rom.bin` *before* the cart boots, which is why
-the toggles live in the launcher rather than the in-game Esc menu — the ROM has
-to be final by the time the cart reads it back.
-
-The launcher keeps a pristine `rom.bin.orig` snapshot and rebuilds the live ROM
-from it on every launch, so turning a mod off genuinely undoes it and two runs
-with the same mod set are byte-identical.
+Mods are applied to `assets/<id>/rom.bin` before the cart boots, which is why
+the toggles live in the launcher. A pristine `rom.bin.orig` snapshot is kept
+and the live ROM rebuilt from it every launch, so turning a mod off genuinely
+undoes it and two runs with the same mod set are byte-identical.
 
 One directory per mod under `mods/`:
 
@@ -166,108 +150,100 @@ mods/my-randomizer/
   "version":  "1.0.0",
   "games":    ["tlozoos"],
   "patch":    "seed.bps",
-  "overlay":  "overlay",
   "priority": 100,
   "enabled":  true
 }
 ```
 
-- **`games`** — which carts it applies to. Omit the key to apply to both.
-- **`patch`** — an `.ips` or `.bps` file. This is the format Oracles
-  randomizers and romhacks already ship in, so most existing patches drop
-  straight in.
-- **`overlay`** — a directory of raw splices named for their hex ROM offset
-  (`overlay/03f200.bin` writes those bytes at `0x3F200`). Handy for a
-  hand-edited tileset without generating a whole patch.
-- **`priority`** — lower numbers apply first. Unknown keys are ignored, so a
-  manifest aimed at a newer loader still loads.
+IPS and BPS both work — that's what Oracles randomizers and romhacks already
+ship as. Unknown manifest keys are ignored, so a manifest for a newer loader
+still loads. Full spec and a worked example in
+[`examples/mods/`](examples/mods).
 
-A working example lives in [`examples/mods/`](examples/mods).
-
-### What won't work
-
-A patch that **changes the ROM size** can't run here. The generated C is bound
-to the original bank layout, so a resized image has nowhere to go — the loader
-reports it and skips that mod rather than booting something broken. BPS patches
-also carry a source checksum; one built against a different revision is
-rejected with a message saying so, instead of silently producing garbage.
+**What won't work:** a patch that changes the ROM *size*. The generated C is
+bound to the original bank layout, so the loader reports it and skips the mod.
+BPS patches also carry a source checksum; one built for a different revision
+is rejected rather than silently producing garbage.
 
 ## Voxel mode
 
 **Off by default.** The game plays exactly as it always did unless you turn it
-on — the frame hook returns the guest frame untouched while the mode is OFF.
+on. Press **F3** to cycle `OFF → 15 → 30 → 45` (camera pitch), or start on a
+rung with `--voxel 2`.
 
-Press **F3** in game to cycle `OFF -> 15 -> 30 -> 45` (camera pitch), or start
-on a rung with `--voxel 2`.
+The overworld is re-rendered as a tilted 3D diorama built from PPU state every
+frame. A static recompilation has no scene graph, entity list or collision
+data, so this reads the only honest source there is — the BG tilemap, CGB
+palettes and OAM in emulated VRAM:
 
-The overworld is re-rendered as a tilted 3D diorama built from the PPU's own
-state every frame. A static recompilation has no scene graph, no entity list
-and no collision data — just the VRAM the game wrote — so that is what this
-reads:
+- tiles are classified per 8×8 into terrain heights (water sinks, paths lie
+  flat, bushes and rocks rise, trees and walls rise highest)
+- each screen column is marched far-to-near, projecting cell tops and filling
+  the exposed front wall where height steps down — painter's order per column,
+  no depth buffer
+- terrain is textured with the game's own composed frame, so palettes, season
+  tints and tile animation carry through untouched
+- sprites are re-decoded from VRAM and stood upright as billboards with a
+  contact shadow
+- the status bar stays flat and is composited back on top
 
-- the visible BG tilemap, decoded through the live CGB palettes, is classified
-  per 8x8 tile into a terrain height (water sinks, paths lie flat, bushes and
-  rocks rise, trees and walls rise highest);
-- each screen column is then marched far-to-near, projecting each cell's top
-  surface under the pitched camera and filling the exposed front wall wherever
-  the height steps down — painter's order per column, so no depth buffer;
-- the terrain texture is the game's own composed frame, so palettes, season
-  tints and tile animation carry through untouched;
-- OAM sprites are re-decoded from VRAM and stood upright as billboards with a
-  contact shadow, so characters rise out of the ground instead of lying on it;
-- the status bar stays flat and is composited back on top.
-
-Output is a normal 160x144 frame handed back through the runtime's present
-path, so shaders, scaling, screenshots and frame dumps all still apply.
+Output is a normal 160×144 frame handed back through the runtime's present
+path, so shaders, scaling and screenshots all still apply.
 
 ### How it hooks in
 
-The cart's generated `*_main.c` calls `gb_platform_render_frame()` directly and
-can't be edited — Ages' copy is generated, and Seasons' comes from upstream. So
-[`patches/gbrt-frame-hook.patch`](patches) adds a small hook to the fetched
-runtime, applied at configure time, letting a host substitute its own rendering
-for the guest frame. It's ~27 lines and useful well beyond this project.
+Generated cart code calls `gb_platform_render_frame()` directly and can't be
+edited, so [`patches/gbrt-frame-hook.patch`](patches) adds a ~27-line hook to
+the fetched runtime at configure time, letting a host substitute its own
+rendering. Small and upstreamable.
 
 ### Honest limits
 
-- Terrain height comes from what tiles *look like*, not from the game's real
-  collision data, so it's a plausible relief rather than a correct one. The
-  thresholds live at the top of
-  [`voxel_tiles.c`](src/voxel/voxel_tiles.c) and are worth tuning per area.
-- The camera is a fixed pitch ladder. There's no free-roam or first-person
-  camera, because moving the player off the grid would need the engine's own
-  collision — which a static recompilation doesn't expose.
-- It renders at the Game Boy's native 160x144, so the diorama is chunky by
-  construction. That's deliberate: it stays a Game Boy picture.
+- Terrain height comes from what tiles *look like*, not from real collision
+  data, so it's a plausible relief rather than a correct one. Thresholds are
+  tunable at the top of [`voxel_tiles.c`](src/voxel/voxel_tiles.c).
+- Fixed pitch ladder. No free-roam or first-person camera — moving the player
+  off the grid needs the engine's own collision, which a recompilation doesn't
+  expose.
+- Native 160×144, so it's chunky by construction. Deliberate.
 - Menus, cinematics and interiors get extruded too, since the classifier only
-  sees tiles. Press F3 to drop back to OFF for those.
+  sees tiles. F3 back to OFF for those.
 
-This is original code. It is not a port of
-[DramaticShapeVoxelMod](https://github.com/DramaticShape/DramaticShapeVoxelMod),
-which targets a Lua/LOVE reimplementation with a real engine-level mod API and
-whose code is not redistributable — a completely different architecture from a
-static recompilation. The shared idea is only the obvious one: extrude the
-game's own tile and sprite data into a diorama.
+### No widescreen
+
+Not possible here, and there's a measurement behind that rather than a guess.
+`VOXEL_DUMP_MAP=<frame>` writes the whole 32×32 BG map; dumped mid-gameplay it
+holds about one screen of real tiles and flat filler everywhere else. Oracles
+only maintains the columns it's about to scroll into, so there is no
+off-screen world to reveal. Widening the view would show filler. Real
+widescreen would mean rewriting the cart's own map-drawing routines.
+
+### 60 FPS
+
+Already there. The runtime paces at the Game Boy's native 59.7 FPS (70224
+cycles per frame) and Oracles runs its logic every frame — there's no 30→60
+unlock to do like there is on N64 recomps, where games shipped at 20 or 30.
 
 ## Layout
 
 ```
-tlozooa_*.c                     generated Oracle of Ages sources (~170 MB)
-runner_main.cpp                 game runner: --game / --games-json / --no-mods
+cmake/GenerateCarts.cmake       build-time recompilation from your own ROM
+runner_main.cpp                 game runner: --game / --games-json / --voxel
 src/mod_loader.{h,c}            manifest parsing, IPS/BPS, overlays
 src/voxel/                      voxel diorama renderer
 launcher/oracles_launcher.py    the launcher app
-launcher/gamepad.py             optional pad navigation for the launcher
+launcher/gamepad.py             optional pad navigation
+patches/                        frame-hook patch for the fetched runtime
 tools/make_test_patches.py      generates IPS/BPS patches to test the loader
-patches/                        frame-hook patch applied to the fetched runtime
-setup.sh                        one-command build + launch
-examples/mods/                  sample mod manifest
-examples/covers/                cover art spec
+examples/                       mod manifest + cover art specs
+setup.sh                        one-command build and launch
 ```
 
-## Credits
+## Legal
 
-- [GB-Recomp/gb-recompiled](https://github.com/GB-Recomp/gb-recompiled) — the
-  static recompiler and runtime everything here is built on.
-- [Stewmath/oracles-disasm](https://github.com/Stewmath/oracles-disasm) — the
-  disassembly the symbol names come from.
+No ROM data is included, distributed, or produced by CI. The games are
+© Nintendo / Capcom; supply your own dumps of games you own. Hashes are
+verified before anything is recompiled.
+
+See [CREDITS.md](CREDITS.md) for full attribution and [LICENSE](LICENSE) for
+terms. This project's own code is MIT.
