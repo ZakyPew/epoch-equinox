@@ -9,3 +9,12 @@ runtime_prefs.ini
 imgui.ini
 .vscode/
 .idea/
+
+# launcher / runtime data
+covers/
+mods/
+*.ppm
+*.png
+!examples/**/*.png
+__pycache__/
+.venv/
