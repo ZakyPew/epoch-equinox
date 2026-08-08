@@ -52,6 +52,9 @@ FetchContent_Declare(gb_recompiled
         COMMAND ${CMAKE_COMMAND}
         -DPATCH_FILE=${CMAKE_CURRENT_SOURCE_DIR}/patches/gbrt-windows.patch
         -P ${CMAKE_CURRENT_SOURCE_DIR}/patches/apply_gbrt_patch.cmake
+        COMMAND ${CMAKE_COMMAND}
+        -DPATCH_FILE=${CMAKE_CURRENT_SOURCE_DIR}/patches/gbrt-host-menu.patch
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/patches/apply_gbrt_patch.cmake
 )
 FetchContent_GetProperties(gb_recompiled)
 if(NOT gb_recompiled_POPULATED)
@@ -69,7 +72,8 @@ if(EPOCH_WITH_VOXEL)
     list(APPEND EPOCH_SUPPORT_SOURCES
         src/voxel/voxel_tiles.c
         src/voxel/voxel_oracle.c
-        src/voxel/voxel_render.c)
+        src/voxel/voxel_render.c
+        src/voxel/voxel_menu.cpp)
 endif()
 
 add_library(epoch_support STATIC ${EPOCH_SUPPORT_SOURCES})
