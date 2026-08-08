@@ -26,7 +26,7 @@ roms/tlozoos.gbc     The Legend of Zelda: Oracle of Seasons (USA, Australia)
 Then:
 
 ```sh
-git clone https://github.com/ZakyPew/tlozooaPEWS.git oracles-recompiled
+git clone https://github.com/ZakyPew/oracles-recompiled.git
 cd oracles-recompiled
 ./setup.sh
 ```
