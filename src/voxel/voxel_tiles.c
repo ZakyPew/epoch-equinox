@@ -152,7 +152,40 @@ static uint8_t classify_tile(GBContext* ctx, const uint8_t* pat, int pal,
 /* scrape                                                              */
 /* ------------------------------------------------------------------ */
 
-bool vox_scrape(GBContext* ctx, VoxTileGrid* grid, VoxSpriteList* sprites) {
+/* Decode one screen scanline's worth of BG pixels for a candidate world
+ * origin row and count how many match the game's own composed frame.
+ * Sprites cover some pixels, so callers probe more than one line and ask
+ * for a clear majority rather than perfection. */
+static int score_origin(GBContext* ctx, const uint32_t* fb, unsigned map_base,
+                        bool signed_tiles, uint8_t scx, int fine_x,
+                        int hud_rows, int fine_y, int cand_row, int screen_y) {
+    GBPPU* ppu = (GBPPU*)ctx->ppu;
+    int map_py = cand_row * 8 + (screen_y - hud_rows) + fine_y;
+    unsigned map_y = ((unsigned)(map_py >> 3)) & 31;
+    int row = map_py & 7;
+    int score = 0;
+    for (int x = 0; x < GB_SCREEN_WIDTH; x++) {
+        int px = x + fine_x;
+        unsigned map_x = ((scx / 8) + (px >> 3)) & 31;
+        unsigned off = map_base + map_y * 32 + map_x;
+        uint8_t tile = ctx->vram[off];
+        uint8_t attr = ctx->vram[0x2000 + off];
+        const uint8_t* pat = tile_pattern(ctx, tile, signed_tiles, (attr >> 3) & 1);
+        int r2 = (attr & 0x40) ? 7 - row : row;
+        uint8_t lo = pat[r2 * 2];
+        uint8_t hi = pat[r2 * 2 + 1];
+        int bit = (attr & 0x20) ? (px & 7) : 7 - (px & 7);
+        int idx = ((lo >> bit) & 1) | (((hi >> bit) & 1) << 1);
+        if (cgb_color(ppu->bg_palette_ram, attr & 7, idx) ==
+            fb[screen_y * GB_SCREEN_WIDTH + x]) {
+            score++;
+        }
+    }
+    return score;
+}
+
+bool vox_scrape(GBContext* ctx, const uint32_t* fb, VoxTileGrid* grid,
+                VoxSpriteList* sprites) {
     if (!ctx || !ctx->vram || !ctx->oam || !ctx->io || !ctx->ppu) return false;
 
     uint8_t lcdc = io_reg(ctx, 0x40);
@@ -218,20 +251,38 @@ bool vox_scrape(GBContext* ctx, VoxTileGrid* grid, VoxSpriteList* sprites) {
                  (oracle.menu_open || oracle.text_active || oracle.no_room);
 
     /* The hud_rows walk above assumes the HUD strip wraps in at the TOP of
-     * the window, which is only half the story on the Oracles carts: they
-     * double-buffer rooms between two halves of the BG map. Rooms at map
-     * row 0 latch scy=240 (HUD rows 30-31 wrap in above the world); rooms
-     * at map row 14 latch scy=112 (the HUD strip trails BELOW the world).
-     * On hardware a mid-frame raster split pins the HUD to the top 16
-     * scanlines either way -- invisible to a single latched scy, which put
-     * those rooms 16px too high with no HUD and mis-anchored every sprite.
-     * When the game state is readable the layout is exact: HUD is the top
-     * 16px, world row 0 sits at whichever map row the scy half points at. */
+     * the window, which the Oracles carts routinely violate: rooms are
+     * double-buffered across the BG map and presented with a mid-frame
+     * raster split that pins the HUD to the top 16 scanlines -- invisible
+     * to a single latched scy, whose meaning turned out to vary by room
+     * (240 -> world at row 0, 112 -> row 14, and at least one more parity
+     * that put the HUD's heart row INSIDE the terrain). So stop inferring:
+     * score every candidate origin row against the game's own composed
+     * frame on two world scanlines and take the winner. fb is ground
+     * truth; sprites only cost a few pixels of score. */
     int world_row0 = -1;   /* <0: generic scy mapping */
     if (use_oracle) {
-        unsigned r = (scy >> 3) & 31;
-        world_row0 = (int)((r >= VOX_HUD_MAP_ROW) ? (r + 2) & 31 : r);
         grid->hud_rows = 16;
+        const int probe[2] = {grid->hud_rows + 5, grid->hud_rows + 61};
+        int best = -1;
+        int best_score = -1;
+        for (int r = 0; r < 32; r++) {
+            int sc = 0;
+            for (int p = 0; p < 2; p++) {
+                sc += score_origin(ctx, fb, map_base, signed_tiles, scx,
+                                   grid->fine_x, grid->hud_rows, grid->fine_y,
+                                   r, probe[p]);
+            }
+            if (sc > best_score) { best_score = sc; best = r; }
+        }
+        if (best_score >= GB_SCREEN_WIDTH) {   /* >= 50% of probed pixels */
+            world_row0 = best;
+        } else {
+            /* Frame too busy to calibrate (huge sprites over both probe
+             * lines): fall back to the two known scy parities. */
+            unsigned r = (scy >> 3) & 31;
+            world_row0 = (int)((r >= VOX_HUD_MAP_ROW) ? (r + 2) & 31 : r);
+        }
     }
 
     /* Backdrop sky from live game state. Outdoors only: groups 0-1 are

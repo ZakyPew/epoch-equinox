@@ -308,7 +308,10 @@ void vox_render(GBContext* ctx, const VoxTileGrid* grid,
                      * falloff so faces read as faces. */
                     int span = sy - prev_sy[X] - 1;
                     int src_py = (int)(wy - 1.0f + (float)grid->fine_y);
-                    if (src_py < 0) src_py = 0;
+                    /* Never source wall texture from above the world's
+                     * first row -- the tile rows under the HUD band hold
+                     * whatever the map wraps to there (HUD tiles). */
+                    if (src_py < world_top) src_py = world_top;
                     int tile_top = src_py & ~7;
                     for (int fy = prev_sy[X] + 1; fy < sy; fy++) {
                         if (fy < world_top * S || fy >= OH) continue;
@@ -435,7 +438,7 @@ static const uint32_t* voxel_frame_hook(GBContext* ctx, const uint32_t* fb,
                                         int* out_w, int* out_h) {
     poll_toggle_key();
     if (g_mode == VOXEL_MODE_OFF || !ctx || !fb) return NULL;
-    if (!vox_scrape(ctx, &g_grid, &g_sprites)) return NULL;
+    if (!vox_scrape(ctx, fb, &g_grid, &g_sprites)) return NULL;
     if (g_grid.flat) return NULL;
     vox_render(ctx, &g_grid, &g_sprites, fb, g_mode, g_scale, g_out);
     *out_w = GB_SCREEN_WIDTH * g_scale;
