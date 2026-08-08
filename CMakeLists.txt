@@ -133,7 +133,9 @@ message(STATUS "Carts: ${_title_list}")
 # ---------------------------------------------------------------------------
 # Our own code: mod loader + voxel renderer
 # ---------------------------------------------------------------------------
-set(EPOCH_SUPPORT_SOURCES src/mod_loader.c)
+set(EPOCH_SUPPORT_SOURCES
+    src/mod_loader.c
+    src/platform_compat.c)
 if(EPOCH_WITH_VOXEL)
     list(APPEND EPOCH_SUPPORT_SOURCES
         src/voxel/voxel_tiles.c
