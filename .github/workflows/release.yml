@@ -18,7 +18,9 @@ permissions:
 
 jobs:
   linux:
-    runs-on: ubuntu-22.04
+    # 24.04: the gb-recompiled runtime needs SDL >= 2.24 (controller type
+    # enums); 22.04's libsdl2-dev is 2.0.20.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - name: Dependencies

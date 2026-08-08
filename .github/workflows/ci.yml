@@ -16,7 +16,9 @@ on:
 jobs:
   native:
     name: Build the player
-    runs-on: ubuntu-22.04
+    # 24.04: the gb-recompiled runtime needs SDL >= 2.24 (controller type
+    # enums); 22.04's libsdl2-dev is 2.0.20.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
@@ -91,12 +93,21 @@ jobs:
           Write-Host 'setup.ps1 is 5.1-clean'
 
   patches:
-    name: Verify the runtime patch still applies
-    runs-on: ubuntu-22.04
+    name: Verify the runtime patches still apply
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - name: Apply against upstream HEAD
+      # Against the pinned runtime commit, not upstream HEAD -- HEAD is not
+      # what we build. All three, in order: the Windows patch edits lines the
+      # frame-hook patch inserted, so each must really apply before the next.
+      - name: Apply chain against the pinned runtime commit
         run: |
-          git clone --depth 1 https://github.com/GB-Recomp/gb-recompiled.git /tmp/gbrt
-          git -C /tmp/gbrt apply --check "$GITHUB_WORKSPACE/patches/gbrt-frame-hook.patch"
-          echo "frame-hook patch applies cleanly to gb-recompiled HEAD"
+          sha=$(sed -n 's/^set(GBRT_REF "\([0-9a-f]\{40\}\)".*/\1/p' CMakeLists.txt)
+          test -n "$sha" || { echo "no pinned sha in CMakeLists.txt"; exit 1; }
+          git init -q /tmp/gbrt
+          git -C /tmp/gbrt fetch --depth 1 https://github.com/GB-Recomp/gb-recompiled.git "$sha"
+          git -C /tmp/gbrt checkout -q FETCH_HEAD
+          for p in gbrt-frame-hook gbrt-windows gbrt-host-menu; do
+            git -C /tmp/gbrt apply "$GITHUB_WORKSPACE/patches/$p.patch"
+            echo "$p applies cleanly to $sha"
+          done
