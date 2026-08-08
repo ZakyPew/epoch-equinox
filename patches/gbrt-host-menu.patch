@@ -1,0 +1,75 @@
+diff --git a/runtime/include/platform_sdl.h b/runtime/include/platform_sdl.h
+--- a/runtime/include/platform_sdl.h
++++ b/runtime/include/platform_sdl.h
+@@ -199,6 +199,15 @@
+  */
+ void gb_platform_set_title(const char* title);
+ 
++/**
++ * @brief Host menu hook: a callback drawn inside the Esc settings menu,
++ * within the active ImGui frame. Lets the embedding application add its
++ * own always-accessible options (e.g. a renderer mode) without forking
++ * the menu. NULL disables.
++ */
++typedef void (*GBHostMenuFn)(void);
++void gb_platform_set_host_menu(GBHostMenuFn fn);
++
+ #ifdef __cplusplus
+ }
+ #endif
+diff --git a/runtime/src/platform_sdl.cpp b/runtime/src/platform_sdl.cpp
+--- a/runtime/src/platform_sdl.cpp
++++ b/runtime/src/platform_sdl.cpp
+@@ -313,6 +313,10 @@
+     int16_t code;
+ } GBInputBinding;
+ static GBRenderScalingMode g_render_scaling_mode = GB_RENDER_SCALING_PIXEL_PERFECT;
++
++/* Host menu hook: drawn inside the settings window each frame. */
++static GBHostMenuFn g_host_menu_fn = NULL;
++void gb_platform_set_host_menu(GBHostMenuFn fn) { g_host_menu_fn = fn; }
+ static GBRenderFilterMode g_render_filter_mode = GB_RENDER_FILTER_NEAREST;
+ static SDL_GameControllerType g_controller_type = SDL_CONTROLLER_TYPE_UNKNOWN;
+ static GBControllerLabelProfile g_controller_label_profile = GB_CONTROLLER_LABEL_GENERIC;
+@@ -1225,6 +1229,20 @@
+                     g_show_fps = (strcmp(value, "0") != 0);
+                     continue;
+                 }
++                if (strcmp(key, "render.scaling_mode") == 0) {
++                    int m = atoi(value);
++                    if (m >= 0 && m <= 3) g_render_scaling_mode = (GBRenderScalingMode)m;
++                    continue;
++                }
++                if (strcmp(key, "render.window_scale") == 0) {
++                    int m = atoi(value);
++                    if (m >= 1 && m <= 8) g_scale = m;
++                    continue;
++                }
++                if (strcmp(key, "render.fullscreen") == 0) {
++                    g_fullscreen = (strcmp(value, "0") != 0);
++                    continue;
++                }
+                 if (strcmp(key, "shader.active") == 0) {
+                     g_active_shader_pref = value;
+                     continue;
+@@ -1394,6 +1412,9 @@
+     fprintf(file, "sgb.colors=%d\n", g_sgb_colors_pref ? 1 : 0);
+     fprintf(file, "sgb.cart_border=%d\n", g_sgb_cart_border_enabled ? 1 : 0);
+     fprintf(file, "diag.show_fps=%d\n", g_show_fps ? 1 : 0);
++    fprintf(file, "render.scaling_mode=%d\n", (int)g_render_scaling_mode);
++    fprintf(file, "render.window_scale=%d\n", g_scale);
++    fprintf(file, "render.fullscreen=%d\n", g_fullscreen ? 1 : 0);
+     if (!g_active_shader_pref.empty()) {
+         fprintf(file, "shader.active=%s\n", g_active_shader_pref.c_str());
+     }
+@@ -4084,6 +4105,10 @@
+          * diagnostics. Open it once to remap keys or pick an output
+          * device, then forget it exists.
+          * ========================================================== */
++        if (g_host_menu_fn) {
++            g_host_menu_fn();
++        }
++
+         if (ImGui::CollapsingHeader("Advanced")) {
+             int window_w = 0;
+             int window_h = 0;

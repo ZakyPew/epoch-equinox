@@ -395,6 +395,15 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
+    /* Windows scales non-DPI-aware windows in the compositor -- a blurry
+     * stretch applied AFTER our integer-scaled viewport, which reads as
+     * "integer scaling doesn't work" on any display above 100%. Declare
+     * per-monitor awareness before SDL creates the window. No effect
+     * elsewhere. */
+#ifdef SDL_HINT_WINDOWS_DPI_AWARENESS
+    SDL_SetHint(SDL_HINT_WINDOWS_DPI_AWARENESS, "permonitorv2");
+#endif
+
     if (!gb_platform_init(5)) {
         fprintf(stderr, "[RUN] platform init failed\n");
         return 1;
@@ -402,6 +411,7 @@ int main(int argc, char* argv[]) {
     gb_platform_set_launcher_return_enabled(false);
 #if EPOCH_HAVE_VOXEL
     voxel_install();
+    voxel_menu_install();
 #endif
 
     /* "Restart Game" from the Esc menu loops back around; everything is

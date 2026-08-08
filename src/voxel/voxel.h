@@ -55,6 +55,10 @@ extern "C" {
 /** Install the frame hook. Call once, before the cart's main loop. */
 void voxel_install(void);
 
+/** Register the diorama's section in the runtime's Esc settings menu.
+ * Call after gb_platform_init(). Implemented in voxel_menu.cpp. */
+void voxel_menu_install(void);
+
 /** Current mode (VOXEL_MODE_*). */
 int  voxel_get_mode(void);
 void voxel_set_mode(int mode);
