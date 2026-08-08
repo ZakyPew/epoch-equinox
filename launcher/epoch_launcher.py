@@ -248,8 +248,34 @@ class Runner:
         dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(source, dest)
 
+    @property
+    def run_log(self) -> Path:
+        return self.root / "epoch-run.log"
+
     def launch(self, game: Game) -> subprocess.Popen:
-        return subprocess.Popen([str(self.exe), "--game", game.id], cwd=self.root)
+        # The runner's output goes to a log file, not a pipe: a pipe nobody
+        # drains would eventually block the game, and when the launcher is a
+        # frozen windowed exe the inherited standard handles are invalid
+        # anyway. The log also turns "the game just didn't start" into a
+        # readable error -- start_game checks for an early exit and shows
+        # the tail of this file.
+        log = open(self.run_log, "w", encoding="utf-8", errors="replace")
+        kwargs = {}
+        if os.name == "nt":
+            # Don't flash a console window behind the game.
+            kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        try:
+            return subprocess.Popen(
+                [str(self.exe), "--game", game.id],
+                cwd=self.root,
+                stdin=subprocess.DEVNULL,
+                stdout=log,
+                stderr=subprocess.STDOUT,
+                **kwargs,
+            )
+        finally:
+            # The child holds its own duplicate of the handle.
+            log.close()
 
 
 # --------------------------------------------------------------------------
@@ -833,7 +859,7 @@ class MainWindow(QWidget):
 
     def start_game(self, game: Game) -> None:
         try:
-            self.runner.launch(game)
+            self.game_proc = self.runner.launch(game)
         except OSError as exc:
             QMessageBox.warning(self, "Could not start the game", str(exc))
             return
@@ -845,6 +871,27 @@ class MainWindow(QWidget):
     def show_again(self) -> None:
         self.reload_games()
         self.show()
+        # A game process that is already dead this soon never took the
+        # screen. Silently reappearing here is indistinguishable from "the
+        # launcher is broken", so say what the runner said instead.
+        proc = getattr(self, "game_proc", None)
+        if proc is not None and proc.poll() not in (None, 0):
+            tail = ""
+            try:
+                text = self.runner.run_log.read_text(
+                    encoding="utf-8", errors="replace"
+                ).strip()
+                tail = "\n".join(text.splitlines()[-15:])
+            except OSError:
+                pass
+            QMessageBox.critical(
+                self,
+                "The game exited immediately",
+                f"{self.runner.exe.name} exited with code {proc.returncode}.\n\n"
+                f"{tail or '(no output captured)'}\n\n"
+                f"Full log: {self.runner.run_log}",
+            )
+            self.game_proc = None
 
 
 def default_runner_path() -> Path:
