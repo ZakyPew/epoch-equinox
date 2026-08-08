@@ -54,6 +54,7 @@ typedef struct {
     int  off_y, off_x;          /* wScreenOffsetY/X, transient draw offset */
     int  link_y, link_x;        /* w1Link whole-pixel position (room space) */
     int  link_z;                /* w1Link zh: 0 on the ground, negative airborne */
+    int  link_dir;              /* w1Link direction: 0 up, 1 right, 2 down, 3 left */
     bool is_seasons;            /* which cart the profile matched */
     int  active_group;          /* wActiveGroup: 0/1 outdoors, 2+ interiors */
     int  active_room;           /* wActiveRoom: room index within the group */
@@ -103,6 +104,7 @@ typedef struct {
     int  link_sx;               /* centre x */
     int  link_feet_sy;          /* feet row at z=0 (his shadow's row) */
     int  link_jump;             /* pixels airborne, >= 0 */
+    int  link_dir;              /* facing: 0 up, 1 right, 2 down, 3 left */
     /* Backdrop sky, from live game state. VOX_SKY_NONE keeps the neutral
      * dark gradient (indoors, dungeons, non-Oracles carts). */
     int  sky;

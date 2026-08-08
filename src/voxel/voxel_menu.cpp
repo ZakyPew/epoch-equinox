@@ -19,6 +19,7 @@ static void draw_voxel_menu(void) {
 
     static const char* modes[VOXEL_MODE_COUNT] = {
         "Off", "Tilt 15\xC2\xB0", "Tilt 30\xC2\xB0", "Tilt 45\xC2\xB0",
+        "Chase Cam",
     };
     int mode = voxel_get_mode();
     if (ImGui::Combo("Diorama", &mode, modes, VOXEL_MODE_COUNT)) {

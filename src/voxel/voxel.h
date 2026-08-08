@@ -45,12 +45,15 @@
 extern "C" {
 #endif
 
-/* Camera pitch presets, in the spirit of an options ladder. 0 = off. */
+/* Camera presets, in the spirit of an options ladder. 0 = off. The tilt
+ * levels are the fixed diorama; CHASE is a third-person perspective camera
+ * floating behind the player, raycasting the same heightfield. */
 #define VOXEL_MODE_OFF   0
 #define VOXEL_MODE_15    1
 #define VOXEL_MODE_30    2
 #define VOXEL_MODE_45    3
-#define VOXEL_MODE_COUNT 4
+#define VOXEL_MODE_CHASE 4
+#define VOXEL_MODE_COUNT 5
 
 /** Install the frame hook. Call once, before the cart's main loop. */
 void voxel_install(void);

@@ -137,6 +137,7 @@ bool vox_oracle_read(GBContext* ctx, VoxOracleState* st) {
         st->link_y = link[0x0B];
         st->link_x = link[0x0D];
         st->link_z = (int8_t)link[0x0F];
+        st->link_dir = link[0x08] & 3;   /* SpecialObjectStruct.direction */
     }
 
     /* Copy the room's collision grid, and require it to be populated:

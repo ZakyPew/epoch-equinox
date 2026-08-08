@@ -71,7 +71,8 @@ void voxel_set_mode(int mode) {
     if (mode < 0 || mode >= VOXEL_MODE_COUNT) mode = VOXEL_MODE_OFF;
     if (mode != g_mode) {
         g_mode = mode;
-        static const char* names[VOXEL_MODE_COUNT] = {"OFF", "15", "30", "45"};
+        static const char* names[VOXEL_MODE_COUNT] = {"OFF", "15", "30", "45",
+                                                      "CHASE"};
         fprintf(stderr, "[VOXEL] mode: %s\n", names[mode]);
     }
 }
@@ -182,6 +183,174 @@ static void vox_paint_sky(int kind, uint32_t* out, int S) {
 }
 
 /* ------------------------------------------------------------------ */
+/* chase camera                                                        */
+/* ------------------------------------------------------------------ */
+
+static inline uint32_t chase_tex_at(const VoxTileGrid* grid, float x, float y) {
+    int px = (int)(x + (float)grid->fine_x);
+    int py = (int)(y + (float)grid->fine_y);
+    if (px < 0) px = 0;
+    if (px >= VOX_TEX_W) px = VOX_TEX_W - 1;
+    if (py < 0) py = 0;
+    if (py >= VOX_TEX_H) py = VOX_TEX_H - 1;
+    return grid->tex[py * VOX_TEX_W + px];
+}
+
+/* Third person: a camera floating behind the player, looking the way they
+ * face, raycasting the same heightfield the diorama extrudes -- the
+ * classic "voxel space" scheme finally used for what it was invented
+ * for. Planar (unnormalized) rays keep walls straight; a per-column
+ * y-buffer gives front-to-back occlusion with no depth buffer. */
+static void render_chase(GBContext* ctx, const VoxTileGrid* grid,
+                         const VoxSpriteList* sprites, int S, uint32_t* out) {
+    const int OW = GB_SCREEN_WIDTH * S;
+    const int OH = GB_SCREEN_HEIGHT * S;
+    const int world_top = grid->hud_rows;
+    const float HPX = 5.0f;             /* vertical px per height unit */
+    const float FAR = 230.0f;
+
+    /* Sky first; the ground overwrites what it owns. */
+    if (grid->sky != VOX_SKY_NONE) {
+        vox_paint_sky(grid->sky, out, S);
+    } else {
+        for (int Y = 0; Y < OH; Y++) {
+            int l = 26 + (Y * 20) / OH;
+            uint32_t c = 0xFF000000u
+                         | ((uint32_t)(l - 8 > 0 ? l - 8 : 0) << 16)
+                         | ((uint32_t)l << 8) | (uint32_t)(l + 6);
+            for (int X = 0; X < OW; X++) out[Y * OW + X] = c;
+        }
+    }
+
+    float lx = grid->link_known ? (float)grid->link_sx : 80.0f;
+    float ly = grid->link_known ? (float)grid->link_feet_sy : 104.0f;
+
+    /* Yaw eases toward the player's facing, so 4-way turns sweep the
+     * camera around instead of snapping it. */
+    static float yaw = -1.5708f;
+    static const float DIR_YAW[4] = {-1.5708f, 0.0f, 1.5708f, 3.14159f};
+    float target = DIR_YAW[grid->link_known ? (grid->link_dir & 3) : 0];
+    float diff = target - yaw;
+    while (diff > 3.14159f) diff -= 6.28318f;
+    while (diff < -3.14159f) diff += 6.28318f;
+    yaw += diff * 0.12f;
+
+    const float fxv = cosf(yaw), fyv = sinf(yaw);
+    const float rxv = -fyv, ryv = fxv;      /* screen-space right vector */
+
+    const float BACK = 46.0f;               /* camera behind the player */
+    const float CAMH = 26.0f;               /* and above their ground */
+    float cx = lx - fxv * BACK;
+    float cy = ly - fyv * BACK;
+    float cg = height_at(grid, cx, cy);
+    if (cg < 0.0f) cg = 0.0f;
+    const float cz = cg * HPX + CAMH;
+
+    const float focal = (float)OW * 0.9f;   /* ~58 degree field of view */
+    const int horizon = (int)((float)OH * 0.36f);
+    const uint32_t fog = (grid->sky != VOX_SKY_NONE)
+        ? VOX_SKIES[grid->sky].horizon : 0xFF2C2620u;
+
+    for (int X = 0; X < OW; X++) {
+        float ndc = ((float)X - (float)OW * 0.5f) / focal;
+        float rx = fxv + rxv * ndc;
+        float ry = fyv + ryv * ndc;
+        int ybuf = OH;
+        for (float d = 8.0f; d < FAR; d += (d < 70.0f ? 0.6f : 1.4f)) {
+            float wx2 = cx + rx * d;
+            float wy2 = cy + ry * d;
+            bool inside = wx2 >= 0.0f && wx2 < (float)GB_SCREEN_WIDTH &&
+                          wy2 >= (float)world_top &&
+                          wy2 < (float)GB_SCREEN_HEIGHT;
+            float h = inside ? height_at(grid, wx2, wy2) : 0.0f;
+            int sy = horizon + (int)((cz - h * HPX) * focal / d);
+            if (sy < ybuf) {
+                uint32_t c;
+                if (inside) {
+                    c = chase_tex_at(grid, wx2, wy2);
+                    if (h < 0.0f) {
+                        c = shade(c, 190);
+                        c = (c & 0xFFFFFF00u) | 0x00000050u;
+                    }
+                } else {
+                    c = fog;
+                }
+                int t = (int)(d * 256.0f / FAR);
+                if (t > 225) t = 225;
+                c = lerp_color(c, fog, t);
+                int top = sy < 0 ? 0 : sy;
+                for (int yy = top; yy < ybuf; yy++) {
+                    out[yy * OW + X] = c;
+                }
+                ybuf = top;
+                if (ybuf <= 0) break;
+            }
+        }
+    }
+
+    /* Sprites: farthest first, scaled by depth, standing on their ground. */
+    int order[VOX_MAX_SPRITES];
+    float depth[VOX_MAX_SPRITES];
+    int n = 0;
+    for (int i = 0; i < sprites->count; i++) {
+        const VoxSprite* s = &sprites->entries[i];
+        float pxc = (float)(s->x + 4);
+        float pyc = (float)(s->y + (s->tall ? 16 : 8));
+        float dep = (pxc - cx) * fxv + (pyc - cy) * fyv;
+        if (dep < 10.0f || dep > FAR) continue;
+        order[n] = i;
+        depth[n] = dep;
+        n++;
+    }
+    for (int a = 1; a < n; a++) {
+        int oi = order[a];
+        float od = depth[a];
+        int b = a - 1;
+        while (b >= 0 && depth[b] < od) {
+            order[b + 1] = order[b];
+            depth[b + 1] = depth[b];
+            b--;
+        }
+        order[b + 1] = oi;
+        depth[b + 1] = od;
+    }
+    for (int k = 0; k < n; k++) {
+        const VoxSprite* s = &sprites->entries[order[k]];
+        float dep = depth[k];
+        int sh = s->tall ? 16 : 8;
+        float pxc = (float)(s->x + 4);
+        float pyc = (float)(s->y + sh);
+        float lat = (pxc - cx) * rxv + (pyc - cy) * ryv;
+        float g = height_at(grid, pxc, pyc);
+        if (g < 0.0f) g = 0.0f;
+        float scale = focal / dep;
+        int cxp = (int)((float)OW * 0.5f + lat / dep * focal);
+        int byp = horizon + (int)((cz - g * HPX) * focal / dep);
+        int w2 = (int)(8.0f * scale / (float)S + 0.5f) * S;
+        int h2 = (int)((float)sh * scale / (float)S + 0.5f) * S;
+        if (w2 < 2 || h2 < 2) continue;
+        for (int row = 0; row < sh; row++) {
+            uint32_t px8[8];
+            vox_decode_sprite_row(ctx, s, row, px8);
+            int y0 = byp - h2 + row * h2 / sh;
+            int y1 = byp - h2 + (row + 1) * h2 / sh;
+            for (int yy = y0; yy < y1; yy++) {
+                if (yy < 0 || yy >= OH) continue;
+                for (int c2 = 0; c2 < 8; c2++) {
+                    if (!px8[c2]) continue;
+                    int x0 = cxp - w2 / 2 + c2 * w2 / 8;
+                    int x1 = cxp - w2 / 2 + (c2 + 1) * w2 / 8;
+                    for (int xx = x0; xx < x1; xx++) {
+                        if (xx < 0 || xx >= OW) continue;
+                        out[yy * OW + xx] = px8[c2];
+                    }
+                }
+            }
+        }
+    }
+}
+
+/* ------------------------------------------------------------------ */
 /* the diorama                                                         */
 /* ------------------------------------------------------------------ */
 
@@ -217,6 +386,11 @@ void vox_render(GBContext* ctx, const VoxTileGrid* grid,
             for (int X = 0; X < OW; X++) out[Y * OW + X] = src[X / S];
         }
         return;
+    }
+
+    if (mode == VOXEL_MODE_CHASE) {
+        render_chase(ctx, grid, sprites, S, out);
+        goto compose_overlays;
     }
 
     /* Squashing the world frees vertical room; spend it lifting the diorama
@@ -439,6 +613,7 @@ void vox_render(GBContext* ctx, const VoxTileGrid* grid,
         }
     }
 
+compose_overlays:
     /* A dialog box floats flat over the frozen diorama, exactly as the
      * game drew it -- the world stays voxel, the words stay words. */
     if (grid->text_overlay && grid->box_w > 0) {

@@ -384,6 +384,7 @@ bool vox_scrape(GBContext* ctx, const uint32_t* fb, VoxTileGrid* grid,
         grid->link_feet_sy = oracle.link_y - oracle.cam_y + oracle.off_y
                              + grid->hud_rows + 8;
         grid->link_jump = oracle.link_z < 0 ? -oracle.link_z : 0;
+        grid->link_dir = oracle.link_dir;
         if (getenv("VOXEL_DEBUG")) {
             static int n = 0;
             if ((n++ % 30) == 0) {
