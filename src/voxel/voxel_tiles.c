@@ -19,15 +19,18 @@ static inline uint8_t io_reg(GBContext* ctx, uint8_t reg) {
     return ctx->io[reg];
 }
 
-/* CGB BGR555 -> RGBA8888 (matches the runtime's own conversion closely
- * enough for classification and billboard decode). */
+/* CGB BGR555 -> the runtime's framebuffer format, which is 0xAARRGGBB
+ * (R in bits 16-23, B in the low byte). This module once packed it the
+ * other way round -- harmless for classification, which only compared
+ * its own values, but every colour it DREW (billboards, sky, tints) had
+ * red and blue swapped. */
 static uint32_t cgb_color(const uint8_t* pal_ram, int pal, int idx) {
     int off = pal * 8 + idx * 2;
     uint16_t raw = (uint16_t)(pal_ram[off] | (pal_ram[off + 1] << 8));
     uint32_t r = (raw & 0x1F) * 255 / 31;
     uint32_t g = ((raw >> 5) & 0x1F) * 255 / 31;
     uint32_t b = ((raw >> 10) & 0x1F) * 255 / 31;
-    return 0xFF000000u | (b << 16) | (g << 8) | r;
+    return 0xFF000000u | (r << 16) | (g << 8) | b;
 }
 
 /* Fetch the 16 bytes of one tile pattern from a given VRAM bank. */
@@ -70,9 +73,9 @@ static void tile_histogram(const uint8_t* pat, int counts[4]) {
 }
 
 static void rgb_of(uint32_t c, int* r, int* g, int* b) {
-    *r = (int)(c & 0xFF);
+    *r = (int)((c >> 16) & 0xFF);
     *g = (int)((c >> 8) & 0xFF);
-    *b = (int)((c >> 16) & 0xFF);
+    *b = (int)(c & 0xFF);
 }
 
 /* Dominant-hue features over the weighted palette. */
@@ -201,6 +204,28 @@ bool vox_scrape(GBContext* ctx, VoxTileGrid* grid, VoxSpriteList* sprites) {
     VoxOracleState oracle;
     bool use_oracle = vox_oracle_read(ctx, &oracle) && oracle.valid;
     grid->flat = use_oracle && oracle.menu_open;
+
+    /* Backdrop sky from live game state. Outdoors only: groups 0-1 are
+     * the overworlds (Ages present/past; Seasons overworld/Subrosia),
+     * everything else is interior and keeps the neutral backdrop. */
+    grid->sky = VOX_SKY_NONE;
+    if (use_oracle && oracle.active_group <= 1) {
+        if (oracle.is_seasons) {
+            if (oracle.active_group == 1) {
+                grid->sky = VOX_SKY_SUBROSIA;
+            } else {
+                switch (oracle.room_state & 3) {
+                    case 0: grid->sky = VOX_SKY_SPRING; break;
+                    case 1: grid->sky = VOX_SKY_SUMMER; break;
+                    case 2: grid->sky = VOX_SKY_AUTUMN; break;
+                    default: grid->sky = VOX_SKY_WINTER; break;
+                }
+            }
+        } else {
+            grid->sky = (oracle.active_group == 1) ? VOX_SKY_AGES_PAST
+                                                   : VOX_SKY_AGES_PRESENT;
+        }
+    }
 
     /* Link's screen position, from his room position and the camera. His
      * feet row is where his shadow falls -- z does not move it. */

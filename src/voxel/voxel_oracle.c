@@ -54,11 +54,14 @@ typedef struct {
     const char* title;      /* ROM header title at $134 */
     uint8_t cam_y_off;      /* hCameraY - $FF80 */
     uint8_t cam_x_off;      /* hCameraX - $FF80 */
+    uint16_t group_addr;    /* wActiveGroup */
+    uint16_t state_addr;    /* wRoomStateModifier (the season, in Seasons) */
+    bool is_seasons;
 } OracleProfile;
 
 static const OracleProfile PROFILES[] = {
-    {"ZELDA NAYRU", 0x2A, 0x2C},   /* Oracle of Ages */
-    {"ZELDA DIN",   0x28, 0x2A},   /* Oracle of Seasons */
+    {"ZELDA NAYRU", 0x2A, 0x2C, 0xCC2D, 0xCC32, false},   /* Oracle of Ages */
+    {"ZELDA DIN",   0x28, 0x2A, 0xCC49, 0xCC4E, true},    /* Oracle of Seasons */
 };
 
 /* Cached per-ROM detection. GBContext has no user slot, so key the cache on
@@ -113,6 +116,9 @@ bool vox_oracle_read(GBContext* ctx, VoxOracleState* st) {
                 ((int)ctx->hram[prof->cam_x_off + 1] << 8);
     st->off_y = (int8_t)wram0(ctx, A_wScreenOffsetY);
     st->off_x = (int8_t)wram0(ctx, A_wScreenOffsetX);
+    st->is_seasons = prof->is_seasons;
+    st->active_group = wram0(ctx, prof->group_addr);
+    st->room_state = wram0(ctx, prof->state_addr);
 
     /* w1Link lives in WRAM bank 1 regardless of the currently-mapped bank:
      * index the backing store directly. Offsets are SpecialObjectStruct's

@@ -127,49 +127,13 @@ libcurl for you.
 }
 
 # --------------------------------------------------------------------------
-# 3. ROMs -- required before anything can be built
+# 3. build -- fast, and needs no ROM at all
 # --------------------------------------------------------------------------
-Say 'Checking for ROMs'
-New-Item -ItemType Directory -Force -Path roms | Out-Null
-
-# 5.1 trap: -Include is ignored unless the path carries a wildcard, and
-# silently returns nothing -- which would have reported "no ROMs" with the
-# files sitting right there. Filter by extension instead.
-$romExts = @('.gb', '.gbc', '.sgb')
-$roms = @(Get-ChildItem -Path roms -File -ErrorAction SilentlyContinue |
-          Where-Object { $romExts -contains $_.Extension.ToLower() })
-
-if ($roms.Count -eq 0) {
-    Write-Host @'
-
-  No ROMs in roms\.
-
-  This project ships no game code -- it recompiles the games from your own
-  dumps, so a ROM has to be there before anything can be built:
-
-      roms\tlozooa.gbc     The Legend of Zelda: Oracle of Ages   (USA, Australia)
-      roms\tlozoos.gbc     The Legend of Zelda: Oracle of Seasons (USA, Australia)
-
-  Either one alone is fine -- you will just get that game.
-
-'@ -ForegroundColor Yellow
-    if ($Host.Name -eq 'ConsoleHost' -and -not $env:CI) {
-        Read-Host 'Press Enter to close'
-    }
-    exit 1
-}
-$roms | ForEach-Object { Write-Host "    found: $($_.Name)" }
-
-# --------------------------------------------------------------------------
-# 4. build
-# --------------------------------------------------------------------------
-Say 'Configuring -- builds the recompiler, then turns your ROMs into C'
-Write-Host '    (first run: a couple of minutes for the recompiler, ~75s per game)'
-
+Say 'Configuring'
 cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE="$toolchain" -DCMAKE_BUILD_TYPE=Release
 if ($LASTEXITCODE -ne 0) { Fail 'CMake configure failed (scroll up for the first error)' }
 
-Say 'Compiling -- this is the slow part. Go make tea.'
+Say 'Compiling (about a minute)'
 cmake --build build --config Release --parallel
 if ($LASTEXITCODE -ne 0) { Fail 'Build failed (scroll up for the first error)' }
 
@@ -177,6 +141,29 @@ $exe = Get-ChildItem -Path build -Recurse -Filter epoch.exe -ErrorAction Silentl
        Select-Object -First 1
 if (-not $exe) { Fail 'Build finished but epoch.exe is missing' }
 Write-Host "    built: $($exe.FullName)"
+
+# --------------------------------------------------------------------------
+# 4. ROMs -- needed to PLAY, not to build
+# --------------------------------------------------------------------------
+New-Item -ItemType Directory -Force -Path roms | Out-Null
+$romExts = @('.gb', '.gbc', '.sgb')
+$roms = @(Get-ChildItem -Path roms -File -ErrorAction SilentlyContinue |
+          Where-Object { $romExts -contains $_.Extension.ToLower() })
+if ($roms.Count -eq 0) {
+    Write-Host @'
+
+  Built. To play, drop your ROMs into roms\:
+
+      roms\tlozooa.gbc     Oracle of Ages   (USA, Australia)
+      roms\tlozoos.gbc     Oracle of Seasons (USA, Australia)
+
+  Any other .gb/.gbc works too. Then re-run this script or start the
+  launcher directly.
+
+'@ -ForegroundColor Yellow
+} else {
+    $roms | ForEach-Object { Write-Host "    ROMs: $($_.Name)" }
+}
 
 # --------------------------------------------------------------------------
 # 5. launcher deps

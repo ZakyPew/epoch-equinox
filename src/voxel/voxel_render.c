@@ -87,6 +87,64 @@ static inline float height_at(const VoxTileGrid* grid, int x, int y) {
 }
 
 /* ------------------------------------------------------------------ */
+/* sky                                                                 */
+/* ------------------------------------------------------------------ */
+
+/* Zenith / horizon colours per sky kind (0xAABBGGRR). The horizon sits
+ * behind the diorama's top edge, so most of what shows is the upper band. */
+typedef struct { uint32_t zenith, horizon, cloud; } VoxSkyPalette;
+
+/* 0xFFRRGGBB, matching the framebuffer. */
+static const VoxSkyPalette VOX_SKIES[] = {
+    [VOX_SKY_AGES_PRESENT] = {0xFF2C68B4u, 0xFF9CC8E0u, 0xFFDCE8F0u},
+    [VOX_SKY_AGES_PAST]    = {0xFF9C6A4Au, 0xFFF0D8A8u, 0xFFF8ECC8u},
+    [VOX_SKY_SPRING]       = {0xFF4880C0u, 0xFFC0D0E8u, 0xFFE4ECF4u},
+    [VOX_SKY_SUMMER]       = {0xFF2878D0u, 0xFF8CC8E8u, 0xFFE0F0F8u},
+    [VOX_SKY_AUTUMN]       = {0xFF90507Cu, 0xFFF0B888u, 0xFFF8D8B0u},
+    [VOX_SKY_WINTER]       = {0xFF7890B0u, 0xFFC0C8D8u, 0xFFE8ECF0u},
+    [VOX_SKY_SUBROSIA]     = {0xFF3C0820u, 0xFFA01830u, 0xFFD04050u},
+};
+
+static inline uint32_t lerp_color(uint32_t a, uint32_t b, int t /*0..256*/) {
+    uint32_t rb = ((a & 0x00FF00FFu) * (256 - t) + (b & 0x00FF00FFu) * t) >> 8;
+    uint32_t g  = ((a & 0x0000FF00u) * (256 - t) + (b & 0x0000FF00u) * t) >> 8;
+    return 0xFF000000u | (rb & 0x00FF00FFu) | (g & 0x0000FF00u);
+}
+
+/* Cheap smooth value noise for the clouds: two octaves of cosine bumps. */
+static inline int cloud_density(int x, int y, int t) {
+    float fx = (float)(x + t) * 0.045f;
+    float fy = (float)y * 0.11f;
+    float v = cosf(fx) * cosf(fy * 0.7f + 1.7f)
+            + 0.5f * cosf(fx * 2.3f + 0.9f) * cosf(fy * 1.6f);
+    int d = (int)((v - 0.55f) * 190.0f);
+    if (d < 0) d = 0;
+    if (d > 110) d = 110;
+    return d;
+}
+
+static void vox_paint_sky(int kind, uint32_t* out) {
+    const VoxSkyPalette* p = &VOX_SKIES[kind];
+
+    /* Slow drift; wraps harmlessly. Subrosia's "clouds" are ember glow and
+     * drift faster. */
+    static int t = 0;
+    t += (kind == VOX_SKY_SUBROSIA) ? 3 : 1;
+    int drift = t >> 3;
+
+    for (int y = 0; y < GB_SCREEN_HEIGHT; y++) {
+        /* Horizon low on the screen, where the diorama's far edge sits. */
+        int g = y * 256 / (GB_SCREEN_HEIGHT + 24);
+        uint32_t base = lerp_color(p->zenith, p->horizon, g);
+        for (int x = 0; x < GB_SCREEN_WIDTH; x++) {
+            int d = cloud_density(x, y, drift);
+            out[y * GB_SCREEN_WIDTH + x] =
+                d ? lerp_color(base, p->cloud, d * 2) : base;
+        }
+    }
+}
+
+/* ------------------------------------------------------------------ */
 /* the diorama                                                         */
 /* ------------------------------------------------------------------ */
 
@@ -118,13 +176,21 @@ void vox_render(GBContext* ctx, const VoxTileGrid* grid,
     float y_off = (float)world_top + ((float)world_h * (1.0f - cam.squash)) * 0.5f;
     y_off += headroom * 0.55f;
 
-    /* Backdrop: a quiet vertical fade so the diorama reads as a model on a
-     * table rather than a screen with holes in it. */
-    for (int y = 0; y < GB_SCREEN_HEIGHT; y++) {
-        int l = 26 + y * 20 / GB_SCREEN_HEIGHT;
-        uint32_t c = 0xFF000000u | ((uint32_t)(l + 6) << 16) | ((uint32_t)l << 8)
-                     | (uint32_t)(l - 8 > 0 ? l - 8 : 0);
-        for (int x = 0; x < GB_SCREEN_WIDTH; x++) out[y * GB_SCREEN_WIDTH + x] = c;
+    /* Backdrop. Outdoors on the Oracles carts this is a sky that follows
+     * the game's own state -- the season in Seasons, present/past in Ages,
+     * Subrosia's furnace glow -- with slow procedural clouds. Anywhere
+     * else (interiors, other carts) it stays the quiet dark fade, so the
+     * diorama reads as a model on a table. */
+    if (grid->sky != VOX_SKY_NONE) {
+        vox_paint_sky(grid->sky, out);
+    } else {
+        for (int y = 0; y < GB_SCREEN_HEIGHT; y++) {
+            int l = 26 + y * 20 / GB_SCREEN_HEIGHT;
+            uint32_t c = 0xFF000000u
+                         | ((uint32_t)(l - 8 > 0 ? l - 8 : 0) << 16)
+                         | ((uint32_t)l << 8) | (uint32_t)(l + 6);
+            for (int x = 0; x < GB_SCREEN_WIDTH; x++) out[y * GB_SCREEN_WIDTH + x] = c;
+        }
     }
 
     for (int x = 0; x < GB_SCREEN_WIDTH; x++) {
@@ -140,7 +206,7 @@ void vox_render(GBContext* ctx, const VoxTileGrid* grid,
                 /* Water: tint toward deep blue so sunk cells read as
                  * liquid rather than as a hole in the table. */
                 tex = shade(tex, 190);
-                tex = (tex & 0xFF00FFFFu) | 0x00500000u;
+                tex = (tex & 0xFFFFFF00u) | 0x00000050u;
             }
 
             if (prev_sy >= 0 && sy > prev_sy + 1) {

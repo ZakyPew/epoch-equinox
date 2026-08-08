@@ -54,47 +54,39 @@ GENERATOR=()
 command -v ninja >/dev/null 2>&1 && GENERATOR=(-G Ninja)
 
 # --------------------------------------------------------------------------
-# 2. ROMs -- required before anything can be built
+# 2. build -- fast, and needs no ROM at all
 # --------------------------------------------------------------------------
-say "Checking for ROMs"
+say "Configuring"
+cmake -S . -B build "${GENERATOR[@]}" -DCMAKE_BUILD_TYPE=Release
+
+say "Compiling (about a minute)"
+cmake --build build -j"$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)"
+
+[[ -x build/epoch ]] || fail "build finished but build/epoch is missing"
+
+# --------------------------------------------------------------------------
+# 3. ROMs -- needed to PLAY, not to build
+# --------------------------------------------------------------------------
 mkdir -p roms
 shopt -s nullglob
 found=(roms/*.gb roms/*.gbc roms/*.sgb)
 shopt -u nullglob
-
 if ((${#found[@]} == 0)); then
-    cat >&2 <<'EOF'
+    cat <<'EOF'
 
-  No ROMs in roms/.
+  Built. To play, drop your ROMs into roms/:
 
-  This project ships no game code -- it recompiles the games from your own
-  dumps, so a ROM has to be there before anything can be built. Copy yours
-  in, named by game id:
+      roms/tlozooa.gbc     Oracle of Ages   (USA, Australia)
+      roms/tlozoos.gbc     Oracle of Seasons (USA, Australia)
 
-      roms/tlozooa.gbc     The Legend of Zelda: Oracle of Ages   (USA, Australia)
-      roms/tlozoos.gbc     The Legend of Zelda: Oracle of Seasons (USA, Australia)
-
-  Either one alone is fine -- you'll just get that game.
-
-  Optional: drop the matching .sym files from Stewmath/oracles-disasm beside
-  them (roms/tlozooa.sym) and generated functions get real names.
+  Any other .gb/.gbc works too. Then re-run this script or start the
+  launcher directly.
 
 EOF
-    exit 1
+else
+    printf '    ROMs: %s
+' "${found[@]}"
 fi
-printf '    found: %s\n' "${found[@]}"
-
-# --------------------------------------------------------------------------
-# 3. build
-# --------------------------------------------------------------------------
-say "Configuring -- builds the recompiler, then turns your ROMs into C"
-echo "    (first run: ~2 min for the recompiler, ~75s per game)"
-cmake -S . -B build "${GENERATOR[@]}" -DCMAKE_BUILD_TYPE=MinSizeRel
-
-say "Compiling -- this is the slow part, 20-30 min cold. Go make tea."
-cmake --build build -j"$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)"
-
-[[ -x build/epoch ]] || fail "build finished but build/epoch is missing"
 
 # --------------------------------------------------------------------------
 # 4. launcher deps

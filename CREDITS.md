@@ -31,11 +31,13 @@ This repository began as a fork of [GB-Recomp/tlozooa](https://github.com/GB-Rec
 which packaged pre-generated Oracle of Ages C together with a small launcher.
 The Seasons equivalent is [GB-Recomp/tlozoos](https://github.com/GB-Recomp/tlozoos).
 
-It no longer contains any of that generated code. The project now recompiles
-both games from the user's own ROMs at build time, so what remains is the
-build system, the launcher, the mod loader and the renderer — all original.
-The GB-Recomp packaging is still what proved the approach and is why this
-exists at all.
+It no longer contains any of that generated code — nor generates it.
+tools/interp_probe.c showed the recompiled output was never executed (the
+runtime interprets the loaded ROM directly, byte-identically), so the
+project became what it functionally always was: a native player. What
+remains is the launcher, the mod loader, the renderer and the platform
+work — all original. The GB-Recomp packaging is still what started this
+and is why it exists at all.
 
 ## Original to this project
 

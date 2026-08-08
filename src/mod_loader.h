@@ -1,25 +1,12 @@
 /**
  * @file mod_loader.h
- * @brief Mod discovery and ROM patching for the Oracles compilation.
+ * @brief Mod discovery and ROM patching.
  *
- * Design constraint: neither cart's generated `*_main.c` may be edited.
- * `tlozooa_*.c` is generated-but-committed here, and `tlozoos_*.c` is
- * FetchContent'd from GB-Recomp/tlozoos, so there is no hook point
- * inside either cart we can rely on.
- *
- * So mods are applied *between* the two things the runtime already does:
- *
- *   1. `gb_load_assets()` extracts the verified ROM into
- *      `assets/<id>/rom.bin` (SHA-1 checked against the source ROM).
- *   2. On every later boot it reads `assets/<id>/rom.bin` straight back
- *      with no hash check at all (`load_from_assets()` in the runtime's
- *      gb_asset_loader.c only verifies on the extract path).
- *
- * Step 2 is the seam. The launcher stages assets, keeps a pristine
- * `rom.bin.orig` snapshot, and rewrites `rom.bin` from that snapshot plus
- * whatever mods are enabled — before handing control to the cart. The
- * cart then boots a patched ROM without knowing anything happened, and
- * disabling a mod is just a re-stage from the snapshot.
+ * The runner loads the stock ROM into memory and hands the buffer here;
+ * enabled mods are applied in place before the emulator ever sees it. The
+ * file on disk is never modified, so disabling a mod needs no undo -- the
+ * next launch simply reloads stock. Two runs with the same mod set are
+ * byte-identical by construction.
  *
  * Mod layout, one directory per mod under `mods/`:
  *
@@ -90,35 +77,15 @@ const GBModInfo*  gb_mods_get(int index);
 void              gb_mods_set_enabled(int index, bool enabled);
 
 /**
- * Rebuild `assets/<game_id>/rom.bin` from the pristine snapshot plus every
- * enabled mod, in priority order.
+ * Apply every enabled mod, in priority order, directly to @p rom in memory.
+ * The buffer is the freshly loaded stock ROM; the file on disk is never
+ * touched, so "off" needs no undo at all -- next launch reloads stock.
  *
- * On first call for a game it creates the snapshot (`rom.bin.orig`) from
- * the freshly extracted rom.bin. Callers must have staged assets already —
- * see gb_mods_stage_assets().
- *
- * Safe to call with zero enabled mods: that restores the stock ROM, which
- * is exactly what "turn everything off" should do.
- *
- * @return true on success; false leaves rom.bin restored to the snapshot.
+ * Call gb_mods_scan() first. Returns the number of mods that applied
+ * cleanly; failed mods are skipped with a log line and the buffer keeps
+ * every earlier mod's work.
  */
-bool gb_mods_apply(const char* game_id, uint32_t rom_size);
-
-/**
- * Ensure `assets/<game_id>/rom.bin` exists, extracting from @p rom_path if
- * needed. Thin wrapper over the runtime's gb_load_assets() using a
- * temporary staging buffer, so the launcher can patch before the cart
- * boots. @p expected_sha1 is the 20-byte hash of the stock ROM.
- */
-bool gb_mods_stage_assets(const char* game_id,
-                          const char* rom_path,
-                          const uint8_t expected_sha1[20],
-                          uint32_t rom_size,
-                          const void* manifest,
-                          uint32_t manifest_count);
-
-/** Restore the stock ROM and forget the snapshot (used by "verify files"). */
-bool gb_mods_restore_stock(const char* game_id);
+int gb_mods_apply_buffer(uint8_t* rom, uint32_t rom_size);
 
 #ifdef __cplusplus
 }

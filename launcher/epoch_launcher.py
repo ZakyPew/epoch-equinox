@@ -5,10 +5,8 @@ A standalone launcher for the recompiled Oracle of Ages / Oracle of Seasons
 runner, in the shape Zelda64Recomp and Ship of Harkinian use: the launcher is
 its own process, and the game binary only runs carts.
 
-That split is deliberate. The runner links ~170 MB of generated C per cart and
-takes minutes to rebuild; the launcher is the part that actually changes, so it
-lives here where a restart costs nothing. It also means a crash in the cart
-can't take the launcher down with it.
+That split is deliberate: UI iterates without touching the player, and a
+crash in the game process can't take the launcher down with it.
 
 The game table is not duplicated here — it comes from `epoch --games-json`,
 so the two stay in sync from one source.

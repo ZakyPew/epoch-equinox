@@ -1,8 +1,6 @@
 /* Mod discovery + ROM patching. See mod_loader.h for the design rationale. */
 #include "mod_loader.h"
 
-#include "gb_asset_loader.h"
-
 #include "platform_compat.h"
 
 #include <ctype.h>
@@ -538,156 +536,62 @@ void gb_mods_set_enabled(int index, bool enabled) {
 }
 
 /* ------------------------------------------------------------------ */
-/* staging + applying                                                  */
+/* applying                                                            */
 /* ------------------------------------------------------------------ */
 
-static void rom_paths(const char* game_id, char* live, size_t live_sz,
-                      char* orig, size_t orig_sz) {
-    snprintf(live, live_sz, "assets/%s/rom.bin", game_id);
-    snprintf(orig, orig_sz, "assets/%s/rom.bin.orig", game_id);
-}
+int gb_mods_apply_buffer(uint8_t* rom, uint32_t rom_size) {
+    if (!rom || rom_size == 0) return 0;
 
-bool gb_mods_stage_assets(const char* game_id,
-                          const char* rom_path,
-                          const uint8_t expected_sha1[20],
-                          uint32_t rom_size,
-                          const void* manifest,
-                          uint32_t manifest_count) {
-    char live[GB_MOD_PATH_MAX], orig[GB_MOD_PATH_MAX];
-    rom_paths(game_id, live, sizeof(live), orig, sizeof(orig));
-
-    /* Already staged, and a snapshot exists to patch from. */
-    if (file_exists(orig)) return true;
-
-    /* Not staged yet: run the runtime's own extractor into a scratch
-     * buffer so assets/<id>/ is written exactly as the cart would write
-     * it, SHA-1 check and all. */
-    if (!file_exists(live)) {
-        uint8_t* scratch = (uint8_t*)calloc(rom_size, 1);
-        if (!scratch) return false;
-
-        GBGameAssets staging;
-        memset(&staging, 0, sizeof(staging));
-        staging.game_id = game_id;
-        staging.rom_filename = rom_path;
-        staging.rom_data = scratch;
-        staging.rom_size = rom_size;
-        memcpy((void*)staging.expected_sha1, expected_sha1, 20);
-        staging.manifest = (const GBAssetEntry*)manifest;
-        staging.manifest_count = manifest_count;
-
-        bool ok = gb_load_assets(&staging);
-        free(scratch);
-        if (!ok) {
-            LOG("%s: could not stage assets from '%s'", game_id, rom_path);
-            return false;
-        }
-    }
-
-    if (!file_exists(live)) {
-        LOG("%s: expected %s after staging but it is missing", game_id, live);
-        return false;
-    }
-    if (!copy_file(live, orig)) {
-        LOG("%s: could not write pristine snapshot %s", game_id, orig);
-        return false;
-    }
-    LOG("%s: pristine ROM snapshot saved", game_id);
-    return true;
-}
-
-bool gb_mods_restore_stock(const char* game_id) {
-    char live[GB_MOD_PATH_MAX], orig[GB_MOD_PATH_MAX];
-    rom_paths(game_id, live, sizeof(live), orig, sizeof(orig));
-    if (!file_exists(orig)) return false;
-    return copy_file(orig, live);
-}
-
-bool gb_mods_apply(const char* game_id, uint32_t rom_size) {
-    char live[GB_MOD_PATH_MAX], orig[GB_MOD_PATH_MAX];
-    rom_paths(game_id, live, sizeof(live), orig, sizeof(orig));
-
-    if (!file_exists(orig)) {
-        LOG("%s: no pristine snapshot; stage assets first", game_id);
-        return false;
-    }
-
-    /* Always rebuild from the snapshot so disabling a mod actually undoes
-     * it, and so two runs with the same mod set are byte-identical. */
-    size_t rom_len = 0;
-    uint8_t* rom = read_whole_file(orig, &rom_len);
-    if (!rom) return false;
-    if (rom_len != rom_size) {
-        LOG("%s: snapshot is %zu bytes, expected %u", game_id, rom_len, rom_size);
-        free(rom);
-        return false;
-    }
-
-    int enabled = 0, failed = 0;
+    int applied = 0;
     for (int i = 0; i < g_mod_count; i++) {
         GBModInfo* m = &g_mods[i];
         if (!m->enabled) continue;
-        enabled++;
         bool mod_ok = true;
 
         if (m->patch_kind == GB_MOD_PATCH_IPS) {
             size_t plen = 0;
             uint8_t* p = read_whole_file(m->patch_file, &plen);
-            if (!p) { LOG("%s: cannot read %s", m->id, m->patch_file); failed++; continue; }
-            if (!ips_apply(p, plen, rom, rom_len)) {
-                LOG("%s: IPS failed", m->id);
-                failed++;
-                mod_ok = false;
+            if (!p) {
+                LOG("%s: cannot read %s", m->id, m->patch_file);
+                continue;
             }
+            if (!ips_apply(p, plen, rom, rom_size)) mod_ok = false;
             free(p);
         } else if (m->patch_kind == GB_MOD_PATCH_BPS) {
             size_t plen = 0;
             uint8_t* p = read_whole_file(m->patch_file, &plen);
-            if (!p) { LOG("%s: cannot read %s", m->id, m->patch_file); failed++; continue; }
+            if (!p) {
+                LOG("%s: cannot read %s", m->id, m->patch_file);
+                continue;
+            }
             size_t tlen = 0;
-            uint8_t* out = bps_apply(p, plen, rom, rom_len, &tlen);
+            uint8_t* out = bps_apply(p, plen, rom, rom_size, &tlen);
             free(p);
             if (!out) {
-                LOG("%s: BPS failed", m->id);
-                failed++;
                 mod_ok = false;
-            } else if (tlen != rom_len) {
-                /* A BPS that resizes the cart cannot boot on a statically
-                 * recompiled binary: the generated code is bound to the
-                 * original bank layout. */
-                LOG("%s: BPS output is %zu bytes but this cart is fixed at %zu - skipping",
-                    m->id, tlen, rom_len);
+            } else if (tlen != rom_size) {
+                /* A resized image cannot boot: the MBC layout is fixed. */
+                LOG("%s: BPS output is %zu bytes but the cart is fixed at %u - skipping",
+                    m->id, tlen, rom_size);
                 free(out);
-                failed++;
                 mod_ok = false;
             } else {
-                memcpy(rom, out, rom_len);
+                memcpy(rom, out, rom_size);
                 free(out);
             }
         }
 
         if (m->overlay_dir[0]) {
-            int n = overlay_apply(m->overlay_dir, rom, rom_len);
+            int n = overlay_apply(m->overlay_dir, rom, rom_size);
             if (n > 0) LOG("%s: %d overlay file(s) applied", m->id, n);
         }
+
         if (mod_ok) {
             LOG("applied '%s' %s", m->name, m->version);
+            applied++;
         } else {
             LOG("skipped '%s' %s - its patch did not apply", m->name, m->version);
         }
     }
-
-    bool ok = write_whole_file(live, rom, rom_len);
-    free(rom);
-    if (!ok) {
-        LOG("%s: could not write %s", game_id, live);
-        return false;
-    }
-
-    if (enabled == 0) {
-        LOG("%s: no mods enabled — stock ROM restored", game_id);
-    } else {
-        LOG("%s: %d mod(s) enabled, %d failed", game_id, enabled, failed);
-    }
-    return failed == 0;
+    return applied;
 }
