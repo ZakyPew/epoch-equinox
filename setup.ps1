@@ -3,12 +3,18 @@
 #   powershell -ExecutionPolicy Bypass -File setup.ps1
 #   powershell -ExecutionPolicy Bypass -File setup.ps1 -NoRun
 #
+# Written for Windows PowerShell 5.1 -- the one every Windows ships with --
+# so no PowerShell 7 syntax anywhere in this file. It previously used the
+# `??` operator, which 5.1 cannot even parse: the script died before its
+# first line, with no message. Parse errors are the one failure this file
+# cannot catch for you, which is why staying 5.1-clean matters.
+#
 # Safe to re-run: the build is incremental and pip is a no-op once satisfied.
 #
 # Needs Visual Studio 2019+ with the "Desktop development with C++" workload
 # (the free Community edition is fine), CMake, Python 3, and vcpkg for SDL2
-# and libcurl. It will tell you which of those are missing rather than
-# failing halfway through a build.
+# and libcurl. It tells you which of those are missing rather than failing
+# halfway through a build.
 
 [CmdletBinding()]
 param([switch]$NoRun)
@@ -17,7 +23,19 @@ $ErrorActionPreference = 'Stop'
 Set-Location $PSScriptRoot
 
 function Say  { param($m) Write-Host "`n==> $m" -ForegroundColor Cyan }
-function Fail { param($m) Write-Host "`nERROR: $m" -ForegroundColor Red; exit 1 }
+
+# Pause before dying when the window would vanish (double-click), so the
+# error is actually readable.
+function Fail {
+    param($m)
+    Write-Host "`nERROR: $m" -ForegroundColor Red
+    if ($Host.Name -eq 'ConsoleHost' -and -not $env:CI) {
+        Read-Host 'Press Enter to close'
+    }
+    exit 1
+}
+
+try {
 
 # --------------------------------------------------------------------------
 # 1. tools
@@ -34,15 +52,29 @@ Then open a new terminal so PATH is picked up.
 '@
 }
 
-$python = (Get-Command python -ErrorAction SilentlyContinue) ??
-          (Get-Command python3 -ErrorAction SilentlyContinue)
+# Find a real Python. Two traps here: 5.1 has no ?? operator, and a bare
+# Windows has a fake python.exe (the Microsoft Store alias under
+# WindowsApps) that Get-Command happily returns but that only opens the
+# Store when run.
+$python = Get-Command python -ErrorAction SilentlyContinue
+if (-not $python) {
+    $python = Get-Command python3 -ErrorAction SilentlyContinue
+}
+if ($python -and $python.Source -like '*WindowsApps*') {
+    $python = $null
+}
 if (-not $python) {
     Fail @'
-Python 3 not found.
+Python 3 not found (or only the Microsoft Store stub is on PATH).
 
     winget install Python.Python.3.12
+
+Then open a new terminal. If it still fails, disable the Store alias:
+Settings > Apps > Advanced app settings > App execution aliases >
+turn off "python.exe".
 '@
 }
+Write-Host "    Python: $($python.Source)"
 
 # MSVC is found via CMake's generator, but check early so the failure is
 # legible rather than a wall of CMake output.
@@ -80,6 +112,7 @@ if ($env:VCPKG_ROOT -and (Test-Path "$env:VCPKG_ROOT\scripts\buildsystems\vcpkg.
     $toolchain = "$env:VCPKG_ROOT\scripts\buildsystems\vcpkg.cmake"
     Write-Host "    vcpkg: $env:VCPKG_ROOT"
     & "$env:VCPKG_ROOT\vcpkg.exe" install sdl2:x64-windows curl:x64-windows
+    if ($LASTEXITCODE -ne 0) { Fail 'vcpkg could not install SDL2/libcurl' }
 } else {
     Fail @'
 vcpkg not found (VCPKG_ROOT is unset or wrong).
@@ -98,9 +131,15 @@ libcurl for you.
 # --------------------------------------------------------------------------
 Say 'Checking for ROMs'
 New-Item -ItemType Directory -Force -Path roms | Out-Null
-$roms = Get-ChildItem roms -Include *.gb, *.gbc, *.sgb -File -ErrorAction SilentlyContinue
 
-if (-not $roms) {
+# 5.1 trap: -Include is ignored unless the path carries a wildcard, and
+# silently returns nothing -- which would have reported "no ROMs" with the
+# files sitting right there. Filter by extension instead.
+$romExts = @('.gb', '.gbc', '.sgb')
+$roms = @(Get-ChildItem -Path roms -File -ErrorAction SilentlyContinue |
+          Where-Object { $romExts -contains $_.Extension.ToLower() })
+
+if ($roms.Count -eq 0) {
     Write-Host @'
 
   No ROMs in roms\.
@@ -114,6 +153,9 @@ if (-not $roms) {
   Either one alone is fine -- you will just get that game.
 
 '@ -ForegroundColor Yellow
+    if ($Host.Name -eq 'ConsoleHost' -and -not $env:CI) {
+        Read-Host 'Press Enter to close'
+    }
     exit 1
 }
 $roms | ForEach-Object { Write-Host "    found: $($_.Name)" }
@@ -125,13 +167,13 @@ Say 'Configuring -- builds the recompiler, then turns your ROMs into C'
 Write-Host '    (first run: a couple of minutes for the recompiler, ~75s per game)'
 
 cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE="$toolchain" -DCMAKE_BUILD_TYPE=Release
-if ($LASTEXITCODE -ne 0) { Fail 'CMake configure failed' }
+if ($LASTEXITCODE -ne 0) { Fail 'CMake configure failed (scroll up for the first error)' }
 
 Say 'Compiling -- this is the slow part. Go make tea.'
 cmake --build build --config Release --parallel
-if ($LASTEXITCODE -ne 0) { Fail 'Build failed' }
+if ($LASTEXITCODE -ne 0) { Fail 'Build failed (scroll up for the first error)' }
 
-$exe = Get-ChildItem build -Recurse -Filter epoch.exe -ErrorAction SilentlyContinue |
+$exe = Get-ChildItem -Path build -Recurse -Filter epoch.exe -ErrorAction SilentlyContinue |
        Select-Object -First 1
 if (-not $exe) { Fail 'Build finished but epoch.exe is missing' }
 Write-Host "    built: $($exe.FullName)"
@@ -148,4 +190,16 @@ if ($LASTEXITCODE -ne 0) {
 Say "Done. Launcher:  python launcher\epoch_launcher.py"
 if (-not $NoRun) {
     & $python.Source launcher/epoch_launcher.py --runner $exe.FullName
+}
+
+} catch {
+    # Anything unexpected: show it and hold the window open instead of
+    # flashing and closing.
+    Write-Host "`nUNEXPECTED ERROR:" -ForegroundColor Red
+    Write-Host $_.Exception.Message -ForegroundColor Red
+    Write-Host $_.ScriptStackTrace
+    if ($Host.Name -eq 'ConsoleHost' -and -not $env:CI) {
+        Read-Host 'Press Enter to close'
+    }
+    exit 1
 }

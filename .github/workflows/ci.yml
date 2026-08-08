@@ -86,6 +86,25 @@ jobs:
           print("launcher imports OK; pygame present:", gamepad._HAVE_PYGAME)
           EOF
 
+  powershell:
+    name: Lint setup.ps1 for Windows PowerShell 5.1
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      # setup.ps1 must stay parseable by the PowerShell every Windows ships
+      # with. A PS7-only operator once made it die before its first line,
+      # with no message at all -- this job is why that cannot recur.
+      - name: PSScriptAnalyzer, 5.1 target
+        shell: pwsh
+        run: |
+          Install-Module PSScriptAnalyzer -Force -Scope CurrentUser
+          $settings = @{ Rules = @{ PSUseCompatibleSyntax = @{
+            Enable = $true; TargetVersions = @('5.1','7.0') } } }
+          $r = Invoke-ScriptAnalyzer -Path setup.ps1 -Settings $settings |
+               Where-Object Severity -eq 'Error'
+          if ($r) { $r | Format-List; exit 1 }
+          Write-Host 'setup.ps1 is 5.1-clean'
+
   patches:
     name: Verify the runtime patch still applies
     runs-on: ubuntu-22.04
