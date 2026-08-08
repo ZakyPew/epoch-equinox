@@ -80,10 +80,16 @@ void voxel_set_mode(int mode) {
 /* helpers                                                             */
 /* ------------------------------------------------------------------ */
 
-static inline uint32_t shade(uint32_t c, int mul /* 0..256 */) {
+static inline uint32_t shade(uint32_t c, int mul /* 0..~272 */) {
+    /* Clamp per channel: brightening (mul > 256) overflowed bright
+     * channels into their neighbours' bytes, which is why top-lit yellow
+     * flowers came out the wrong colour entirely. */
     uint32_t r = ((c & 0x0000FF) * (uint32_t)mul) >> 8;
     uint32_t g = (((c >> 8) & 0xFF) * (uint32_t)mul) >> 8;
     uint32_t b = (((c >> 16) & 0xFF) * (uint32_t)mul) >> 8;
+    if (r > 255) r = 255;
+    if (g > 255) g = 255;
+    if (b > 255) b = 255;
     return 0xFF000000u | (b << 16) | (g << 8) | r;
 }
 

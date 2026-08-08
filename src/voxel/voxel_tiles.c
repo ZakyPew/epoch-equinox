@@ -125,7 +125,15 @@ static TileFeatures tile_features(GBContext* ctx, const uint8_t* pat, int pal) {
 static uint8_t classify_tile(GBContext* ctx, const uint8_t* pat, int pal,
                              bool* leafy_out) {
     TileFeatures f = tile_features(ctx, pat, pal);
-    if (leafy_out) *leafy_out = f.green_bias > 12;
+    /* "Organic" for the renderer's dome pass: green growth, and bright
+     * flowering tiles (any green presence, mostly light, plenty of
+     * pattern). Masonry and rock stay architectural -- they are either
+     * grey (no green lean) or dominated by dark outline pixels. */
+    if (leafy_out) {
+        *leafy_out = f.green_bias > 12 ||
+                     (f.green_bias > 0 && f.dark_frac < 45 &&
+                      f.luma > 100 && f.contrast > 70);
+    }
 
     /* Water: strongly blue, mid luma. Sinks. */
     if (f.blue_bias > 28 && f.luma < 190) return VOX_H_WATER;
