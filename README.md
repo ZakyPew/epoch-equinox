@@ -96,8 +96,14 @@ button labels for Xbox, PlayStation, Switch Pro and Joy-Con.
 | `M` | Mute | — |
 | **`F3`** | **Cycle voxel mode** (off → 15° → 30° → 45°) | — |
 
-The runtime menu covers savestates, palettes, shader presets, SGB borders,
-hardware mode, audio and input remapping.
+The Esc menu opens with a **Display** section — fullscreen, scaling mode
+(Pixel Perfect / Aspect Fit / Aspect Fill / Stretch), scale filter, window
+size, and a live readout of the exact scale on screen (e.g. `Showing 9x:
+1440x1296 in a 2560x1400 window`). Pixel Perfect grows in whole steps and
+letterboxes the rest — that is what keeps it razor sharp; use Aspect Fit to
+fill the window instead. Below it: the voxel diorama section, then the rest
+(savestates, palettes, shader presets, SGB borders, hardware mode, audio and
+input remapping).
 
 ## Launch options
 

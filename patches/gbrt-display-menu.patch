@@ -1,0 +1,72 @@
+diff --git a/runtime/src/platform_sdl.cpp b/runtime/src/platform_sdl.cpp
+--- a/runtime/src/platform_sdl.cpp
++++ b/runtime/src/platform_sdl.cpp
+@@ -4105,16 +4105,14 @@
+          * diagnostics. Open it once to remap keys or pick an output
+          * device, then forget it exists.
+          * ========================================================== */
+-        if (g_host_menu_fn) {
+-            g_host_menu_fn();
+-        }
+-
+-        if (ImGui::CollapsingHeader("Advanced")) {
+-            int window_w = 0;
+-            int window_h = 0;
+-            SDL_GetWindowSize(g_window, &window_w, &window_h);
+-
+-            ImGui::TextDisabled("Display");
++        /* ============================================================
++         * Display: the options people actually reach for, in the open
++         * rather than folded into Advanced. The live readout answers
++         * "is it scaling?" at a glance -- Pixel Perfect only grows in
++         * whole steps, which reads as "not scaling" on a maximized
++         * window unless the numbers say otherwise.
++         * ========================================================== */
++        if (ImGui::CollapsingHeader("Display", ImGuiTreeNodeFlags_DefaultOpen)) {
+             bool fullscreen = g_fullscreen;
+             if (ImGui::Checkbox("Fullscreen", &fullscreen)) {
+                 set_fullscreen_enabled(fullscreen);
+@@ -4135,7 +4133,6 @@
+                 g_render_filter_mode = (GBRenderFilterMode)filter_mode;
+                 update_render_filter();
+             }
+-
+             if (!g_fullscreen) {
+                 int scale_idx = g_scale - 1;
+                 if (ImGui::Combo("Window Size",
+@@ -4148,6 +4145,35 @@
+             } else {
+                 ImGui::TextDisabled("Window Size disabled while fullscreen.");
+             }
++            {
++                int win_w = 0, win_h = 0;
++                SDL_GetWindowSize(g_window, &win_w, &win_h);
++                if (g_render_scaling_mode == GB_RENDER_SCALING_PIXEL_PERFECT) {
++                    const int cw = border_content_width();
++                    const int mult = cw > 0 ? g_game_viewport.w / cw : 0;
++                    ImGui::TextDisabled("Showing %dx: %dx%d in a %dx%d window.",
++                                        mult, g_game_viewport.w,
++                                        g_game_viewport.h, win_w, win_h);
++                    ImGui::TextDisabled("Pixel Perfect grows in whole steps and\n"
++                                        "letterboxes the rest, so every pixel\n"
++                                        "stays razor sharp. Aspect Fit fills.");
++                } else {
++                    ImGui::TextDisabled("Showing %dx%d in a %dx%d window.",
++                                        g_game_viewport.w, g_game_viewport.h,
++                                        win_w, win_h);
++                }
++            }
++        }
++
++        if (g_host_menu_fn) {
++            g_host_menu_fn();
++        }
++
++        if (ImGui::CollapsingHeader("Advanced")) {
++            int window_w = 0;
++            int window_h = 0;
++            SDL_GetWindowSize(g_window, &window_w, &window_h);
++
+             if (ImGui::Checkbox("V-Sync", &g_vsync)) {
+                 SDL_GL_SetSwapInterval(g_vsync ? 1 : 0);
+             }
