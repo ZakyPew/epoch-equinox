@@ -230,13 +230,22 @@ void vox_render(GBContext* ctx, const VoxTileGrid* grid,
 
                 if (prev_sy[x] >= 0 && sy > prev_sy[x] + 1) {
                     /* Height dropped toward the viewer: the far cell's front
-                     * wall is exposed. Shade it darker with a little vertical
-                     * falloff so tall faces read as faces. */
+                     * wall is exposed. Texture it by tiling that cell's own
+                     * 8px artwork down the face -- stretching a single texel
+                     * turned every tall tree line into a vertical smear --
+                     * and darken with a little falloff so faces read as
+                     * faces. */
                     int span = sy - prev_sy[x] - 1;
+                    int src_py = (wy - 1) + grid->fine_y;
+                    if (src_py < 0) src_py = 0;
+                    int tile_top = src_py & ~7;
                     for (int fy = prev_sy[x] + 1; fy < sy; fy++) {
                         if (fy < world_top || fy >= GB_SCREEN_HEIGHT) continue;
-                        int t = (fy - prev_sy[x]) * 52 / (span + 1);
-                        out[fy * GB_SCREEN_WIDTH + x] = shade(prev_tex[x], 198 - t);
+                        int d = fy - prev_sy[x];
+                        uint32_t wall = grid->tex[(tile_top + (d & 7)) * VOX_TEX_W
+                                                  + (x + grid->fine_x)];
+                        int t = d * 52 / (span + 1);
+                        out[fy * GB_SCREEN_WIDTH + x] = shade(wall, 186 - t);
                     }
                 }
 
