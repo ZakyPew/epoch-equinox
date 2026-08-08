@@ -3,7 +3,7 @@
 <p align="center">
   A native player for <b>The Legend of Zelda: Oracle of Ages</b> and
   <b>Oracle of Seasons</b> — modern launcher, mod support, and an optional
-  3D diorama mode. Bring your own ROMs.
+  3D voxel mode with a third-person chase camera. Bring your own ROMs.
 </p>
 
 <p align="center">
@@ -25,8 +25,13 @@
 
 Both games run from one binary at full native speed, with savestates, shader
 presets, controller remapping, SGB borders, IPS/BPS mod loading — and a voxel
-mode that rebuilds the overworld as a tilted diorama out of the Game Boy's own
-tilemap.
+mode that rebuilds the overworld out of the Game Boy's own tilemap: tilted
+dioramas at 3× internal resolution, hand-sculptable room heights, and a
+third-person chase camera that follows Link through the world in perspective.
+
+<p align="center">
+  <img src="docs/chase-cam.png" alt="Chase camera: three perspective views" width="900">
+</p>
 
 ## Quick start
 
@@ -94,7 +99,7 @@ button labels for Xbox, PlayStation, Switch Pro and Joy-Con.
 | `F6` / `F7` | Previous / next savestate slot | — |
 | `F1` | Toggle FPS overlay | — |
 | `M` | Mute | — |
-| **`F3`** | **Cycle voxel mode** (off → 15° → 30° → 45°) | — |
+| **`F3`** | **Cycle voxel mode** (off → 15° → 30° → 45° → chase cam) | — |
 
 The Esc menu opens with a **Display** section — fullscreen, scaling mode
 (Pixel Perfect / Aspect Fit / Aspect Fill / Stretch), scale filter, window
@@ -114,7 +119,7 @@ The launcher handles this for you, but the binary stands alone:
 | `--game <id>` | run a cart directly (`tlozooa`, `tlozoos`) |
 | `--list-games` | print the ids in this build |
 | `--no-mods` | boot the stock ROM, ignoring `mods/` |
-| `--voxel <n>` | start with the diorama on (`0`–`3`) |
+| `--voxel <n>` | start with the voxel mode on (`0`–`4`; `4` = chase cam) |
 | `--games-json` | machine-readable game table (what the launcher reads) |
 
 ```sh
@@ -158,6 +163,10 @@ at the addresses named by
   winter, ember-red in Subrosia), day blue in Ages' present, golden dusk in
   the past — with slow procedural clouds. Interiors keep a neutral backdrop
 - the status bar stays flat and composites back on top
+- **chase cam** (`F3` to the last stop): a third-person camera floating
+  behind Link, looking where he faces, raycasting the same heightfield in
+  true perspective — distance fog, depth-scaled sprite billboards, and a
+  camera that sweeps around when he turns
 
 Output is a normal 160×144 frame handed back through the runtime's present
 path, so shaders, scaling and screenshots all still apply.
@@ -329,20 +338,38 @@ that one run only.
 
 </details>
 
-## Contributing
+## Contributing — we'd love more hands
 
-Issues and pull requests welcome. Useful things to know:
+The surface area is now bigger than one keyboard. The build is ~1 minute
+from a cold clone (`setup.sh` / `setup.ps1`), CI covers Linux + Windows +
+the patch chain, and every runtime modification is a reviewable patch file
+in `patches/`. `src/` and `launcher/` are the project's own code.
 
-- `src/` and `launcher/` are the project's own code — that's where changes go
-- generated cart C lives in `build/generated/` and is never committed
-- CI builds our C against a synthetic cart, imports the launcher headlessly,
-  and checks the runtime patch still applies upstream
+If any of this sounds fun, open an issue or just send a PR:
 
-Good first areas: **confirming (or fixing) the Windows build**, tuning the
-voxel height classifier against `oracles-disasm`'s real collision tables, and
-per-section asset splitting for finer-grained mods.
+- **Renderer** (`src/voxel/`): sprite occlusion in chase cam, wall
+  texturing in perspective, a room cache so the 3D world persists across
+  screens, first-person mode. Plain C, one pass, no GPU code — the GLES
+  side is already handled.
+- **Room sculpting** (no code!): run with `VOXEL_EDIT=1` and every room
+  you enter writes a ready-to-edit text template; heights are single
+  characters. A curated override pack for the whole overworld would ship
+  as a default.
+- **Mod API** (`src/mod_loader.c`): IPS/BPS/overlays work today; the next
+  step is a scripting surface over the games' named WRAM symbols
+  (`oracles-disasm` names hundreds — the voxel mode already reads a dozen
+  live).
+- **Achievements**: the memory-watch machinery exists; it needs a
+  condition format, a definitions file, and a toast.
+- **Voice packs**: dialog open/close is already detected; a playback mixer
+  and a dialogue-transcript logger would make fan dubs possible.
+- **Testing** (`tools/vox_shot.c`): boots a ROM headless, drives it with
+  an input script, dumps frame pairs — the whole voxel pipeline was built
+  against it. More scripted routes (dungeons!) directly increase coverage.
 
-**Never attach a ROM, savefile, or ROM-derived asset to an issue or PR.**
+**Never attach a ROM or ROM-derived asset to an issue or PR.** Battery
+saves (`.sav`) are your own play data and are welcome — `tests/saves/`
+exists exactly for save files parked in interesting places.
 
 ## Credits
 

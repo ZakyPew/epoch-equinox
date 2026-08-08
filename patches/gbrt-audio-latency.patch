@@ -1,0 +1,35 @@
+diff --git a/runtime/src/platform_sdl.cpp b/runtime/src/platform_sdl.cpp
+--- a/runtime/src/platform_sdl.cpp
++++ b/runtime/src/platform_sdl.cpp
+@@ -335,7 +335,10 @@
+ static std::string g_controller_name;
+ static bool g_audio_output_enabled = true;
+ static bool g_audio_muted = false;
+-static uint32_t g_audio_latency_ms = 80;
++/* 40ms: half the original target. The GB has no audio pipeline to hide
++ * behind -- sword swings and menu blips land noticeably tighter, and the
++ * ring never underran at 40 in testing. Preference-adjustable 20-250. */
++static uint32_t g_audio_latency_ms = 40;
+ static uint32_t g_audio_volume_percent = 100;
+ static uint32_t g_audio_low_watermark = 0;
+ static uint32_t g_audio_device_sample_rate = 44100;
+@@ -1082,7 +1085,7 @@
+ static void set_default_audio_preferences(void) {
+     g_audio_output_enabled = true;
+     g_audio_muted = false;
+-    g_audio_latency_ms = 80;
++    g_audio_latency_ms = 40;
+     g_audio_volume_percent = 100;
+     g_audio_target_device_name.clear();
+ }
+@@ -4670,7 +4673,9 @@
+     want.freq = AUDIO_SAMPLE_RATE;
+     want.format = AUDIO_S16LSB;
+     want.channels = 2;
+-    want.samples = 2048;
++    /* 1024 (~23ms at 44.1k): the device chunk has to be smaller than the
++     * latency target or the target is a fiction. */
++    want.samples = 1024;
+     want.callback = sdl_audio_callback;
+     want.userdata = NULL;
+ 

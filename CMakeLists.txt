@@ -65,6 +65,9 @@ FetchContent_Declare(gb_recompiled
         COMMAND ${CMAKE_COMMAND}
         -DPATCH_FILE=${CMAKE_CURRENT_SOURCE_DIR}/patches/gbrt-hires-frame.patch
         -P ${CMAKE_CURRENT_SOURCE_DIR}/patches/apply_gbrt_patch.cmake
+        COMMAND ${CMAKE_COMMAND}
+        -DPATCH_FILE=${CMAKE_CURRENT_SOURCE_DIR}/patches/gbrt-audio-latency.patch
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/patches/apply_gbrt_patch.cmake
 )
 FetchContent_GetProperties(gb_recompiled)
 if(NOT gb_recompiled_POPULATED)
