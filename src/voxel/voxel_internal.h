@@ -26,10 +26,31 @@ typedef enum {
     VOX_H_HIGH   = 4,   /* trees, walls, houses */
 } VoxHeightClass;
 
+/* Live game state read from the Oracles carts' own WRAM/HRAM, when the
+ * running cart is one of them and the frame is trustworthy. See
+ * voxel_oracle.c for the addresses and the validity rules. */
+typedef struct {
+    bool valid;
+    bool menu_open;
+    int  cam_y, cam_x;          /* hCameraY/X, room pixels */
+    int  off_y, off_x;          /* wScreenOffsetY/X, transient draw offset */
+    uint8_t collisions[16 * 12]; /* wRoomCollisions, stride 16 */
+} VoxOracleState;
+
+/* Read + validate the cart's room state. False = not an Oracles cart, or
+ * this frame's room data can't be trusted (boot, transition, empty). */
+bool vox_oracle_read(GBContext* ctx, VoxOracleState* st);
+
+/* Height for one room cell: collision decides, colour breaks ties. */
+uint8_t vox_oracle_height(uint8_t collision, uint8_t colour_class);
+
 typedef struct {
     /* Per visible tile: height class and whether it's part of the window
      * layer (HUD) rather than the scrolling BG. */
     uint8_t height[VOX_TILES_H][VOX_TILES_W];
+    /* True while a full-screen menu owns the display: render the frame
+     * flat instead of extruding inventory screens. */
+    bool flat;
     uint8_t scx, scy;          /* latched scroll for this frame */
     /* Sub-tile scroll remainder, so the height grid can be sampled in
      * screen space. */

@@ -139,6 +139,7 @@ set(EPOCH_SUPPORT_SOURCES
 if(EPOCH_WITH_VOXEL)
     list(APPEND EPOCH_SUPPORT_SOURCES
         src/voxel/voxel_tiles.c
+        src/voxel/voxel_oracle.c
         src/voxel/voxel_render.c)
 endif()
 

@@ -95,6 +95,14 @@ void vox_render(GBContext* ctx, const VoxTileGrid* grid,
                 int mode, uint32_t* out) {
     const VoxCam cam = VOX_CAMS[mode];
 
+    /* A full-screen menu owns the display: pass the frame through flat
+     * rather than extruding an inventory screen. The mode stays armed, so
+     * closing the menu drops straight back into the diorama. */
+    if (grid->flat) {
+        memcpy(out, fb, GB_FRAMEBUFFER_SIZE * sizeof(uint32_t));
+        return;
+    }
+
     /* The status bar is a band at the top; the world is everything under it
      * and stays flat inside its own band at the end. */
     const int world_top = grid->hud_rows;
