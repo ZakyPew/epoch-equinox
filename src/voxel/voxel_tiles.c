@@ -194,6 +194,14 @@ bool vox_scrape(GBContext* ctx, VoxTileGrid* grid, VoxSpriteList* sprites) {
     bool signed_tiles = !(lcdc & 0x10);
     unsigned map_base = (lcdc & 0x08) ? 0x1C00 : 0x1800;
 
+    /* Game-aware pass: if this is an Oracles cart in trustworthy room
+     * state, terrain height comes from the cart's own collision grid and
+     * the colours only break ties. Otherwise colours decide everything,
+     * exactly as before. */
+    VoxOracleState oracle;
+    bool use_oracle = vox_oracle_read(ctx, &oracle) && oracle.valid;
+    grid->flat = use_oracle && oracle.menu_open;
+
     for (int ty = 0; ty < VOX_TILES_H; ty++) {
         for (int tx = 0; tx < VOX_TILES_W; tx++) {
             unsigned map_x = ((scx / 8) + tx) & 31;
@@ -206,7 +214,30 @@ bool vox_scrape(GBContext* ctx, VoxTileGrid* grid, VoxSpriteList* sprites) {
             int bank = (attr >> 3) & 1;
 
             const uint8_t* pat = tile_pattern(ctx, tile, signed_tiles, bank);
-            grid->height[ty][tx] = classify_tile(ctx, pat, pal);
+            uint8_t by_colour = classify_tile(ctx, pat, pal);
+
+            if (use_oracle) {
+                /* Sample this tile's centre in room space. Screen origin of
+                 * the tile is (tx*8 - fine_x, ty*8 - fine_y); the room is
+                 * drawn below the HUD band, offset by camera and any
+                 * transient screen offset. */
+                int sx = tx * 8 - grid->fine_x + 4;
+                int sy = ty * 8 - grid->fine_y + 4;
+                int wx = sx + oracle.cam_x + oracle.off_x;
+                int wy = sy - grid->hud_rows + oracle.cam_y + oracle.off_y;
+                int col = wx >> 4, row = wy >> 4;
+
+                if (row >= 0 && row < 12 && col >= 0 && col < 16) {
+                    uint8_t coll = oracle.collisions[row * 16 + col];
+                    grid->height[ty][tx] = vox_oracle_height(coll, by_colour);
+                    continue;
+                }
+                /* Above the HUD line or outside the room: flat. */
+                grid->height[ty][tx] = VOX_H_FLOOR;
+                continue;
+            }
+
+            grid->height[ty][tx] = by_colour;
         }
     }
 

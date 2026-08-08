@@ -153,8 +153,14 @@ PPU state. A static recompilation has no scene graph, entity list or collision
 data, so this reads the only honest source there is: the BG tilemap, CGB
 palettes and OAM sitting in emulated VRAM.
 
-- tiles are classified per 8×8 into terrain heights — water sinks, paths lie
-  flat, bushes and rocks rise, trees and walls rise highest
+- **on the Oracles carts, terrain height comes from the game's own collision
+  data** — `wRoomCollisions` and the camera, read live from WRAM at the
+  addresses named by [oracles-disasm](https://github.com/Stewmath/oracles-disasm).
+  Water sinks because the game says it's water; walls rise because collision
+  says solid; menus render flat because `wOpenedMenuType` says a menu is open.
+  Colours only break ties (tree vs fence, grass vs path)
+- on anything else, tiles are classified per 8×8 by colour — water sinks,
+  paths lie flat, bushes and rocks rise, trees and walls rise highest
 - each screen column is marched far-to-near, projecting cell tops and filling
   the exposed front wall where height steps down
 - terrain is textured with the game's *own* composed frame, so palettes,
@@ -165,18 +171,26 @@ palettes and OAM sitting in emulated VRAM.
 Output is a normal 160×144 frame handed back through the runtime's present
 path, so shaders, scaling and screenshots all still apply.
 
+Colour-only vs the game's own collision data, same frame:
+
+<p align="center"><img src="docs/voxel-ab.png" alt="left: colour heuristic, right: collision data" width="820"></p>
+
 <details>
 <summary><b>Honest limits</b></summary>
 
-- Heights come from what tiles *look like*, not real collision data, so it's a
-  plausible relief rather than a correct one. Thresholds are tunable at the top
-  of [`voxel_tiles.c`](src/voxel/voxel_tiles.c).
+- On non-Oracles carts, heights come from what tiles *look like* — a plausible
+  relief rather than a correct one. Thresholds are tunable at the top of
+  [`voxel_tiles.c`](src/voxel/voxel_tiles.c).
+- During room-to-room scroll transitions the collision grid describes the
+  *next* room while the screen still shows both, so those half-seconds use the
+  colour classifier. `VOXEL_NO_ORACLE=1` forces it everywhere, for A/B tests.
 - Fixed pitch ladder. No free-roam or first-person camera — moving the player
   off the grid needs the engine's own collision, which a recompilation doesn't
   expose.
 - Native 160×144, so it's chunky by construction. Deliberate.
-- Menus, cinematics and interiors get extruded too, since the classifier only
-  sees tiles. `F3` back to off for those.
+- On the Oracles carts, menus and boot cinematics now render flat
+  automatically. Interiors extrude by their real collision, which reads well.
+  On other carts the classifier only sees tiles, so menus extrude — `F3` off.
 - **No widescreen, and that's measured not guessed.** `VOXEL_DUMP_MAP=<frame>`
   writes the whole 32×32 BG map; mid-gameplay it holds about one screen of real
   tiles and flat filler everywhere else. Oracles only maintains the columns
