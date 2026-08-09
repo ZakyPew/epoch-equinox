@@ -55,6 +55,36 @@ extern "C" {
 #define VOXEL_MODE_CHASE 4
 #define VOXEL_MODE_COUNT 5
 
+/* Live-tunable shape and camera constants.
+ *
+ * The per-room override files decide WHICH height class a cell is; these
+ * decide what a height class LOOKS like. They were compile-time constants,
+ * which meant every "the trees are too tall" needed a rebuild. They are
+ * sliders in the Esc menu now, saved to voxel/tuning.ini, so a good look
+ * can be found while playing and then baked in as the default.
+ */
+typedef struct {
+    float units[5];       /* extrusion per height class, indexed by class */
+    float footprint;      /* px of taper at a foliage edge (0 = hard cell) */
+    float tilt_scale;     /* multiplier on the diorama's vertical lift */
+    float chase_back;     /* camera distance behind the player */
+    float chase_height;   /* camera height above the player's ground */
+    float chase_fov;      /* focal length as a fraction of output width */
+    float chase_hpx;      /* screen px per height unit in perspective */
+    float fog_start;      /* distance where distance fog begins */
+    float fog_max;        /* strongest fog blend, 0-256 */
+} VoxelTuning;
+
+/** The live tuning block. Safe to mutate; the renderer reads it per frame. */
+VoxelTuning* voxel_tuning(void);
+
+/** Restore the shipped defaults. */
+void voxel_tuning_reset(void);
+
+/** Persist to / restore from voxel/tuning.ini next to the binary. */
+void voxel_tuning_save(void);
+void voxel_tuning_load(void);
+
 /** Install the frame hook. Call once, before the cart's main loop. */
 void voxel_install(void);
 
