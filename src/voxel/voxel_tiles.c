@@ -407,6 +407,13 @@ bool vox_scrape(GBContext* ctx, const uint32_t* fb, VoxTileGrid* grid,
         }
     }
 
+    /* One override lookup for the whole frame. It re-reads the file when
+     * the file changes on disk, so sculpting a room is edit-and-see. */
+    const uint8_t* ov = use_oracle
+        ? vox_override_lookup(oracle.is_seasons, oracle.active_group,
+                              oracle.active_room, oracle.collisions)
+        : NULL;
+
     for (int ty = 0; ty < VOX_TILES_H; ty++) {
         for (int tx = 0; tx < VOX_TILES_W; tx++) {
             unsigned map_x = ((scx / 8) + tx) & 31;
@@ -471,10 +478,9 @@ bool vox_scrape(GBContext* ctx, const uint32_t* fb, VoxTileGrid* grid,
                     /* Hand-authored room overrides get the final word --
                      * for props the player can walk past (statue rows,
                      * gates) that read as "should be 3D" to a human and
-                     * as $00 to the collision map. */
-                    const uint8_t* ov = vox_override_lookup(
-                        oracle.is_seasons, oracle.active_group,
-                        oracle.active_room, oracle.collisions);
+                     * as $00 to the collision map. Looked up once per
+                     * frame above, not per tile: the lookup now stats the
+                     * file to catch live edits. */
                     if (ov && row < 8 && col < 10 &&
                         ov[row * 10 + col] != 0xFF) {
                         hcls = ov[row * 10 + col];

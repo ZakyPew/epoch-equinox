@@ -215,7 +215,11 @@ voxel/overrides/ages-0-6a.txt     # game, group, room (hex), next to the binary
 Run with `VOXEL_EDIT=1` and every room you enter that has no override file
 gets a ready-to-edit template written for it — including the
 collision-derived heights as a comment, so you can see what you're
-overriding. Edit the file, leave the room, walk back in: it reloads.
+overriding.
+
+**Editing is live.** The file is polled a few times a second while you stand
+in the room, so saving in a text editor reshapes the terrain in front of you
+— no restart, no leaving the room.
 
 Colour-only vs the game's own collision data, same frame:
 
