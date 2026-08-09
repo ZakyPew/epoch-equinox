@@ -526,6 +526,92 @@ scan_sprites:
         memcpy(grid->leafy, next, sizeof(next));
     }
 
+    /* Billboard trees, for the chase camera: a solid room cell whose four
+     * screen tiles all read leafy at full height is one 16px tree. The
+     * chase renderer pulls these cells out of its heightfield and draws
+     * each as a trunk-and-canopy billboard, so a forest becomes a row of
+     * trees with ground running beneath the canopies instead of a green
+     * rampart. Canopy shades come from the tree's own art, so autumn,
+     * winter and Subrosia keep their palettes. */
+    grid->tree_count = 0;
+    memset(grid->treecell, 0, sizeof(grid->treecell));
+    if (use_oracle) {
+        for (int row = 0; row < 12; row++) {
+            for (int col = 0; col < 16; col++) {
+                if (grid->tree_count >= VOX_MAX_TREES) break;
+                if (oracle.collisions[row * 16 + col] != 0x0F) continue;
+                int sx = col * 16 - oracle.cam_x - oracle.off_x;
+                int sy = row * 16 - oracle.cam_y - oracle.off_y
+                         + grid->hud_rows;
+                int tx0 = (sx + grid->fine_x) >> 3;
+                int ty0 = (sy + grid->fine_y) >> 3;
+                if (tx0 < 0 || ty0 < 0 ||
+                    tx0 + 1 >= VOX_TILES_W || ty0 + 1 >= VOX_TILES_H)
+                    continue;
+                /* All four tiles leafy and raised = one growing thing.
+                 * The minimum height class across the cell sizes the
+                 * billboard: MID cells (bushes, squat trees -- the colour
+                 * classifier rarely awards HIGH) become shrubs, HIGH
+                 * cells full trees. */
+                bool all = true;
+                int hmin = VOX_H_HIGH;
+                for (int dy = 0; dy < 2 && all; dy++) {
+                    for (int dx = 0; dx < 2; dx++) {
+                        if (!grid->leafy[ty0 + dy][tx0 + dx] ||
+                            grid->height[ty0 + dy][tx0 + dx] < VOX_H_MID) {
+                            all = false;
+                            break;
+                        }
+                        if (grid->height[ty0 + dy][tx0 + dx] < hmin)
+                            hmin = grid->height[ty0 + dy][tx0 + dx];
+                    }
+                }
+                if (!all) continue;
+
+                /* Palette from the art block: brightest, darkest, mean. */
+                uint32_t lit = 0, dark = 0;
+                int lb = -1, db = 0x7FFFFFFF, n = 0;
+                long ar = 0, ag = 0, ab = 0;
+                for (int py = 0; py < 16; py++) {
+                    for (int px = 0; px < 16; px++) {
+                        int gx = sx + px + grid->fine_x;
+                        int gy = sy + py + grid->fine_y;
+                        if (gx < 0 || gy < 0 ||
+                            gx >= VOX_TEX_W || gy >= VOX_TEX_H) continue;
+                        uint32_t c = grid->tex[gy * VOX_TEX_W + gx];
+                        int r8 = (c >> 16) & 0xFF;
+                        int g8 = (c >> 8) & 0xFF;
+                        int b8 = c & 0xFF;
+                        int br = r8 + g8 * 2 + b8;
+                        if (br > lb) { lb = br; lit = c; }
+                        if (br < db) { db = br; dark = c; }
+                        ar += r8; ag += g8; ab += b8; n++;
+                    }
+                }
+                if (n == 0) continue;
+
+                VoxTree* t = &grid->trees[grid->tree_count++];
+                t->sx = sx;
+                t->sy = sy;
+                t->hcls = hmin;
+                t->lit = lit;
+                t->dark = dark;
+                t->mid = 0xFF000000u | ((uint32_t)(ar / n) << 16) |
+                         ((uint32_t)(ag / n) << 8) | (uint32_t)(ab / n);
+                /* Bark: the art's shadow tone pulled toward brown. */
+                t->bark = 0xFF000000u |
+                    (((((dark >> 16) & 0xFF) * 2 + 0x5A) / 3) << 16) |
+                    (((((dark >> 8) & 0xFF) * 2 + 0x3A) / 3) << 8) |
+                    ((((dark & 0xFF) * 2 + 0x28) / 3));
+                for (int dy = 0; dy < 2; dy++) {
+                    for (int dx = 0; dx < 2; dx++) {
+                        grid->treecell[ty0 + dy][tx0 + dx] = 1;
+                    }
+                }
+            }
+        }
+    }
+
     /* OAM scrape: raw entries, decoded lazily at draw time. */
     sprites->count = 0;
     bool tall = (lcdc & 0x04) != 0;

@@ -115,13 +115,27 @@ int main(int argc, char* argv[]) {
 
         for (int w = 0; w < want_n; w++) {
             if (want[w] != i) continue;
+            /* Scrape + render FIRST: the diagnostic dumps below read the
+             * grid, and printing it before this frame's scrape showed the
+             * previous wanted frame's world -- all zeros on the first. */
+            char path[512];
+            snprintf(path, sizeof(path), "%s-%lu-flat.ppm", argv[4], i);
+            write_ppm(path, fb, GB_SCREEN_WIDTH, GB_SCREEN_HEIGHT);
+            if (vox_scrape(ctx, fb, &grid, &sprites)) {
+                vox_render(ctx, &grid, &sprites, fb, mode, shot_scale, out);
+                snprintf(path, sizeof(path), "%s-%lu-vox.ppm", argv[4], i);
+                write_ppm(path, out, GB_SCREEN_WIDTH * shot_scale,
+                          GB_SCREEN_HEIGHT * shot_scale);
+            } else {
+                fprintf(stderr, "frame %lu: scrape declined (LCD off?)\n", i);
+            }
             fprintf(stderr,
                     "frame %lu: scroll=%02X menu=%02X scy=%3u scx=%3u "
-                    "camY=%u%u dirty=%02X\n",
+                    "camY=%u%u dirty=%02X trees=%d\n",
                     i, ctx->wram[0xCD00 - 0xC000], ctx->wram[0xCBCB - 0xC000],
                     ctx->io[0x42], ctx->io[0x43],
                     ctx->hram[0x2B], ctx->hram[0x2A],
-                    ctx->wram[0xCD01 - 0xC000]);
+                    ctx->wram[0xCD01 - 0xC000], grid.tree_count);
             if (getenv("VOX_DUMP_CC")) {
                 fprintf(stderr, "  CC2C:");
                 for (int c = 0; c < 12; c++) {
@@ -138,6 +152,59 @@ int main(int argc, char* argv[]) {
                     for (int c = 0; c < 16; c++) {
                         fprintf(stderr, " %02X",
                                 ctx->wram[0xCF00 + row * 16 + c - 0xC000]);
+                    }
+                    fprintf(stderr, "\n");
+                }
+            }
+            if (getenv("VOX_DUMP_HGT")) {
+                fprintf(stderr, "  hud_rows=%d fine=(%d,%d)\n",
+                        grid.hud_rows, grid.fine_x, grid.fine_y);
+                for (int ty = 0; ty < VOX_TILES_H; ty++) {
+                    fprintf(stderr, "  hgt %2d: ", ty);
+                    for (int tx = 0; tx < VOX_TILES_W; tx++) {
+                        int h = grid.height[ty][tx];
+                        fputc(grid.leafy[ty][tx] ? "wfLMH"[h] : "01234"[h],
+                              stderr);
+                    }
+                    fprintf(stderr, "\n");
+                }
+            }
+            if (getenv("VOX_DUMP_TREE")) {
+                /* Why each solid cell did or didn't become a billboard
+                 * tree: for every room cell, the height class + leafy flag
+                 * of its four screen tiles, using the same mapping the
+                 * extractor uses. */
+                int cam_y = (int)ctx->hram[0x2A] | ((int)ctx->hram[0x2B] << 8);
+                int cam_x = (int)ctx->hram[0x2C] | ((int)ctx->hram[0x2D] << 8);
+                int off_y = (int8_t)ctx->wram[0xCD08 - 0xC000];
+                int off_x = (int8_t)ctx->wram[0xCD09 - 0xC000];
+                for (int row = 0; row < 12; row++) {
+                    fprintf(stderr, "  tree %2d: ", row);
+                    for (int col = 0; col < 16; col++) {
+                        uint8_t cv = ctx->wram[0xCE00 + row * 16 + col - 0xC000];
+                        if (cv != 0x0F) { fputc('.', stderr); continue; }
+                        int sx = col * 16 - cam_x - off_x;
+                        int sy = row * 16 - cam_y - off_y + grid.hud_rows;
+                        int tx0 = (sx + grid.fine_x) >> 3;
+                        int ty0 = (sy + grid.fine_y) >> 3;
+                        if (tx0 < 0 || ty0 < 0 ||
+                            tx0 + 1 >= VOX_TILES_W || ty0 + 1 >= VOX_TILES_H) {
+                            fputc('o', stderr);   /* out of tile grid */
+                            continue;
+                        }
+                        int hi = 9, lo = -1, leaf = 0;
+                        for (int dy = 0; dy < 2; dy++)
+                            for (int dx = 0; dx < 2; dx++) {
+                                int h = grid.height[ty0 + dy][tx0 + dx];
+                                if (h < hi) hi = h;
+                                if (h > lo) lo = h;
+                                leaf += grid.leafy[ty0 + dy][tx0 + dx];
+                            }
+                        char m = (hi == VOX_H_HIGH && leaf == 4) ? 'T'
+                               : (leaf == 4) ? 'h'   /* leafy, not all HIGH */
+                               : (hi >= VOX_H_MID) ? 'l'  /* tall, not leafy */
+                               : '?';
+                        fprintf(stderr, "%c", m);
                     }
                     fprintf(stderr, "\n");
                 }
@@ -161,17 +228,6 @@ int main(int argc, char* argv[]) {
                     }
                     fprintf(stderr, "\n");
                 }
-            }
-            char path[512];
-            snprintf(path, sizeof(path), "%s-%lu-flat.ppm", argv[4], i);
-            write_ppm(path, fb, GB_SCREEN_WIDTH, GB_SCREEN_HEIGHT);
-            if (vox_scrape(ctx, fb, &grid, &sprites)) {
-                vox_render(ctx, &grid, &sprites, fb, mode, shot_scale, out);
-                snprintf(path, sizeof(path), "%s-%lu-vox.ppm", argv[4], i);
-                write_ppm(path, out, GB_SCREEN_WIDTH * shot_scale,
-                          GB_SCREEN_HEIGHT * shot_scale);
-            } else {
-                fprintf(stderr, "frame %lu: scrape declined (LCD off?)\n", i);
             }
         }
     }
