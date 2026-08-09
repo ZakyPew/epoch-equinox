@@ -117,17 +117,25 @@
   </div>
 
 <script>
-  /* Edit stream/now.txt while you stream and this picks it up within a
-     few seconds -- no need to touch OBS or reload the source. If the file
-     is missing the line simply keeps whatever it last showed. */
-  async function poll() {
-    try {
-      const r = await fetch('now.txt?t=' + Date.now(), {cache:'no-store'});
-      if (r.ok) {
-        const t = (await r.text()).trim();
-        if (t) document.getElementById('now').textContent = t;
-      }
-    } catch (e) { /* file:// without the sibling file — ignore */ }
+  /* Live status without fetch().
+   *
+   * OBS loads a local overlay over file://, and Chromium blocks fetch()
+   * and XHR against file:// URLs -- so the obvious implementation fails
+   * silently and the line never updates. Loading a <script> from the same
+   * folder IS allowed, so the status lives in now.js as a one-line call:
+   *
+   *     NOW("making the trees stop looking like spikes");
+   *
+   * Re-injected every few seconds with a cache-buster. If now.js is
+   * missing the default text just stays put. */
+  window.NOW = function (t) {
+    if (t) document.getElementById('now').textContent = t;
+  };
+  function poll() {
+    var s = document.createElement('script');
+    s.src = 'now.js?t=' + Date.now();
+    s.onload = s.onerror = function () { s.remove(); };
+    document.head.appendChild(s);
   }
   poll();
   setInterval(poll, 4000);

@@ -32,15 +32,27 @@ you're capturing.
 
 ## Change the "now building" line mid-stream
 
-Edit `stream/now.txt`, save, and the overlay picks it up within a few
-seconds. One line of plain text:
+Edit `stream/now.js`, save, and the overlay picks it up within a few
+seconds. One line:
 
-```
-chasing down the tree shapes
+```js
+NOW("chasing down the tree shapes");
 ```
 
-If the file is missing the overlay just keeps showing the last thing it
-read, so nothing breaks.
+If the file is missing the overlay keeps its default text, so nothing
+breaks.
+
+(It is a `.js` file rather than plain text for an annoying reason: OBS
+loads a local overlay over `file://`, and browsers block `fetch()` against
+`file://` URLs. Loading a script from the same folder is allowed, so this
+is the version that actually works.)
+
+## Cover art in the emblem
+
+The mark in the corner is your two covers as one split disc. Put
+`cover-ages.png` and `cover-seasons.png` next to the HTML — square crops,
+a few hundred pixels is plenty. Without them the emblem falls back to a
+plain gradient and nothing breaks.
 
 ## Notes
 

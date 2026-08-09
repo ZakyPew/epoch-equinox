@@ -43,7 +43,32 @@
     backdrop-filter:blur(6px);
     box-shadow:0 16px 44px rgba(0,0,0,.5);
   }
-  .glyph { width:62px; height:62px; flex:0 0 auto; }
+  /* The emblem is the two covers as one split disc -- Ages on the left,
+     Seasons on the right. Drop cover-ages.png and cover-seasons.png next
+     to this file; without them the gradient underneath shows through and
+     nothing breaks. */
+  .emblem {
+    position:relative; width:96px; height:96px; flex:0 0 auto;
+    border-radius:50%; overflow:hidden;
+    background:linear-gradient(150deg,#9CC8E0,#F0B888);
+    box-shadow:0 0 0 2px rgba(156,200,224,.45), 0 8px 20px rgba(0,0,0,.45);
+  }
+  .emblem i {
+    position:absolute; inset:0; display:block;
+    background-size:cover; background-position:center;
+  }
+  .emblem .a { clip-path:inset(0 50% 0 0); background-image:url("cover-ages.png"); }
+  .emblem .b { clip-path:inset(0 0 0 50%); background-image:url("cover-seasons.png"); }
+  .emblem::after {
+    content:""; position:absolute; inset:0;
+    background:linear-gradient(180deg, rgba(255,255,255,.10), rgba(0,0,0,.28));
+  }
+  .emblem .seam {
+    position:absolute; left:50%; top:0; bottom:0; width:2px;
+    transform:translateX(-1px);
+    background:linear-gradient(180deg,#9CC8E0,#F0B888); opacity:.85;
+    clip-path:none;
+  }
   .top-text { display:flex; flex-direction:column; gap:8px; min-width:0; }
   .name {
     font-size:36px; letter-spacing:.05em; color:var(--ink);
@@ -105,18 +130,9 @@
 <body>
 
   <div class="top">
-    <svg class="glyph" viewBox="0 0 48 48" aria-hidden="true">
-      <defs>
-        <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0" stop-color="#9CC8E0"/>
-          <stop offset="1" stop-color="#F0B888"/>
-        </linearGradient>
-      </defs>
-      <circle cx="24" cy="24" r="20" fill="none" stroke="url(#g)" stroke-width="2.2"/>
-      <path d="M24 4 L24 44" stroke="url(#g)" stroke-width="2.2"/>
-      <path d="M24 4 A20 20 0 0 1 24 44 Z" fill="url(#g)" opacity=".28"/>
-      <circle cx="24" cy="24" r="4.4" fill="url(#g)"/>
-    </svg>
+    <div class="emblem" aria-hidden="true">
+      <i class="a"></i><i class="b"></i><span class="seam"></span>
+    </div>
     <div class="top-text">
       <div class="name">EPOCH &amp; EQUINOX</div>
       <div class="tag">A Game Boy world rebuilt in 3D<br>from its own memory</div>
@@ -137,16 +153,25 @@
   </div>
 
 <script>
-  /* Same live text file as the horizontal overlay, so one edit updates
-     whichever layout is on screen. */
-  async function poll() {
-    try {
-      const r = await fetch('now.txt?t=' + Date.now(), {cache:'no-store'});
-      if (r.ok) {
-        const t = (await r.text()).trim();
-        if (t) document.getElementById('now').textContent = t;
-      }
-    } catch (e) {}
+  /* Live status without fetch().
+   *
+   * OBS loads a local overlay over file://, and Chromium blocks fetch()
+   * and XHR against file:// URLs -- so the obvious implementation fails
+   * silently and the line never updates. Loading a <script> from the same
+   * folder IS allowed, so the status lives in now.js as a one-line call:
+   *
+   *     NOW("making the trees stop looking like spikes");
+   *
+   * Re-injected every few seconds with a cache-buster. If now.js is
+   * missing the default text just stays put. */
+  window.NOW = function (t) {
+    if (t) document.getElementById('now').textContent = t;
+  };
+  function poll() {
+    var s = document.createElement('script');
+    s.src = 'now.js?t=' + Date.now();
+    s.onload = s.onerror = function () { s.remove(); };
+    document.head.appendChild(s);
   }
   poll();
   setInterval(poll, 4000);
