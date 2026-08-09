@@ -186,6 +186,8 @@ static void vox_paint_sky(int kind, uint32_t* out, int S) {
 /* chase camera                                                        */
 /* ------------------------------------------------------------------ */
 
+static inline int top_rim(int S) { return 2 * S; }
+
 static inline uint32_t chase_tex_at(const VoxTileGrid* grid, float x, float y) {
     int px = (int)(x + (float)grid->fine_x);
     int py = (int)(y + (float)grid->fine_y);
@@ -206,7 +208,7 @@ static void render_chase(GBContext* ctx, const VoxTileGrid* grid,
     const int OW = GB_SCREEN_WIDTH * S;
     const int OH = GB_SCREEN_HEIGHT * S;
     const int world_top = grid->hud_rows;
-    const float HPX = 5.0f;             /* vertical px per height unit */
+    const float HPX = 3.2f;             /* vertical px per height unit */
     const float FAR = 230.0f;
 
     /* Sky first; the ground overwrites what it owns. */
@@ -225,23 +227,43 @@ static void render_chase(GBContext* ctx, const VoxTileGrid* grid,
     float lx = grid->link_known ? (float)grid->link_sx : 80.0f;
     float ly = grid->link_known ? (float)grid->link_feet_sy : 104.0f;
 
-    /* Yaw eases toward the player's facing, so 4-way turns sweep the
-     * camera around instead of snapping it. */
+    /* The camera is on the stick, not on the d-pad: auto-following Link's
+     * 4-way facing swung the world around on every tap, which played as
+     * chaos. Yaw is yours -- right stick, or Q/E on the keyboard -- and
+     * holds steady otherwise. Default: behind Link, looking north. */
     static float yaw = -1.5708f;
-    static const float DIR_YAW[4] = {-1.5708f, 0.0f, 1.5708f, 3.14159f};
-    float target = DIR_YAW[grid->link_known ? (grid->link_dir & 3) : 0];
-    float diff = target - yaw;
-    while (diff > 3.14159f) diff -= 6.28318f;
-    while (diff < -3.14159f) diff += 6.28318f;
-    yaw += diff * 0.12f;
+#ifdef GB_HAS_SDL2
+    {
+        float turn = 0.0f;
+        const Uint8* keys = SDL_GetKeyboardState(NULL);
+        if (keys) {
+            if (keys[SDL_SCANCODE_Q]) turn -= 1.0f;
+            if (keys[SDL_SCANCODE_E]) turn += 1.0f;
+        }
+        SDL_GameController* pad = SDL_GameControllerFromPlayerIndex(0);
+        if (pad) {
+            Sint16 ax = SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_RIGHTX);
+            if (ax > 6000 || ax < -6000) turn += (float)ax / 32767.0f;
+        }
+        yaw += turn * 0.055f;
+    }
+#endif
 
     const float fxv = cosf(yaw), fyv = sinf(yaw);
     const float rxv = -fyv, ryv = fxv;      /* screen-space right vector */
 
-    const float BACK = 46.0f;               /* camera behind the player */
-    const float CAMH = 26.0f;               /* and above their ground */
-    float cx = lx - fxv * BACK;
-    float cy = ly - fyv * BACK;
+    const float BACK = 44.0f;               /* camera behind the player */
+    const float CAMH = 22.0f;               /* and above their ground */
+    /* Ease the camera's position so Link's whole-pixel steps (and room
+     * transitions) glide instead of ticking. */
+    static float scx_f = 0.0f, scy_f = 0.0f;
+    static bool cam_live = false;
+    float tx = lx - fxv * BACK;
+    float ty = ly - fyv * BACK;
+    if (!cam_live) { scx_f = tx; scy_f = ty; cam_live = true; }
+    scx_f += (tx - scx_f) * 0.35f;
+    scy_f += (ty - scy_f) * 0.35f;
+    float cx = scx_f, cy = scy_f;
     float cg = height_at(grid, cx, cy);
     if (cg < 0.0f) cg = 0.0f;
     const float cz = cg * HPX + CAMH;
@@ -256,6 +278,7 @@ static void render_chase(GBContext* ctx, const VoxTileGrid* grid,
         float rx = fxv + rxv * ndc;
         float ry = fyv + ryv * ndc;
         int ybuf = OH;
+        float ph = 0.0f;
         for (float d = 8.0f; d < FAR; d += (d < 70.0f ? 0.6f : 1.4f)) {
             float wx2 = cx + rx * d;
             float wy2 = cy + ry * d;
@@ -278,71 +301,115 @@ static void render_chase(GBContext* ctx, const VoxTileGrid* grid,
                 int t = (int)(d * 256.0f / FAR);
                 if (t > 225) t = 225;
                 c = lerp_color(c, fog, t);
+                /* A step up in height means this span is mostly the riser's
+                 * front face: darken it below a thin lit rim, so cliffs and
+                 * tree lines read as forms instead of vertical streaks. */
+                bool face = h > ph + 0.25f;
+                uint32_t cw = face ? shade(c, 148) : c;
+                int rim = top_rim(S);
                 int top = sy < 0 ? 0 : sy;
                 for (int yy = top; yy < ybuf; yy++) {
-                    out[yy * OW + X] = c;
+                    out[yy * OW + X] = (face && yy >= top + rim) ? cw : c;
                 }
                 ybuf = top;
                 if (ybuf <= 0) break;
             }
+            ph = h;
         }
     }
 
-    /* Sprites: farthest first, scaled by depth, standing on their ground. */
-    int order[VOX_MAX_SPRITES];
-    float depth[VOX_MAX_SPRITES];
-    int n = 0;
+    /* Sprites: adjacent 8px OAM entries at the same y are one character,
+     * and drawing the halves as independent billboards let them drift into
+     * twins with depth. Group each horizontal run, then draw runs farthest
+     * first, scaled by depth, standing on their ground. */
+    typedef struct {
+        int members[6];      /* sprite indices, left to right */
+        int n;
+        int x, y, sh;
+        float dep, lat, g;
+    } ChaseRun;
+    ChaseRun runs[VOX_MAX_SPRITES];
+    bool used[VOX_MAX_SPRITES] = {false};
+    int nr = 0;
     for (int i = 0; i < sprites->count; i++) {
+        if (used[i]) continue;
         const VoxSprite* s = &sprites->entries[i];
-        float pxc = (float)(s->x + 4);
-        float pyc = (float)(s->y + (s->tall ? 16 : 8));
-        float dep = (pxc - cx) * fxv + (pyc - cy) * fyv;
-        if (dep < 10.0f || dep > FAR) continue;
-        order[n] = i;
-        depth[n] = dep;
-        n++;
+        /* Find the leftmost member of this run. */
+        int lx0 = s->x;
+        for (bool moved = true; moved;) {
+            moved = false;
+            for (int j = 0; j < sprites->count; j++) {
+                if (!used[j] && sprites->entries[j].y == s->y &&
+                    sprites->entries[j].x == lx0 - 8) {
+                    lx0 -= 8;
+                    moved = true;
+                }
+            }
+        }
+        ChaseRun* r = &runs[nr];
+        r->n = 0;
+        r->x = lx0;
+        r->y = s->y;
+        r->sh = s->tall ? 16 : 8;
+        for (int step = 0; step < 6; step++) {
+            int want = lx0 + step * 8;
+            int found = -1;
+            for (int j = 0; j < sprites->count; j++) {
+                if (!used[j] && sprites->entries[j].y == s->y &&
+                    sprites->entries[j].x == want) { found = j; break; }
+            }
+            if (found < 0) break;
+            used[found] = true;
+            r->members[r->n++] = found;
+        }
+        if (r->n == 0) continue;
+
+        float pxc = (float)r->x + (float)(r->n * 8) * 0.5f;
+        float pyc = (float)(r->y + r->sh);
+        r->dep = (pxc - cx) * fxv + (pyc - cy) * fyv;
+        r->lat = (pxc - cx) * rxv + (pyc - cy) * ryv;
+        if (r->dep < 10.0f || r->dep > FAR) continue;
+        r->g = height_at(grid, pxc, pyc);
+        if (r->g < 0.0f) r->g = 0.0f;
+        nr++;
     }
-    for (int a = 1; a < n; a++) {
-        int oi = order[a];
-        float od = depth[a];
+    for (int a = 1; a < nr; a++) {
+        ChaseRun tmp = runs[a];
         int b = a - 1;
-        while (b >= 0 && depth[b] < od) {
-            order[b + 1] = order[b];
-            depth[b + 1] = depth[b];
+        while (b >= 0 && runs[b].dep < tmp.dep) {
+            runs[b + 1] = runs[b];
             b--;
         }
-        order[b + 1] = oi;
-        depth[b + 1] = od;
+        runs[b + 1] = tmp;
     }
-    for (int k = 0; k < n; k++) {
-        const VoxSprite* s = &sprites->entries[order[k]];
-        float dep = depth[k];
-        int sh = s->tall ? 16 : 8;
-        float pxc = (float)(s->x + 4);
-        float pyc = (float)(s->y + sh);
-        float lat = (pxc - cx) * rxv + (pyc - cy) * ryv;
-        float g = height_at(grid, pxc, pyc);
-        if (g < 0.0f) g = 0.0f;
-        float scale = focal / dep;
-        int cxp = (int)((float)OW * 0.5f + lat / dep * focal);
-        int byp = horizon + (int)((cz - g * HPX) * focal / dep);
-        int w2 = (int)(8.0f * scale / (float)S + 0.5f) * S;
-        int h2 = (int)((float)sh * scale / (float)S + 0.5f) * S;
+    for (int k = 0; k < nr; k++) {
+        const ChaseRun* r = &runs[k];
+        float scale = focal / r->dep;
+        int wgb = r->n * 8;
+        int cxp = (int)((float)OW * 0.5f + r->lat / r->dep * focal);
+        int byp = horizon + (int)((cz - r->g * HPX) * focal / r->dep);
+        int w2 = (int)((float)wgb * scale / (float)S + 0.5f) * S;
+        int h2 = (int)((float)r->sh * scale / (float)S + 0.5f) * S;
         if (w2 < 2 || h2 < 2) continue;
-        for (int row = 0; row < sh; row++) {
-            uint32_t px8[8];
-            vox_decode_sprite_row(ctx, s, row, px8);
-            int y0 = byp - h2 + row * h2 / sh;
-            int y1 = byp - h2 + (row + 1) * h2 / sh;
-            for (int yy = y0; yy < y1; yy++) {
-                if (yy < 0 || yy >= OH) continue;
-                for (int c2 = 0; c2 < 8; c2++) {
-                    if (!px8[c2]) continue;
-                    int x0 = cxp - w2 / 2 + c2 * w2 / 8;
-                    int x1 = cxp - w2 / 2 + (c2 + 1) * w2 / 8;
-                    for (int xx = x0; xx < x1; xx++) {
-                        if (xx < 0 || xx >= OW) continue;
-                        out[yy * OW + xx] = px8[c2];
+        int left = cxp - w2 / 2;
+        for (int m = 0; m < r->n; m++) {
+            const VoxSprite* s = &sprites->entries[r->members[m]];
+            for (int row = 0; row < r->sh; row++) {
+                uint32_t px8[8];
+                vox_decode_sprite_row(ctx, s, row, px8);
+                int y0 = byp - h2 + row * h2 / r->sh;
+                int y1 = byp - h2 + (row + 1) * h2 / r->sh;
+                for (int yy = y0; yy < y1; yy++) {
+                    if (yy < 0 || yy >= OH) continue;
+                    for (int c2 = 0; c2 < 8; c2++) {
+                        if (!px8[c2]) continue;
+                        int gcol = m * 8 + c2;
+                        int x0 = left + gcol * w2 / wgb;
+                        int x1 = left + (gcol + 1) * w2 / wgb;
+                        for (int xx = x0; xx < x1; xx++) {
+                            if (xx < 0 || xx >= OW) continue;
+                            out[yy * OW + xx] = px8[c2];
+                        }
                     }
                 }
             }
