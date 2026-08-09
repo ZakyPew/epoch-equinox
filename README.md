@@ -365,6 +365,12 @@ that one run only.
 
 </details>
 
+## Streaming
+
+`stream/overlay.html` is a transparent 1920×1080 OBS overlay with the project
+name and repo link, plus a "now building" line you can edit live in
+`stream/now.txt`. Setup is three clicks — see [stream/README.md](stream/README.md).
+
 ## Roadmap
 
 What's next, what it costs, and what blocks what: **[ROADMAP.md](ROADMAP.md)**.
