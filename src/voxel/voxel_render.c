@@ -180,12 +180,20 @@ static inline uint32_t shade(uint32_t c, int mul /* 0..~272 */) {
     return 0xFF000000u | (b << 16) | (g << 8) | r;
 }
 
+/* While the chase camera renders, tree cells drop out of the heightfield:
+ * their trunks and canopies are drawn as billboards instead, so the ground
+ * plane runs beneath them. The diorama never sets this and keeps its
+ * extruded domes. */
+static bool g_flatten_trees = false;
+
 /* Height class of one tile, clamped to the grid. */
 static inline float cell_h(const VoxTileGrid* grid, int tx, int ty) {
     if (tx < 0) tx = 0;
     if (tx >= VOX_TILES_W) tx = VOX_TILES_W - 1;
     if (ty < 0) ty = 0;
     if (ty >= VOX_TILES_H) ty = VOX_TILES_H - 1;
+    if (g_flatten_trees && grid->treecell[ty][tx])
+        return VOX_UNITS[VOX_H_FLOOR];
     return VOX_UNITS[grid->height[ty][tx]];
 }
 
@@ -215,6 +223,8 @@ static inline float height_at(const VoxTileGrid* grid, float x, float y) {
     if (tx >= VOX_TILES_W) tx = VOX_TILES_W - 1;
     if (ty < 0) ty = 0;
     if (ty >= VOX_TILES_H) ty = VOX_TILES_H - 1;
+    if (g_flatten_trees && grid->treecell[ty][tx])
+        return VOX_UNITS[VOX_H_FLOOR];
     float h = VOX_UNITS[grid->height[ty][tx]];
     if (h <= 0.0f || !grid->leafy[ty][tx]) return h;
 
@@ -346,6 +356,7 @@ static void render_chase(GBContext* ctx, const VoxTileGrid* grid,
     const float FAR = 230.0f;
 
     for (int i = 0; i < OW * OH; i++) s_zbuf[i] = 1e9f;
+    g_flatten_trees = true;
 
     /* Sky first; the ground overwrites what it owns. */
     if (grid->sky != VOX_SKY_NONE) {
@@ -627,8 +638,99 @@ static void render_chase(GBContext* ctx, const VoxTileGrid* grid,
         }
         runs[b + 1] = tmp;
     }
-    for (int k = 0; k < nr; k++) {
-        const ChaseRun* r = &runs[k];
+
+    /* Billboard trees, depth-sorted into the same painter's pass as the
+     * sprites, so a character walks behind one trunk and in front of the
+     * next tree down the row. */
+    int nt = 0;
+    float tdep[VOX_MAX_TREES], tlat[VOX_MAX_TREES], tg[VOX_MAX_TREES];
+    const VoxTree* tptr[VOX_MAX_TREES];
+    for (int i = 0; i < grid->tree_count; i++) {
+        const VoxTree* t = &grid->trees[i];
+        float pxc = (float)t->sx + 8.0f;
+        float pyc = (float)t->sy + 16.0f;
+        float dep = (pxc - cx) * fxv + (pyc - cy) * fyv;
+        if (dep < 16.0f || dep > FAR) continue;
+        tdep[nt] = dep;
+        tlat[nt] = (pxc - cx) * rxv + (pyc - cy) * ryv;
+        float gh = chase_height_at(grid, pxc, pyc);
+        tg[nt] = gh < 0.0f ? 0.0f : gh;
+        tptr[nt] = t;
+        nt++;
+    }
+    for (int a = 1; a < nt; a++) {
+        float d0 = tdep[a], l0 = tlat[a], g0 = tg[a];
+        const VoxTree* p0 = tptr[a];
+        int b = a - 1;
+        while (b >= 0 && tdep[b] < d0) {
+            tdep[b + 1] = tdep[b]; tlat[b + 1] = tlat[b];
+            tg[b + 1] = tg[b];     tptr[b + 1] = tptr[b];
+            b--;
+        }
+        tdep[b + 1] = d0; tlat[b + 1] = l0; tg[b + 1] = g0; tptr[b + 1] = p0;
+    }
+
+    int ri = 0, ti = 0;
+    while (ri < nr || ti < nt) {
+        if (ti < nt && (ri >= nr || tdep[ti] >= runs[ri].dep)) {
+            /* One tree: a bark trunk and an elliptical canopy shaded in
+             * the three tones sampled from its own art -- lit crown, mid
+             * body, shadowed underside -- with a checker dither at the
+             * band seams so it stays pixel-art and not vector clip-art. */
+            const VoxTree* t = tptr[ti];
+            float dep = tdep[ti];
+            float sc = focal / dep;
+            int cxp = (int)((float)OW * 0.5f + tlat[ti] / dep * focal);
+            int byp = horizon + (int)((cz - tg[ti] * HPX) * focal / dep);
+            int t2 = (int)((dep - g_tune.fog_start) * 256.0f /
+                           (FAR - g_tune.fog_start));
+            if (t2 < 0) t2 = 0;
+            if (t2 > (int)g_tune.fog_max) t2 = (int)g_tune.fog_max;
+            /* Proportions by height class: HIGH cells are full trees,
+             * MID cells squat shrubs (bushes keep reading as cuttable). */
+            bool big = t->hcls >= VOX_H_HIGH;
+            int th2 = (int)((big ? 9.0f : 4.0f) * sc);
+            int tw2 = (int)((big ? 6.0f : 5.0f) * sc);
+            int chh = (int)((big ? 22.0f : 13.0f) * sc);
+            int cww = (int)((big ? 24.0f : 17.0f) * sc);
+            ti++;
+            if (chh < 3 || cww < 3) continue;
+            if (tw2 < 2) tw2 = 2;
+            uint32_t bark = lerp_color(t->bark, fog, t2);
+            uint32_t lit  = lerp_color(t->lit, fog, t2);
+            uint32_t mid  = lerp_color(t->mid, fog, t2);
+            uint32_t dk   = lerp_color(shade(t->dark, 200), fog, t2);
+            for (int yy = byp - th2; yy < byp; yy++) {
+                if (yy < 0 || yy >= OH) continue;
+                for (int k2 = 0; k2 < tw2; k2++) {
+                    int xx = cxp - tw2 / 2 + k2;
+                    if (xx < 0 || xx >= OW) continue;
+                    if (s_zbuf[yy * OW + xx] < dep - 3.0f) continue;
+                    out[yy * OW + xx] = (k2 == 0 || k2 == tw2 - 1)
+                        ? shade(bark, 150) : bark;
+                }
+            }
+            int cyc = byp - th2 - chh / 2;
+            for (int yy = cyc - chh / 2; yy <= cyc + chh / 2; yy++) {
+                if (yy < 0 || yy >= OH) continue;
+                float v = (float)(yy - cyc) / ((float)chh * 0.5f);
+                for (int xx = cxp - cww / 2; xx <= cxp + cww / 2; xx++) {
+                    if (xx < 0 || xx >= OW) continue;
+                    float u = (float)(xx - cxp) / ((float)cww * 0.5f);
+                    float r2 = u * u + v * v;
+                    if (r2 > 1.0f) continue;
+                    if (s_zbuf[yy * OW + xx] < dep - 3.0f) continue;
+                    float sv = v + 0.40f * u * u
+                             + (((xx ^ yy) & 1) ? 0.05f : -0.05f);
+                    uint32_t c2 = sv < -0.20f ? lit
+                                 : (sv < 0.40f ? mid : dk);
+                    if (r2 > 0.82f) c2 = shade(c2, 132);
+                    out[yy * OW + xx] = c2;
+                }
+            }
+            continue;
+        }
+        const ChaseRun* r = &runs[ri++];
         float scale = focal / r->dep;
         int wgb = r->n * 8;
         int cxp = (int)((float)OW * 0.5f + r->lat / r->dep * focal);
@@ -709,6 +811,7 @@ void vox_render(GBContext* ctx, const VoxTileGrid* grid,
 
     if (mode == VOXEL_MODE_CHASE) {
         render_chase(ctx, grid, sprites, S, out);
+        g_flatten_trees = false;   /* diorama modes keep extruded trees */
         goto compose_overlays;
     }
 

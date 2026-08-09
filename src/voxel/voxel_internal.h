@@ -81,6 +81,18 @@ uint8_t vox_oracle_height(uint8_t collision, uint8_t colour_class);
 const uint8_t* vox_override_lookup(bool is_seasons, int group, int room,
                                    const uint8_t* collisions);
 
+/* One 16x16 tree object, for the chase camera's billboard trees. The
+ * canopy palette is sampled from the tree's own tile art so seasonal
+ * palettes carry over. Screen px of the cell's top-left corner. */
+typedef struct {
+    int sx, sy;
+    int hcls;                  /* VOX_H_MID = shrub, VOX_H_HIGH = tree */
+    uint32_t lit, mid, dark;   /* canopy shades, bright to shadow */
+    uint32_t bark;             /* trunk */
+} VoxTree;
+
+#define VOX_MAX_TREES 64
+
 typedef struct {
     /* Per visible tile: height class and whether it's part of the window
      * layer (HUD) rather than the scrolling BG. */
@@ -117,6 +129,13 @@ typedef struct {
     /* Sub-tile scroll remainder, so the height grid can be sampled in
      * screen space. */
     uint8_t fine_x, fine_y;
+    /* Billboard trees (chase camera only): 16px room cells that are one
+     * whole tree. treecell marks their 8px tiles so the chase heightfield
+     * can treat them as open ground under a free-standing canopy; the
+     * diorama ignores both fields and keeps its extruded domes. */
+    uint8_t treecell[VOX_TILES_H][VOX_TILES_W];
+    VoxTree trees[VOX_MAX_TREES];
+    int tree_count;
     /* Height in screen pixels of the HUD band at the top of the screen.
      *
      * Oracles does not use the window layer for its status bar — probing the
