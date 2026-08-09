@@ -365,6 +365,10 @@ that one run only.
 
 </details>
 
+## Roadmap
+
+What's next, what it costs, and what blocks what: **[ROADMAP.md](ROADMAP.md)**.
+
 ## Contributing — we'd love more hands
 
 The surface area is now bigger than one keyboard. The build is ~1 minute
