@@ -615,23 +615,34 @@ class LauncherView(QWidget):
                 Qt.AspectRatioMode.KeepAspectRatioByExpanding,
                 Qt.TransformationMode.SmoothTransformation,
             )
-            pr.setOpacity(0.78 if active else 0.24)
+            # Both covers stay legible. Drawing the inactive one at a
+            # quarter opacity over a near-black ground assumed bright art;
+            # a dark cover just turned to mud. The active/inactive
+            # hierarchy comes from the veil below and the text treatment,
+            # not from crushing the artwork.
+            pr.setOpacity(1.0 if active else 0.72)
             pr.drawPixmap(
                 int(cx - scaled.width() / 2), int(h / 2 - scaled.height() / 2), scaled
             )
             pr.setOpacity(1.0)
 
+            if not active:
+                pr.fillPath(path, QBrush(QColor(6, 8, 12, 92)))
+
             # Scrim under the text side. Custom art is drawn bright enough to
             # actually look at, so the title and menu need their own contrast
             # rather than relying on the art being dim.
+            # Only as much scrim as the text actually needs. Fading to
+            # clear at 0.55 shaded over half the artwork, which on a dark
+            # cover read as "the whole panel is dim".
             scrim = QLinearGradient(0, 0, w, 0)
-            dark = QColor(0, 0, 0, 205)
+            dark = QColor(0, 0, 0, 188)
             clear = QColor(0, 0, 0, 0)
             if index == 0:
                 scrim.setColorAt(0.0, dark)
-                scrim.setColorAt(0.55, clear)
+                scrim.setColorAt(0.34, clear)
             else:
-                scrim.setColorAt(0.45, clear)
+                scrim.setColorAt(0.66, clear)
                 scrim.setColorAt(1.0, dark)
             pr.fillPath(path, QBrush(scrim))
         else:
@@ -645,6 +656,23 @@ class LauncherView(QWidget):
 
         self._paint_text(pr, index, game, theme, w, h, active)
         pr.restore()
+
+    @staticmethod
+    def _text(pr: QPainter, rect: QRectF, align, s: str, ink: QColor,
+              shadow: float = 1.6) -> None:
+        """Draw text with a soft dark offset behind it.
+
+        The scrim is deliberately narrow now, so text can land on bright
+        artwork (snowfields, waterfalls). A shadow costs nothing and keeps
+        every label readable regardless of what cover art someone drops in.
+        """
+        if shadow > 0.0:
+            dark = QColor(0, 0, 0, 165)
+            dark.setAlphaF(dark.alphaF() * ink.alphaF())
+            pr.setPen(dark)
+            pr.drawText(rect.translated(shadow, shadow), align, s)
+        pr.setPen(ink)
+        pr.drawText(rect, align, s)
 
     def _paint_text(
         self,
@@ -669,19 +697,18 @@ class LauncherView(QWidget):
         pr.setFont(label_font(8.5, 3.2))
         sub = QColor(theme.accent)
         sub.setAlphaF(0.85 if active else 0.35)
-        pr.setPen(sub)
-        pr.drawText(QRectF(x, h * 0.13, box_w, 22), align, "EPOCH & EQUINOX")
+        self._text(pr, QRectF(x, h * 0.13, box_w, 22), align,
+                   "EPOCH & EQUINOX", sub, 1.2)
 
         pr.setFont(title_font(30 if active else 27, QFont.Weight.Light))
-        pr.setPen(ink)
-        pr.drawText(QRectF(x, h * 0.16, box_w, 64), align, game.title)
+        self._text(pr, QRectF(x, h * 0.16, box_w, 64), align, game.title, ink, 2.0)
 
         if not game.playable:
             warn = QColor(236, 150, 140)
             warn.setAlphaF(0.95 if active else 0.4)
             pr.setFont(label_font(8.0, 2.6))
-            pr.setPen(warn)
-            pr.drawText(QRectF(x, h * 0.245, box_w, 20), align, "ROM REQUIRED")
+            self._text(pr, QRectF(x, h * 0.245, box_w, 20), align,
+                       "ROM REQUIRED", warn, 1.2)
 
         if active:
             self._paint_menu(pr, game, theme, x, box_w, h, align)
@@ -714,8 +741,8 @@ class LauncherView(QWidget):
             else:
                 col = QColor(theme.ink)
                 col.setAlphaF(0.86)
-            pr.setPen(col)
-            pr.drawText(rect, align | Qt.AlignmentFlag.AlignVCenter, f"{item}  ·")
+            self._text(pr, rect, align | Qt.AlignmentFlag.AlignVCenter,
+                       f"{item}  ·", col, 1.8)
 
 
 # --------------------------------------------------------------------------
