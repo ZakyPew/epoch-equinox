@@ -92,6 +92,11 @@ void voxel_install(void);
  * Call after gb_platform_init(). Implemented in voxel_menu.cpp. */
 void voxel_menu_install(void);
 
+/** Rotate the pressed d-pad direction into the chase camera's frame.
+ *  Call once per frame after input is polled; a no-op in every other
+ *  mode. Without it, "right" walks east even when east is behind you. */
+void voxel_remap_dpad(void);
+
 /** Current mode (VOXEL_MODE_*). */
 int  voxel_get_mode(void);
 void voxel_set_mode(int mode);

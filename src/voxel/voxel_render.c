@@ -47,6 +47,7 @@
 /* ------------------------------------------------------------------ */
 
 static int g_mode = VOXEL_MODE_OFF;
+static float g_chase_yaw = -1.5708f;   /* camera heading, radians */
 static int g_scale = 3;
 static uint32_t g_out[GB_FRAMEBUFFER_SIZE * VOX_MAX_SCALE * VOX_MAX_SCALE];
 static VoxTileGrid g_grid;
@@ -358,7 +359,6 @@ static void render_chase(GBContext* ctx, const VoxTileGrid* grid,
      * 4-way facing swung the world around on every tap, which played as
      * chaos. Yaw is yours -- right stick, or Q/E on the keyboard -- and
      * holds steady otherwise. Default: behind Link, looking north. */
-    static float yaw = -1.5708f;
 #ifdef GB_HAS_SDL2
     {
         float turn = 0.0f;
@@ -372,16 +372,17 @@ static void render_chase(GBContext* ctx, const VoxTileGrid* grid,
             Sint16 ax = SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_RIGHTX);
             if (ax > 6000 || ax < -6000) turn += (float)ax / 32767.0f;
         }
-        yaw += turn * 0.055f;
+        g_chase_yaw += turn * 0.055f;
     }
 #endif
 
-    /* Screen space has y growing DOWNWARD, so the right-handed pairing
-     * (-sin, cos) points screen-left and the view came out mirrored:
-     * pushing the stick right swung the world left, and forward walked
-     * toward the camera. (+sin, -cos) is right in screen space. */
-    const float fxv = cosf(yaw), fyv = sinf(yaw);
-    const float rxv = fyv, ryv = -fxv;      /* screen-space right vector */
+    /* Facing north (g_chase_yaw -pi/2) the forward vector is (0,-1) -- up the
+     * screen -- and the viewer's right hand points east, (+1,0). That is
+     * (-fy, fx). An earlier pass flipped this to (fy,-fx), which mirrored
+     * the whole view: the world looked plausible but left and right were
+     * swapped, so walking east moved you screen-left. */
+    const float fxv = cosf(g_chase_yaw), fyv = sinf(g_chase_yaw);
+    const float rxv = -fyv, ryv = fxv;      /* screen-space right vector */
 
     const float BACK = g_tune.chase_back;   /* camera behind the player */
     const float CAMH = g_tune.chase_height; /* and above their ground */
@@ -426,6 +427,9 @@ static void render_chase(GBContext* ctx, const VoxTileGrid* grid,
             float sy2 = wy2 < (float)world_top ? (float)world_top
                       : (wy2 > (float)(GB_SCREEN_HEIGHT - 1)
                          ? (float)(GB_SCREEN_HEIGHT - 1) : wy2);
+            int tex_col = (int)(sx2 + (float)grid->fine_x);
+            if (tex_col < 0) tex_col = 0;
+            if (tex_col >= VOX_TEX_W) tex_col = VOX_TEX_W - 1;
             float h = chase_height_at(grid, sx2, sy2);
             if (!inside) {
                 /* Outside the room the border cell repeats, so a treeline
@@ -465,11 +469,31 @@ static void render_chase(GBContext* ctx, const VoxTileGrid* grid,
                  * front face: darken it below a thin lit rim, so cliffs and
                  * tree lines read as forms instead of vertical streaks. */
                 bool face = h > ph + 0.25f;
-                uint32_t cw = face ? shade(c, 178) : c;
                 int rim = top_rim(S);
                 int top = sy < 0 ? 0 : sy;
-                for (int yy = top; yy < ybuf; yy++) {
-                    out[yy * OW + X] = (face && yy >= top + rim) ? cw : c;
+                if (face && ybuf - top > rim + 1) {
+                    /* A riser's front face: run the cell's own 8px artwork
+                     * down it instead of smearing one colour, which at tall
+                     * tree heights left long vertical streaks. Darkened,
+                     * with a lit rim along the top edge. */
+                    int tile_top = ((int)(sy2 + (float)grid->fine_y)) & ~7;
+                    if (tile_top < 0) tile_top = 0;
+                    if (tile_top > VOX_TEX_H - 8) tile_top = VOX_TEX_H - 8;
+                    int span = ybuf - top;
+                    for (int yy = top; yy < ybuf; yy++) {
+                        if (yy < top + rim) { out[yy * OW + X] = c; continue; }
+                        int art = ((yy - top) * 8) / span;
+                        if (art > 7) art = 7;
+                        uint32_t wc = grid->tex[(tile_top + art) * VOX_TEX_W + tex_col];
+                        int t2 = (int)((d - g_tune.fog_start) * 256.0f /
+                                       (FAR - g_tune.fog_start));
+                        if (t2 < 0) t2 = 0;
+                        if (t2 > (int)g_tune.fog_max) t2 = (int)g_tune.fog_max;
+                        wc = lerp_color(shade(wc, 168), fog, t2);
+                        out[yy * OW + X] = wc;
+                    }
+                } else {
+                    for (int yy = top; yy < ybuf; yy++) out[yy * OW + X] = c;
                 }
                 ybuf = top;
                 if (ybuf <= 0) break;
@@ -905,6 +929,50 @@ static const uint32_t* voxel_frame_hook(GBContext* ctx, const uint32_t* fb,
     *out_w = GB_SCREEN_WIDTH * g_scale;
     *out_h = GB_SCREEN_HEIGHT * g_scale;
     return g_out;
+}
+
+/* Camera-relative movement for the chase camera.
+ *
+ * The d-pad is world-fixed: right always walks east. That is invisible in
+ * a top-down game, and wrong the moment the camera can turn -- east is
+ * only screen-right while the camera looks north. This rotates the
+ * pressed direction into the camera's frame, so "right" is always the
+ * right of what you can see.
+ *
+ * Bits are active-low: Down, Up, Left, Right in bits 3..0.
+ */
+void voxel_remap_dpad(void) {
+    if (g_mode != VOXEL_MODE_CHASE) return;
+
+    const uint8_t pressed = (uint8_t)(~g_joypad_dpad & 0x0F);
+    if (!pressed) return;
+
+    /* Screen-space direction the player asked for (y grows downward). */
+    float dx = 0.0f, dy = 0.0f;
+    if (pressed & 0x01) dx += 1.0f;   /* right */
+    if (pressed & 0x02) dx -= 1.0f;   /* left  */
+    if (pressed & 0x04) dy -= 1.0f;   /* up    */
+    if (pressed & 0x08) dy += 1.0f;   /* down  */
+    if (dx == 0.0f && dy == 0.0f) return;
+
+    /* Rotate out of the camera's frame into the world. The camera's
+     * forward is world "screen up", its right is world "screen right". */
+    const float fx = cosf(g_chase_yaw), fy = sinf(g_chase_yaw);
+    const float rx = -fy, ry = fx;
+    const float wx = rx * dx + fx * dy;
+    const float wy = ry * dx + fy * dy;
+
+    /* Snap to the four directions the game actually accepts. Diagonals
+     * survive because both axes can clear their threshold. */
+    uint8_t out = 0;
+    const float T = 0.38f;
+    if (wx >  T) out |= 0x01;
+    if (wx < -T) out |= 0x02;
+    if (wy < -T) out |= 0x04;
+    if (wy >  T) out |= 0x08;
+    if (!out) return;
+
+    g_joypad_dpad = (uint8_t)((g_joypad_dpad | 0x0F) & ~out);
 }
 
 void voxel_install(void) {

@@ -501,6 +501,31 @@ bool vox_scrape(GBContext* ctx, const uint32_t* fb, VoxTileGrid* grid,
     s_have_world = use_oracle;
 
 scan_sprites:
+    /* Foliage is classified per 8px tile, but a tree is a 16px object: one
+     * half of it reading "leafy" and the other half not made the renderer's
+     * footprint taper carve some sub-tiles and not others, which at tall
+     * tree heights turned a forest into a comb of spikes. Spread the flag
+     * across each contiguous run of equal-height cells, so one mass agrees
+     * with itself. Two passes reach across a 2x2 object. */
+    for (int pass = 0; pass < 2; pass++) {
+        uint8_t next[VOX_TILES_H][VOX_TILES_W];
+        memcpy(next, grid->leafy, sizeof(next));
+        for (int ty = 0; ty < VOX_TILES_H; ty++) {
+            for (int tx = 0; tx < VOX_TILES_W; tx++) {
+                if (grid->leafy[ty][tx]) continue;
+                uint8_t h = grid->height[ty][tx];
+                if (h == VOX_H_FLOOR || h == VOX_H_WATER) continue;
+                if ((tx > 0               && grid->height[ty][tx - 1] == h && grid->leafy[ty][tx - 1]) ||
+                    (tx < VOX_TILES_W - 1 && grid->height[ty][tx + 1] == h && grid->leafy[ty][tx + 1]) ||
+                    (ty > 0               && grid->height[ty - 1][tx] == h && grid->leafy[ty - 1][tx]) ||
+                    (ty < VOX_TILES_H - 1 && grid->height[ty + 1][tx] == h && grid->leafy[ty + 1][tx])) {
+                    next[ty][tx] = 1;
+                }
+            }
+        }
+        memcpy(grid->leafy, next, sizeof(next));
+    }
+
     /* OAM scrape: raw entries, decoded lazily at draw time. */
     sprites->count = 0;
     bool tall = (lcdc & 0x04) != 0;
