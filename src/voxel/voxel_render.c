@@ -188,6 +188,17 @@ static void vox_paint_sky(int kind, uint32_t* out, int S) {
 
 static inline int top_rim(int S) { return 2 * S; }
 
+/* Box-filtered height for the perspective camera: the per-cell domes and
+ * hard cell edges that read as charm from above alias into striped
+ * shark-fin silhouettes when raycast at an angle. Four taps smooth the
+ * field into rolling forms without flattening it. */
+static inline float chase_height_at(const VoxTileGrid* grid, float x, float y) {
+    return (height_at(grid, x - 4.0f, y - 4.0f) +
+            height_at(grid, x + 4.0f, y - 4.0f) +
+            height_at(grid, x - 4.0f, y + 4.0f) +
+            height_at(grid, x + 4.0f, y + 4.0f)) * 0.25f;
+}
+
 static inline uint32_t chase_tex_at(const VoxTileGrid* grid, float x, float y) {
     int px = (int)(x + (float)grid->fine_x);
     int py = (int)(y + (float)grid->fine_y);
@@ -224,8 +235,14 @@ static void render_chase(GBContext* ctx, const VoxTileGrid* grid,
         }
     }
 
-    float lx = grid->link_known ? (float)grid->link_sx : 80.0f;
-    float ly = grid->link_known ? (float)grid->link_feet_sy : 104.0f;
+    /* Hold the last known anchor through the frames where the game state
+     * is unreadable (room transitions): re-targeting a default centre made
+     * the camera swim away and back on every screen change. */
+    static float lx = 80.0f, ly = 104.0f;
+    if (grid->link_known) {
+        lx = (float)grid->link_sx;
+        ly = (float)grid->link_feet_sy;
+    }
 
     /* The camera is on the stick, not on the d-pad: auto-following Link's
      * 4-way facing swung the world around on every tap, which played as
@@ -249,8 +266,12 @@ static void render_chase(GBContext* ctx, const VoxTileGrid* grid,
     }
 #endif
 
+    /* Screen space has y growing DOWNWARD, so the right-handed pairing
+     * (-sin, cos) points screen-left and the view came out mirrored:
+     * pushing the stick right swung the world left, and forward walked
+     * toward the camera. (+sin, -cos) is right in screen space. */
     const float fxv = cosf(yaw), fyv = sinf(yaw);
-    const float rxv = -fyv, ryv = fxv;      /* screen-space right vector */
+    const float rxv = fyv, ryv = -fxv;      /* screen-space right vector */
 
     const float BACK = 44.0f;               /* camera behind the player */
     const float CAMH = 22.0f;               /* and above their ground */
@@ -264,7 +285,7 @@ static void render_chase(GBContext* ctx, const VoxTileGrid* grid,
     scx_f += (tx - scx_f) * 0.35f;
     scy_f += (ty - scy_f) * 0.35f;
     float cx = scx_f, cy = scy_f;
-    float cg = height_at(grid, cx, cy);
+    float cg = chase_height_at(grid, cx, cy);
     if (cg < 0.0f) cg = 0.0f;
     const float cz = cg * HPX + CAMH;
 
@@ -282,22 +303,29 @@ static void render_chase(GBContext* ctx, const VoxTileGrid* grid,
         for (float d = 8.0f; d < FAR; d += (d < 70.0f ? 0.6f : 1.4f)) {
             float wx2 = cx + rx * d;
             float wy2 = cy + ry * d;
+            /* Past the room's edge the heightfield has nothing to say, but
+             * a sky-coloured hole in the floor is worse than a continued
+             * ground plane: clamp the sample to the room border so the
+             * world runs out into fog instead of falling away. */
             bool inside = wx2 >= 0.0f && wx2 < (float)GB_SCREEN_WIDTH &&
                           wy2 >= (float)world_top &&
                           wy2 < (float)GB_SCREEN_HEIGHT;
-            float h = inside ? height_at(grid, wx2, wy2) : 0.0f;
+            float sx2 = wx2 < 0.0f ? 0.0f
+                      : (wx2 > (float)(GB_SCREEN_WIDTH - 1)
+                         ? (float)(GB_SCREEN_WIDTH - 1) : wx2);
+            float sy2 = wy2 < (float)world_top ? (float)world_top
+                      : (wy2 > (float)(GB_SCREEN_HEIGHT - 1)
+                         ? (float)(GB_SCREEN_HEIGHT - 1) : wy2);
+            float h = chase_height_at(grid, sx2, sy2);
+            if (!inside && h > 0.0f) h = 0.0f;   /* no phantom walls outside */
             int sy = horizon + (int)((cz - h * HPX) * focal / d);
             if (sy < ybuf) {
-                uint32_t c;
-                if (inside) {
-                    c = chase_tex_at(grid, wx2, wy2);
-                    if (h < 0.0f) {
-                        c = shade(c, 190);
-                        c = (c & 0xFFFFFF00u) | 0x00000050u;
-                    }
-                } else {
-                    c = fog;
+                uint32_t c = chase_tex_at(grid, sx2, sy2);
+                if (h < 0.0f) {
+                    c = shade(c, 190);
+                    c = (c & 0xFFFFFF00u) | 0x00000050u;
                 }
+                if (!inside) c = lerp_color(c, fog, 96);
                 int t = (int)(d * 256.0f / FAR);
                 if (t > 225) t = 225;
                 c = lerp_color(c, fog, t);
@@ -369,7 +397,7 @@ static void render_chase(GBContext* ctx, const VoxTileGrid* grid,
         r->dep = (pxc - cx) * fxv + (pyc - cy) * fyv;
         r->lat = (pxc - cx) * rxv + (pyc - cy) * ryv;
         if (r->dep < 10.0f || r->dep > FAR) continue;
-        r->g = height_at(grid, pxc, pyc);
+        r->g = chase_height_at(grid, pxc, pyc);
         if (r->g < 0.0f) r->g = 0.0f;
         nr++;
     }
@@ -684,10 +712,20 @@ compose_overlays:
     /* A dialog box floats flat over the frozen diorama, exactly as the
      * game drew it -- the world stays voxel, the words stay words. */
     if (grid->text_overlay && grid->box_w > 0) {
+        /* In chase cam the box's 2D screen position means nothing (it was
+         * landing in the sky over a 3D view), so pin it to the bottom of
+         * the screen where a dialog belongs. The diorama modes keep it
+         * exactly where the game drew it. */
+        int dy = 0;
+        if (mode == VOXEL_MODE_CHASE) {
+            dy = (GB_SCREEN_HEIGHT - 4) - (grid->box_y + grid->box_h);
+        }
         for (int y = grid->box_y; y < grid->box_y + grid->box_h; y++) {
             const uint32_t* src = fb + y * GB_SCREEN_WIDTH;
+            int oy = y + dy;
+            if (oy < 0 || oy >= GB_SCREEN_HEIGHT) continue;
             for (int sub = 0; sub < S; sub++) {
-                uint32_t* dst = &out[(y * S + sub) * OW];
+                uint32_t* dst = &out[(oy * S + sub) * OW];
                 for (int x = grid->box_x; x < grid->box_x + grid->box_w; x++) {
                     for (int k = 0; k < S; k++) dst[x * S + k] = src[x];
                 }
