@@ -265,6 +265,14 @@ bool vox_scrape(GBContext* ctx, const uint32_t* fb, VoxTileGrid* grid,
      * let the renderer float it flat on top. (Without a frozen world to
      * show -- dialog on the very first frames -- fall back to flat.) */
     static bool s_have_world = false;
+    /* True when this scrape jumps to the sprite scan with the world grid
+     * FROZEN (dialog over a live room). The tree extraction below the
+     * label must not run then: it would match the frozen previous room's
+     * tiles against the CURRENT room's collision data, and a dialog that
+     * opened right after a room change silently deleted every tree until
+     * the next refresh. Frozen frames keep the previous tree list, which
+     * is exactly what a frozen diorama should show. */
+    bool frozen = false;
     if (oracle_cart && oracle.text_active && !grid->flat) {
         if (!s_have_world) {
             grid->flat = true;
@@ -305,6 +313,7 @@ bool vox_scrape(GBContext* ctx, const uint32_t* fb, VoxTileGrid* grid,
             }
             /* Frozen world: skip the state/texture refresh entirely, but
              * keep the sprite scan live so characters stay animated. */
+            frozen = true;
             goto scan_sprites;
         }
     }
@@ -533,6 +542,7 @@ scan_sprites:
      * trees with ground running beneath the canopies instead of a green
      * rampart. Canopy shades come from the tree's own art, so autumn,
      * winter and Subrosia keep their palettes. */
+    if (!frozen) {
     grid->tree_count = 0;
     memset(grid->treecell, 0, sizeof(grid->treecell));
     /* Outdoors only: wRoomLayout's object IDs are read against the
@@ -627,6 +637,7 @@ scan_sprites:
             }
         }
     }
+    }   /* !frozen */
 
     /* OAM scrape: raw entries, decoded lazily at draw time. */
     sprites->count = 0;

@@ -131,11 +131,12 @@ int main(int argc, char* argv[]) {
             }
             fprintf(stderr,
                     "frame %lu: scroll=%02X menu=%02X scy=%3u scx=%3u "
-                    "camY=%u%u dirty=%02X trees=%d\n",
+                    "camY=%u%u dirty=%02X trees=%d text=%02X\n",
                     i, ctx->wram[0xCD00 - 0xC000], ctx->wram[0xCBCB - 0xC000],
                     ctx->io[0x42], ctx->io[0x43],
                     ctx->hram[0x2B], ctx->hram[0x2A],
-                    ctx->wram[0xCD01 - 0xC000], grid.tree_count);
+                    ctx->wram[0xCD01 - 0xC000], grid.tree_count,
+                    ctx->wram[0xCBA0 - 0xC000]);
             if (getenv("VOX_DUMP_CC")) {
                 fprintf(stderr, "  CC2C:");
                 for (int c = 0; c < 12; c++) {
