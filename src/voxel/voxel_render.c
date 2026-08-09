@@ -188,15 +188,30 @@ static void vox_paint_sky(int kind, uint32_t* out, int S) {
 
 static inline int top_rim(int S) { return 2 * S; }
 
-/* Box-filtered height for the perspective camera: the per-cell domes and
- * hard cell edges that read as charm from above alias into striped
- * shark-fin silhouettes when raycast at an angle. Four taps smooth the
- * field into rolling forms without flattening it. */
+/* Raw cell height, no dome shaping. The dome is a top-down flourish: seen
+ * edge-on it puts a peak in the middle of every cell, and a row of them
+ * aliases into the striped shark-fins that made tree lines look crazy. */
+static inline float height_raw(const VoxTileGrid* grid, float x, float y) {
+    int tx = (int)(x + (float)grid->fine_x) >> 3;
+    int ty = (int)(y + (float)grid->fine_y) >> 3;
+    if (tx < 0) tx = 0;
+    if (tx >= VOX_TILES_W) tx = VOX_TILES_W - 1;
+    if (ty < 0) ty = 0;
+    if (ty >= VOX_TILES_H) ty = VOX_TILES_H - 1;
+    return VOX_UNITS[grid->height[ty][tx]];
+}
+
+/* Tent-filtered height for the perspective camera: 3x3 taps at 5px
+ * spacing (weights 4/2/1) turn a clump of raised cells into one rounded
+ * mass and a tree line into a smooth ridge, while a lone tree still
+ * stands as its own bump. Cheap enough for the ~100k samples a frame of
+ * raycasting takes, because the taps skip the dome maths entirely. */
 static inline float chase_height_at(const VoxTileGrid* grid, float x, float y) {
-    return (height_at(grid, x - 4.0f, y - 4.0f) +
-            height_at(grid, x + 4.0f, y - 4.0f) +
-            height_at(grid, x - 4.0f, y + 4.0f) +
-            height_at(grid, x + 4.0f, y + 4.0f)) * 0.25f;
+    const float o = 3.0f;
+    float c = height_raw(grid, x, y);
+    float e = height_raw(grid, x - o, y) + height_raw(grid, x + o, y) +
+              height_raw(grid, x, y - o) + height_raw(grid, x, y + o);
+    return (c * 4.0f + e) * (1.0f / 8.0f);
 }
 
 static inline uint32_t chase_tex_at(const VoxTileGrid* grid, float x, float y) {
@@ -273,8 +288,8 @@ static void render_chase(GBContext* ctx, const VoxTileGrid* grid,
     const float fxv = cosf(yaw), fyv = sinf(yaw);
     const float rxv = fyv, ryv = -fxv;      /* screen-space right vector */
 
-    const float BACK = 44.0f;               /* camera behind the player */
-    const float CAMH = 22.0f;               /* and above their ground */
+    const float BACK = 62.0f;               /* camera behind the player */
+    const float CAMH = 32.0f;               /* and above their ground */
     /* Ease the camera's position so Link's whole-pixel steps (and room
      * transitions) glide instead of ticking. */
     static float scx_f = 0.0f, scy_f = 0.0f;
@@ -289,7 +304,7 @@ static void render_chase(GBContext* ctx, const VoxTileGrid* grid,
     if (cg < 0.0f) cg = 0.0f;
     const float cz = cg * HPX + CAMH;
 
-    const float focal = (float)OW * 0.9f;   /* ~58 degree field of view */
+    const float focal = (float)OW * 0.62f;  /* ~78 degree field of view */
     const int horizon = (int)((float)OH * 0.36f);
     const uint32_t fog = (grid->sky != VOX_SKY_NONE)
         ? VOX_SKIES[grid->sky].horizon : 0xFF2C2620u;
@@ -317,7 +332,27 @@ static void render_chase(GBContext* ctx, const VoxTileGrid* grid,
                       : (wy2 > (float)(GB_SCREEN_HEIGHT - 1)
                          ? (float)(GB_SCREEN_HEIGHT - 1) : wy2);
             float h = chase_height_at(grid, sx2, sy2);
-            if (!inside && h > 0.0f) h = 0.0f;   /* no phantom walls outside */
+            if (!inside) {
+                /* Outside the room the border cell repeats, so a treeline
+                 * at the edge keeps going instead of ending at a cliff of
+                 * flat ground -- then settles to the fog plane over ~70px
+                 * so it reads as "the world continues" rather than "an
+                 * infinite wall". */
+                float outd = 0.0f;
+                if (wx2 < 0.0f) outd = -wx2;
+                else if (wx2 > (float)(GB_SCREEN_WIDTH - 1))
+                    outd = wx2 - (float)(GB_SCREEN_WIDTH - 1);
+                if (wy2 < (float)world_top) {
+                    float t2 = (float)world_top - wy2;
+                    if (t2 > outd) outd = t2;
+                } else if (wy2 > (float)(GB_SCREEN_HEIGHT - 1)) {
+                    float t2 = wy2 - (float)(GB_SCREEN_HEIGHT - 1);
+                    if (t2 > outd) outd = t2;
+                }
+                float k = 1.0f - outd * (1.0f / 70.0f);
+                if (k < 0.0f) k = 0.0f;
+                h *= k;
+            }
             int sy = horizon + (int)((cz - h * HPX) * focal / d);
             if (sy < ybuf) {
                 uint32_t c = chase_tex_at(grid, sx2, sy2);
@@ -326,14 +361,15 @@ static void render_chase(GBContext* ctx, const VoxTileGrid* grid,
                     c = (c & 0xFFFFFF00u) | 0x00000050u;
                 }
                 if (!inside) c = lerp_color(c, fog, 96);
-                int t = (int)(d * 256.0f / FAR);
-                if (t > 225) t = 225;
+                int t = (int)((d - 70.0f) * 256.0f / (FAR - 70.0f));
+                if (t < 0) t = 0;
+                if (t > 150) t = 150;
                 c = lerp_color(c, fog, t);
                 /* A step up in height means this span is mostly the riser's
                  * front face: darken it below a thin lit rim, so cliffs and
                  * tree lines read as forms instead of vertical streaks. */
                 bool face = h > ph + 0.25f;
-                uint32_t cw = face ? shade(c, 148) : c;
+                uint32_t cw = face ? shade(c, 178) : c;
                 int rim = top_rim(S);
                 int top = sy < 0 ? 0 : sy;
                 for (int yy = top; yy < ybuf; yy++) {
@@ -396,7 +432,7 @@ static void render_chase(GBContext* ctx, const VoxTileGrid* grid,
         float pyc = (float)(r->y + r->sh);
         r->dep = (pxc - cx) * fxv + (pyc - cy) * fyv;
         r->lat = (pxc - cx) * rxv + (pyc - cy) * ryv;
-        if (r->dep < 10.0f || r->dep > FAR) continue;
+        if (r->dep < 24.0f || r->dep > FAR) continue;
         r->g = chase_height_at(grid, pxc, pyc);
         if (r->g < 0.0f) r->g = 0.0f;
         nr++;
