@@ -4,6 +4,8 @@
 one-line description, and the repository link, plus a "now building" pill
 you can change without touching OBS.
 
+![overlay composited over gameplay](../docs/stream-overlay.png)
+
 ## Add it in OBS
 
 1. **Sources → + → Browser**
