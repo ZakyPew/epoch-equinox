@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Epoch &amp; Equinox — vertical stream overlay</title>
+<style>
+  /* 1080x1920 for TikTok / Reels / Shorts / vertical Twitch.
+     Transparent: OBS composites this over the scene.
+
+     Two bands only, top and bottom, so the middle of the canvas stays
+     clear for gameplay and a facecam. The bottom band is lifted clear of
+     the caption strip those platforms draw over the last ~10% of the
+     frame, and nothing sits in the right-hand column where the like and
+     comment buttons live. */
+  :root {
+    --ink:#F4F8FC;
+    --dim:#A6BACB;
+    --cool:#9CC8E0;
+    --warm:#F0B888;
+    --panel:rgba(8,13,20,0.76);
+    --line:rgba(156,200,224,0.30);
+
+    --side-safe:150px;   /* clear of the right-hand button column */
+    --bottom-safe:190px; /* clear of the caption strip */
+  }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  html, body {
+    width:1080px; height:1920px; overflow:hidden;
+    background:transparent;
+    font-family:ui-monospace,SFMono-Regular,"SF Mono","Cascadia Mono",Menlo,Consolas,monospace;
+    -webkit-font-smoothing:antialiased;
+  }
+
+  /* ---- top band --------------------------------------------------- */
+  .top {
+    position:absolute; top:34px; left:34px;
+    right:var(--side-safe);
+    display:flex; align-items:center; gap:20px;
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:16px;
+    padding:20px 26px;
+    backdrop-filter:blur(6px);
+    box-shadow:0 16px 44px rgba(0,0,0,.5);
+  }
+  .glyph { width:62px; height:62px; flex:0 0 auto; }
+  .top-text { display:flex; flex-direction:column; gap:8px; min-width:0; }
+  .name {
+    font-size:36px; letter-spacing:.05em; color:var(--ink);
+    font-weight:600; line-height:1; white-space:nowrap;
+  }
+  .tag {
+    font-size:20px; color:var(--dim); line-height:1.25;
+  }
+
+  /* ---- bottom call to action -------------------------------------- */
+  .cta {
+    position:absolute;
+    left:34px; right:var(--side-safe); bottom:var(--bottom-safe);
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:18px;
+    padding:26px 30px;
+    display:flex; flex-direction:column; gap:14px;
+    backdrop-filter:blur(6px);
+    box-shadow:0 18px 52px rgba(0,0,0,.55);
+  }
+  .cta-label {
+    font-size:19px; letter-spacing:.22em; text-transform:uppercase;
+    color:var(--warm);
+  }
+  .link {
+    display:flex; align-items:center; gap:16px;
+    font-size:36px; color:var(--ink); letter-spacing:.01em;
+    line-height:1.1; word-break:break-all;
+  }
+  .link svg { width:38px; height:38px; flex:0 0 auto; fill:var(--cool); }
+  .link b { color:var(--cool); font-weight:600; }
+
+  /* ---- now building pill ------------------------------------------ */
+  .now {
+    position:absolute; left:34px; bottom:calc(var(--bottom-safe) + 190px);
+    display:flex; align-items:center; gap:14px;
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:999px;
+    padding:14px 26px 14px 22px;
+    backdrop-filter:blur(6px);
+    max-width:calc(100% - 34px - var(--side-safe));
+  }
+  .dot {
+    width:12px; height:12px; border-radius:50%; background:var(--warm);
+    flex:0 0 auto;
+    animation:pulse 2.4s ease-out infinite;
+  }
+  @keyframes pulse {
+    0%   { box-shadow:0 0 0 0 rgba(240,184,136,.6); }
+    70%  { box-shadow:0 0 0 18px rgba(240,184,136,0); }
+    100% { box-shadow:0 0 0 0 rgba(240,184,136,0); }
+  }
+  .now-text { font-size:24px; color:var(--ink); }
+  @media (prefers-reduced-motion:reduce) { .dot { animation:none; } }
+</style>
+</head>
+<body>
+
+  <div class="top">
+    <svg class="glyph" viewBox="0 0 48 48" aria-hidden="true">
+      <defs>
+        <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stop-color="#9CC8E0"/>
+          <stop offset="1" stop-color="#F0B888"/>
+        </linearGradient>
+      </defs>
+      <circle cx="24" cy="24" r="20" fill="none" stroke="url(#g)" stroke-width="2.2"/>
+      <path d="M24 4 L24 44" stroke="url(#g)" stroke-width="2.2"/>
+      <path d="M24 4 A20 20 0 0 1 24 44 Z" fill="url(#g)" opacity=".28"/>
+      <circle cx="24" cy="24" r="4.4" fill="url(#g)"/>
+    </svg>
+    <div class="top-text">
+      <div class="name">EPOCH &amp; EQUINOX</div>
+      <div class="tag">A Game Boy world rebuilt in 3D<br>from its own memory</div>
+    </div>
+  </div>
+
+  <div class="now">
+    <span class="dot"></span>
+    <span class="now-text" id="now">building the voxel renderer</span>
+  </div>
+
+  <div class="cta">
+    <div class="cta-label">Open source &middot; come help</div>
+    <div class="link">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8a8 8 0 005.47 7.59c.4.07.55-.17.55-.38l-.01-1.49C3.8 14.16 3.34 12.9 3.34 12.9c-.36-.92-.88-1.16-.88-1.16-.72-.49.06-.48.06-.48.79.06 1.21.82 1.21.82.71 1.21 1.87.86 2.33.66.07-.52.28-.86.5-1.06-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.6 7.6 0 014 0c1.53-1.03 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.28.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48l-.01 2.19c0 .21.15.46.55.38A8 8 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+      <span>github.com/<b>ZakyPew/epoch-equinox</b></span>
+    </div>
+  </div>
+
+<script>
+  /* Same live text file as the horizontal overlay, so one edit updates
+     whichever layout is on screen. */
+  async function poll() {
+    try {
+      const r = await fetch('now.txt?t=' + Date.now(), {cache:'no-store'});
+      if (r.ok) {
+        const t = (await r.text()).trim();
+        if (t) document.getElementById('now').textContent = t;
+      }
+    } catch (e) {}
+  }
+  poll();
+  setInterval(poll, 4000);
+</script>
+</body>
+</html>
