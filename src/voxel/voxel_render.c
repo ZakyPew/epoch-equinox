@@ -975,6 +975,10 @@ void voxel_remap_dpad(void) {
     g_joypad_dpad = (uint8_t)((g_joypad_dpad | 0x0F) & ~out);
 }
 
+void voxel_terrain_status(int* live, int* scroll_mode, const char** reason) {
+    vox_oracle_status(live, scroll_mode, reason);
+}
+
 void voxel_install(void) {
     voxel_tuning_load();
     const char* s = getenv("VOXEL_SCALE");

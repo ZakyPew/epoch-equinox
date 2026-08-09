@@ -97,6 +97,12 @@ void voxel_menu_install(void);
  *  mode. Without it, "right" walks east even when east is behind you. */
 void voxel_remap_dpad(void);
 
+/** Is terrain coming from the game's own collision data this frame?
+ *  live = 1 yes, 0 no (the room renders as a flat slab). scroll_mode is
+ *  the game's wScrollMode, and reason names which check refused it.
+ *  Any out-param may be NULL. */
+void voxel_terrain_status(int* live, int* scroll_mode, const char** reason);
+
 /** Current mode (VOXEL_MODE_*). */
 int  voxel_get_mode(void);
 void voxel_set_mode(int mode);

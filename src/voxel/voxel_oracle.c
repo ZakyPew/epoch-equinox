@@ -70,6 +70,14 @@ static const OracleProfile PROFILES[] = {
 /* Cached per-ROM detection. GBContext has no user slot, so key the cache on
  * the ROM pointer -- good enough for one cart per process, which is how the
  * runner works. */
+static uint8_t g_last_scroll = 0;
+static bool g_last_live = false;
+/* Why last frame's terrain was refused, in words. A flat room is always
+ * one of a short list of refusals, and the difference between them is the
+ * difference between a bug in the gate and a room that genuinely has no
+ * shape -- worth one screenshot instead of a guessing round trip. */
+static const char* g_last_reason = "";
+
 static const OracleProfile* g_profile = NULL;
 static const uint8_t* g_profile_rom = NULL;
 
@@ -95,13 +103,18 @@ static inline uint8_t wram0(GBContext* ctx, uint16_t addr) {
 
 bool vox_oracle_read(GBContext* ctx, VoxOracleState* st) {
     memset(st, 0, sizeof(*st));
+    g_last_live = false;
+    g_last_reason = "";
 
     /* A/B switch: VOXEL_NO_ORACLE=1 forces the colour-only classifier,
      * which is how the two are compared on identical frames. */
-    if (getenv("VOXEL_NO_ORACLE")) return false;
+    if (getenv("VOXEL_NO_ORACLE")) { g_last_reason = "forced off"; return false; }
 
     const OracleProfile* prof = detect(ctx);
-    if (!prof || !ctx->wram || !ctx->hram) return false;
+    if (!prof || !ctx->wram || !ctx->hram) {
+        g_last_reason = "not an Oracles cart";
+        return false;
+    }
     st->profile_matched = true;
 
     st->menu_open = wram0(ctx, A_wOpenedMenuType) != 0;
@@ -116,7 +129,20 @@ bool vox_oracle_read(GBContext* ctx, VoxOracleState* st) {
      * that means "one room, at rest". */
     uint8_t scroll = wram0(ctx, A_wScrollMode);
     st->no_room = (scroll == 0);
-    if (scroll != 0x01) return false;
+    st->scroll_mode = scroll;
+    g_last_scroll = scroll;
+    /* Trust the room unless the screen is showing two of them.
+     *
+     * This gate was once "bit 2 set", which let transitions through (they
+     * read 8), and was then tightened to "exactly 1" -- which fixed
+     * transitions and quietly flattened every area that idles in some
+     * other mode, including whole groups nobody had walked through yet.
+     * Reject the states that mean no room (0) or a room change (bit 2, and
+     * the 8 seen live mid-scroll); anything else is a room at rest. */
+    if (scroll == 0 || (scroll & 0x04) || scroll == 0x08) {
+        g_last_reason = (scroll == 0) ? "no room active" : "room change";
+        return false;
+    }
 
     st->cam_y = (int)ctx->hram[prof->cam_y_off] |
                 ((int)ctx->hram[prof->cam_y_off + 1] << 8);
@@ -151,10 +177,23 @@ bool vox_oracle_read(GBContext* ctx, VoxOracleState* st) {
         st->collisions[i] = v;
         if (!seen[v]) { seen[v] = 1; distinct++; }
     }
-    if (distinct < 2) return false;
+    if (distinct < 2) {
+        g_last_reason = "collision grid empty";
+        return false;
+    }
 
     st->valid = true;
+    g_last_live = true;
     return true;
+}
+
+/* What the last frame's terrain decision was, for the on-screen readout:
+ * a flat room is almost always this gate saying no, and the scroll mode
+ * is the number that explains which room state it saw. */
+void vox_oracle_status(int* live, int* scroll_mode, const char** reason) {
+    if (live) *live = g_last_live ? 1 : 0;
+    if (scroll_mode) *scroll_mode = (int)g_last_scroll;
+    if (reason) *reason = g_last_reason ? g_last_reason : "";
 }
 
 /* Map a collision value to a height class, using the tile's colour features
