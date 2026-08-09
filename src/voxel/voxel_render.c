@@ -64,26 +64,32 @@ static const VoxCam VOX_CAMS[VOXEL_MODE_COUNT] = {
 };
 
 /* Shape and camera constants, live-tunable from the Esc menu. Defaults
- * are the values these had as compile-time constants. */
-static VoxelTuning g_tune;
+ * are the values these had as compile-time constants.
+ *
+ * g_tune starts AT the defaults rather than zero: direct callers like
+ * vox_shot use vox_render without going through voxel_install(), and a
+ * zeroed tuning block is a dead renderer (FOV 0 -- every chase ray
+ * degenerate, every height flat). */
+#define VOX_TUNE_INIT {                     \
+    .units = {                              \
+        [VOX_H_WATER] = -1.5f,              \
+        [VOX_H_FLOOR] = 0.0f,               \
+        [VOX_H_LOW]   = 1.0f,               \
+        [VOX_H_MID]   = 3.0f,               \
+        [VOX_H_HIGH]  = 6.0f,               \
+    },                                      \
+    .footprint    = 3.0f,                   \
+    .tilt_scale   = 1.0f,                   \
+    .chase_back   = 62.0f,                  \
+    .chase_height = 32.0f,                  \
+    .chase_fov    = 0.62f,                  \
+    .chase_hpx    = 3.2f,                   \
+    .fog_start    = 70.0f,                  \
+    .fog_max      = 150.0f,                 \
+}
 
-static const VoxelTuning VOX_TUNE_DEFAULTS = {
-    .units = {
-        [VOX_H_WATER] = -1.5f,
-        [VOX_H_FLOOR] = 0.0f,
-        [VOX_H_LOW]   = 1.0f,
-        [VOX_H_MID]   = 3.0f,
-        [VOX_H_HIGH]  = 6.0f,
-    },
-    .footprint    = 3.0f,
-    .tilt_scale   = 1.0f,
-    .chase_back   = 62.0f,
-    .chase_height = 32.0f,
-    .chase_fov    = 0.62f,
-    .chase_hpx    = 3.2f,
-    .fog_start    = 70.0f,
-    .fog_max      = 150.0f,
-};
+static VoxelTuning g_tune = VOX_TUNE_INIT;
+static const VoxelTuning VOX_TUNE_DEFAULTS = VOX_TUNE_INIT;
 
 /* VOX_UNITS was an array; keep the spelling so the call sites read the
  * same, but source the numbers from the live block. */
@@ -325,6 +331,12 @@ static inline uint32_t chase_tex_at(const VoxTileGrid* grid, float x, float y) {
  * classic "voxel space" scheme finally used for what it was invented
  * for. Planar (unnormalized) rays keep walls straight; a per-column
  * y-buffer gives front-to-back occlusion with no depth buffer. */
+/* Per-pixel terrain depth for the last chase frame. Billboards test
+ * against it, which is the whole of sprite occlusion: without it a
+ * character behind a wall drew straight through the wall, because the
+ * painter's order only sorts sprites against each other. */
+static float s_zbuf[GB_FRAMEBUFFER_SIZE * VOX_MAX_SCALE * VOX_MAX_SCALE];
+
 static void render_chase(GBContext* ctx, const VoxTileGrid* grid,
                          const VoxSpriteList* sprites, int S, uint32_t* out) {
     const int OW = GB_SCREEN_WIDTH * S;
@@ -332,6 +344,8 @@ static void render_chase(GBContext* ctx, const VoxTileGrid* grid,
     const int world_top = grid->hud_rows;
     const float HPX = g_tune.chase_hpx;
     const float FAR = 230.0f;
+
+    for (int i = 0; i < OW * OH; i++) s_zbuf[i] = 1e9f;
 
     /* Sky first; the ground overwrites what it owns. */
     if (grid->sky != VOX_SKY_NONE) {
@@ -472,28 +486,51 @@ static void render_chase(GBContext* ctx, const VoxTileGrid* grid,
                 int rim = top_rim(S);
                 int top = sy < 0 ? 0 : sy;
                 if (face && ybuf - top > rim + 1) {
-                    /* A riser's front face: run the cell's own 8px artwork
-                     * down it instead of smearing one colour, which at tall
-                     * tree heights left long vertical streaks. Darkened,
-                     * with a lit rim along the top edge. */
+                    /* A riser's front face. Tile the cell's own 8px artwork
+                     * down it at native chunkiness -- the diorama already
+                     * does this and its cliffs read as rock courses, where
+                     * stretching the art once down the face (the old way)
+                     * smeared it into vertical taffy. */
                     int tile_top = ((int)(sy2 + (float)grid->fine_y)) & ~7;
                     if (tile_top < 0) tile_top = 0;
                     if (tile_top > VOX_TEX_H - 8) tile_top = VOX_TEX_H - 8;
                     int span = ybuf - top;
+                    int t2 = (int)((d - g_tune.fog_start) * 256.0f /
+                                   (FAR - g_tune.fog_start));
+                    if (t2 < 0) t2 = 0;
+                    if (t2 > (int)g_tune.fog_max) t2 = (int)g_tune.fog_max;
+                    /* A tree's face is not cliff all the way down: below
+                     * the canopy it falls into bark shadow, which is what
+                     * separates "tree" from "green wall" at eye level. The
+                     * bark keeps the cell's own colour cast so autumn and
+                     * winter palettes still land. */
+                    bool leafy_face =
+                        grid->leafy[tile_top >> 3][tex_col >> 3] != 0;
+                    int trunk_y = (leafy_face && span >= 8 * S)
+                        ? top + (span * 3) / 5 : ybuf;
+                    uint32_t bark = lerp_color(
+                        shade(chase_tex_at(grid, sx2, sy2), 70),
+                        0xFF3A2A20u, 120);
+                    bark = lerp_color(bark, fog, t2);
                     for (int yy = top; yy < ybuf; yy++) {
-                        if (yy < top + rim) { out[yy * OW + X] = c; continue; }
-                        int art = ((yy - top) * 8) / span;
-                        if (art > 7) art = 7;
-                        uint32_t wc = grid->tex[(tile_top + art) * VOX_TEX_W + tex_col];
-                        int t2 = (int)((d - g_tune.fog_start) * 256.0f /
-                                       (FAR - g_tune.fog_start));
-                        if (t2 < 0) t2 = 0;
-                        if (t2 > (int)g_tune.fog_max) t2 = (int)g_tune.fog_max;
-                        wc = lerp_color(shade(wc, 168), fog, t2);
+                        uint32_t wc;
+                        if (yy < top + rim) {
+                            wc = c;
+                        } else if (yy >= trunk_y) {
+                            wc = bark;
+                        } else {
+                            int art = ((yy - top) / S) & 7;
+                            wc = grid->tex[(tile_top + art) * VOX_TEX_W + tex_col];
+                            wc = lerp_color(shade(wc, 168), fog, t2);
+                        }
                         out[yy * OW + X] = wc;
+                        s_zbuf[yy * OW + X] = d;
                     }
                 } else {
-                    for (int yy = top; yy < ybuf; yy++) out[yy * OW + X] = c;
+                    for (int yy = top; yy < ybuf; yy++) {
+                        out[yy * OW + X] = c;
+                        s_zbuf[yy * OW + X] = d;
+                    }
                 }
                 ybuf = top;
                 if (ybuf <= 0) break;
@@ -511,6 +548,7 @@ static void render_chase(GBContext* ctx, const VoxTileGrid* grid,
         int n;
         int x, y, sh;
         float dep, lat, g;
+        int elev;            /* world px above its ground (held items) */
     } ChaseRun;
     ChaseRun runs[VOX_MAX_SPRITES];
     bool used[VOX_MAX_SPRITES] = {false};
@@ -555,6 +593,29 @@ static void render_chase(GBContext* ctx, const VoxTileGrid* grid,
         if (r->dep < 24.0f || r->dep > FAR) continue;
         r->g = chase_height_at(grid, pxc, pyc);
         if (r->g < 0.0f) r->g = 0.0f;
+        r->elev = 0;
+        /* A run hanging directly over Link's head is the item he is
+         * holding up. Its 2D position is ABOVE him on screen, which the
+         * ground-anchoring below would read as "16px further north" --
+         * planting the sword in the dirt behind him. Anchor it at Link's
+         * own ground instead, elevated by exactly the pixels the game
+         * drew it above his feet, and pull it a hair nearer so it sorts
+         * in front of him. */
+        if (grid->link_known) {
+            int bot = r->y + r->sh;
+            int dxl = (int)pxc - grid->link_sx;
+            if (dxl < 0) dxl = -dxl;
+            int above = grid->link_feet_sy - bot;
+            if (dxl <= 12 && above >= 6 && above <= 32) {
+                float lyf = (float)grid->link_feet_sy;
+                r->dep = (pxc - cx) * fxv + (lyf - cy) * fyv - 1.0f;
+                r->lat = (pxc - cx) * rxv + (lyf - cy) * ryv;
+                if (r->dep < 24.0f || r->dep > FAR) continue;
+                r->g = chase_height_at(grid, (float)grid->link_sx, lyf);
+                if (r->g < 0.0f) r->g = 0.0f;
+                r->elev = above;
+            }
+        }
         nr++;
     }
     for (int a = 1; a < nr; a++) {
@@ -571,7 +632,8 @@ static void render_chase(GBContext* ctx, const VoxTileGrid* grid,
         float scale = focal / r->dep;
         int wgb = r->n * 8;
         int cxp = (int)((float)OW * 0.5f + r->lat / r->dep * focal);
-        int byp = horizon + (int)((cz - r->g * HPX) * focal / r->dep);
+        int byp = horizon +
+            (int)((cz - (r->g * HPX + (float)r->elev)) * focal / r->dep);
         int w2 = (int)((float)wgb * scale / (float)S + 0.5f) * S;
         int h2 = (int)((float)r->sh * scale / (float)S + 0.5f) * S;
         if (w2 < 2 || h2 < 2) continue;
@@ -592,6 +654,12 @@ static void render_chase(GBContext* ctx, const VoxTileGrid* grid,
                         int x1 = left + (gcol + 1) * w2 / wgb;
                         for (int xx = x0; xx < x1; xx++) {
                             if (xx < 0 || xx >= OW) continue;
+                            /* Terrain nearer than the sprite hides it.
+                             * The 3px slack keeps the ground a sprite
+                             * STANDS on -- which sits at essentially the
+                             * same depth -- from eating their feet. */
+                            if (s_zbuf[yy * OW + xx] < r->dep - 3.0f)
+                                continue;
                             out[yy * OW + xx] = px8[c2];
                         }
                     }
