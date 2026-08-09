@@ -30,6 +30,12 @@ dioramas at 3× internal resolution, hand-sculptable room heights, and a
 third-person chase camera that follows Link through the world in perspective.
 
 <p align="center">
+  <img src="docs/modes-clearing.png" alt="One clearing rendered three ways: original, diorama, chase camera" width="900">
+  <br>
+  <em>The same room, untouched · as a diorama · from the chase camera</em>
+</p>
+
+<p align="center">
   <img src="docs/chase-cam.png" alt="Chase camera: three perspective views" width="900">
 </p>
 
