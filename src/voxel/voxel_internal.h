@@ -61,6 +61,9 @@ typedef struct {
     int  active_room;           /* wActiveRoom: room index within the group */
     int  room_state;            /* wRoomStateModifier: the season, in Seasons */
     uint8_t collisions[16 * 12]; /* wRoomCollisions, stride 16 */
+    /* wRoomLayout $CF00: the OBJECT in each cell (tree mass, bush, rock,
+     * sign...), not just whether it blocks. Same stride as collisions. */
+    uint8_t layout[16 * 12];
 } VoxOracleState;
 
 /* Read + validate the cart's room state. False = not an Oracles cart, or
