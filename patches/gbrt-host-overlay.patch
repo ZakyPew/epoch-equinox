@@ -1,0 +1,101 @@
+diff --git a/runtime/include/gbrt.h b/runtime/include/gbrt.h
+--- a/runtime/include/gbrt.h
++++ b/runtime/include/gbrt.h
+@@ -418,6 +418,13 @@
+  */
+ bool gb_context_load_state_file(GBContext* ctx, const char* path);
+ 
++/**
++ * @brief Silence the per-snapshot save/load log lines.
++ *
++ * Rewind captures many states a second; without this each one prints.
++ */
++void gb_context_set_state_logging_quiet(bool quiet);
++
+ /* ============================================================================
+  * Memory Access
+  * ========================================================================== */
+diff --git a/runtime/src/gbrt.c b/runtime/src/gbrt.c
+--- a/runtime/src/gbrt.c
++++ b/runtime/src/gbrt.c
+@@ -1299,6 +1299,15 @@
+     return ram_result && rtc_result;
+ }
+ 
++/* Rewind snapshots several times a second, and a log line per snapshot
++ * buries everything else in the run log. Hosts doing bulk state traffic
++ * turn the chatter off. */
++static bool gbrt_state_logging_quiet = false;
++
++void gb_context_set_state_logging_quiet(bool quiet) {
++    gbrt_state_logging_quiet = quiet;
++}
++
+ bool gb_context_save_state_file(GBContext* ctx, const char* path) {
+     if (!ctx || !path || !path[0] || !ctx->rom || ctx->rom_size == 0 ||
+         !ctx->wram || !ctx->vram || !ctx->oam || !ctx->hram || !ctx->io) {
+@@ -1360,7 +1369,7 @@
+     if (!success) {
+         remove(path);
+     } else {
+-        printf("[GBRT] Saved state to %s\n", path);
++        if (!gbrt_state_logging_quiet) printf("[GBRT] Saved state to %s\n", path);
+     }
+     free(apu_state);
+     return success;
+@@ -1520,7 +1529,7 @@
+     free(ppu_data);
+     free(apu_data);
+ 
+-    printf("[GBRT] Loaded state from %s\n", path);
++    if (!gbrt_state_logging_quiet) printf("[GBRT] Loaded state from %s\n", path);
+     return true;
+ }
+ 
+diff --git a/runtime/include/platform_sdl.h b/runtime/include/platform_sdl.h
+--- a/runtime/include/platform_sdl.h
++++ b/runtime/include/platform_sdl.h
+@@ -141,6 +141,17 @@
+ void gb_platform_set_frame_hook_scaled(GBFrameHookScaledFn fn);
+ 
+ /**
++ * @brief Host overlay hook: draw an always-on HUD inside the live ImGui
++ * frame, outside the settings menu.
++ *
++ * Called every presented frame after the menu is composed, so a host can
++ * surface transient state -- rewind position, checkpoints, toasts --
++ * without owning the whole overlay or patching the menu.
++ */
++typedef void (*GBHostOverlayFn)(void);
++void gb_platform_set_host_overlay(GBHostOverlayFn fn);
++
++/**
+  * @brief Render frame to screen
+  */
+ void gb_platform_render_frame(const uint32_t* framebuffer);
+diff --git a/runtime/src/platform_sdl.cpp b/runtime/src/platform_sdl.cpp
+--- a/runtime/src/platform_sdl.cpp
++++ b/runtime/src/platform_sdl.cpp
+@@ -329,6 +329,9 @@
+ /* Host menu hook: drawn inside the settings window each frame. */
+ static GBHostMenuFn g_host_menu_fn = NULL;
+ void gb_platform_set_host_menu(GBHostMenuFn fn) { g_host_menu_fn = fn; }
++
++static GBHostOverlayFn g_host_overlay_fn = NULL;
++void gb_platform_set_host_overlay(GBHostOverlayFn fn) { g_host_overlay_fn = fn; }
+ static GBRenderFilterMode g_render_filter_mode = GB_RENDER_FILTER_NEAREST;
+ static SDL_GameControllerType g_controller_type = SDL_CONTROLLER_TYPE_UNKNOWN;
+ static GBControllerLabelProfile g_controller_label_profile = GB_CONTROLLER_LABEL_GENERIC;
+@@ -4493,6 +4496,12 @@
+         }
+     }
+ 
++    /* Host overlay: transient state the host wants on screen whether or
++     * not the menu is open (see gb_platform_set_host_overlay). */
++    if (g_host_overlay_fn) {
++        g_host_overlay_fn();
++    }
++
+     /* FPS overlay last so it draws on top of the menu (and over any
+      * border/letterbox the game viewport leaves around the edges). */
+     if (g_show_fps) {
