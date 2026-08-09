@@ -335,6 +335,12 @@ static int run_game(const EpochGame* game, unsigned long long frame_limit) {
                 running = false;
                 break;
             }
+#if EPOCH_HAVE_VOXEL
+            /* The chase camera can face any direction, so the d-pad's
+             * world-fixed east/west stops matching the screen until it is
+             * rotated into the camera's frame. */
+            voxel_remap_dpad();
+#endif
             if (smooth && !ctx->frame_done && slice_cycles >= slice_cycles_budget) {
                 if (ctx->lcd_off_active || !(ctx->io[0x40] & 0x80)) {
                     gb_platform_render_lcd_off_frame();
