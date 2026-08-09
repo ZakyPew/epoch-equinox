@@ -8,6 +8,9 @@
  */
 extern "C" {
 #include "gbrt.h"
+#if EPOCH_HAVE_VOXEL
+#include "voxel/voxel.h"
+#endif
 }
 
 #include "imgui.h"
@@ -52,6 +55,21 @@ static void draw_hud(void) {
         if (show_room) {
             ImGui::TextDisabled("Room %d-%02X   (F9 restarts it, hold R to rewind)",
                                 s->group, s->room);
+#if EPOCH_HAVE_VOXEL
+            /* A room that renders flat is nearly always the terrain gate
+             * declining the frame; say so, with the number that explains
+             * it, instead of leaving "why is this flat" a mystery. */
+            if (voxel_get_mode() != VOXEL_MODE_OFF) {
+                int live = 0, scroll = 0;
+                const char* why = "";
+                voxel_terrain_status(&live, &scroll, &why);
+                if (!live) {
+                    ImGui::TextColored(ImVec4(1.0f, 0.72f, 0.45f, 1.0f),
+                                       "terrain: flat -- %s (scroll %02X)",
+                                       why, scroll);
+                }
+            }
+#endif
         }
         if (s->toast) {
             ImGui::TextUnformatted(s->toast);

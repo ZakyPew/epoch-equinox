@@ -97,6 +97,22 @@ int main(int argc, char* argv[]) {
         if (!fb) continue;
         gb_platform_render_frame(fb);
 
+        /* VOX_TRACE_SCROLL=1: log wScrollMode every time it changes.
+         * Sampling fixed frames answers "what was it at frame N"; the
+         * terrain gate needs "which values does this game ever sit in",
+         * and only the transitions show that. */
+        if (getenv("VOX_TRACE_SCROLL")) {
+            static int prev = -1;
+            int now = ctx->wram[0xCD00 - 0xC000];
+            if (now != prev) {
+                fprintf(stderr, "scroll %02X -> %02X @frame %lu "
+                        "(group=%02X room=%02X)\n",
+                        prev < 0 ? 0 : prev, now, i,
+                        ctx->wram[0xCC2D - 0xC000], ctx->wram[0xCC30 - 0xC000]);
+                prev = now;
+            }
+        }
+
         for (int w = 0; w < want_n; w++) {
             if (want[w] != i) continue;
             fprintf(stderr,

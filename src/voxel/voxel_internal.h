@@ -50,6 +50,7 @@ typedef struct {
     /* wScrollMode == 0: no room is active at all (title, file select,
      * cutscenes). There is no terrain to extrude; pass through flat. */
     bool no_room;
+    int  scroll_mode;          /* wScrollMode, for the status readout */
     int  cam_y, cam_x;          /* hCameraY/X, room pixels */
     int  off_y, off_x;          /* wScreenOffsetY/X, transient draw offset */
     int  link_y, link_x;        /* w1Link whole-pixel position (room space) */
@@ -65,6 +66,10 @@ typedef struct {
 /* Read + validate the cart's room state. False = not an Oracles cart, or
  * this frame's room data can't be trusted (boot, transition, empty). */
 bool vox_oracle_read(GBContext* ctx, VoxOracleState* st);
+
+/* Last frame's terrain decision, for the HUD: whether the game's own data
+ * drove the terrain, the wScrollMode it saw, and why it was refused. */
+void vox_oracle_status(int* live, int* scroll_mode, const char** reason);
 
 /* Height for one room cell: collision decides, colour breaks ties. */
 uint8_t vox_oracle_height(uint8_t collision, uint8_t colour_class);
