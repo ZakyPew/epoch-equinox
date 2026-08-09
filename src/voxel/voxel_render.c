@@ -28,6 +28,12 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifdef _WIN32
+#include <direct.h>
+#else
+#include <sys/stat.h>
+#endif
+
 #include "platform_sdl.h"
 
 #ifdef GB_HAS_SDL2
@@ -56,14 +62,87 @@ static const VoxCam VOX_CAMS[VOXEL_MODE_COUNT] = {
     {0.707f, 3.2f},  /* 45 deg */
 };
 
-/* Extrusion units per height class. Water is negative: it sinks. */
-static const float VOX_UNITS[5] = {
-    [VOX_H_WATER] = -1.5f,
-    [VOX_H_FLOOR] = 0.0f,
-    [VOX_H_LOW]   = 1.0f,
-    [VOX_H_MID]   = 3.0f,
-    [VOX_H_HIGH]  = 6.0f,
+/* Shape and camera constants, live-tunable from the Esc menu. Defaults
+ * are the values these had as compile-time constants. */
+static VoxelTuning g_tune;
+
+static const VoxelTuning VOX_TUNE_DEFAULTS = {
+    .units = {
+        [VOX_H_WATER] = -1.5f,
+        [VOX_H_FLOOR] = 0.0f,
+        [VOX_H_LOW]   = 1.0f,
+        [VOX_H_MID]   = 3.0f,
+        [VOX_H_HIGH]  = 6.0f,
+    },
+    .footprint    = 3.0f,
+    .tilt_scale   = 1.0f,
+    .chase_back   = 62.0f,
+    .chase_height = 32.0f,
+    .chase_fov    = 0.62f,
+    .chase_hpx    = 3.2f,
+    .fog_start    = 70.0f,
+    .fog_max      = 150.0f,
 };
+
+/* VOX_UNITS was an array; keep the spelling so the call sites read the
+ * same, but source the numbers from the live block. */
+#define VOX_UNITS (g_tune.units)
+
+VoxelTuning* voxel_tuning(void) { return &g_tune; }
+
+void voxel_tuning_reset(void) { g_tune = VOX_TUNE_DEFAULTS; }
+
+static const char* TUNE_PATH = "voxel/tuning.ini";
+
+void voxel_tuning_save(void) {
+#ifdef _WIN32
+    _mkdir("voxel");
+#else
+    mkdir("voxel", 0755);
+#endif
+    FILE* f = fopen(TUNE_PATH, "w");
+    if (!f) return;
+    fprintf(f, "# Epoch & Equinox voxel tuning. Delete this file to go back\n"
+               "# to the shipped defaults, or edit it -- the Esc menu writes it.\n");
+    fprintf(f, "water=%.3f\nlow=%.3f\nmid=%.3f\nhigh=%.3f\n",
+            g_tune.units[VOX_H_WATER], g_tune.units[VOX_H_LOW],
+            g_tune.units[VOX_H_MID], g_tune.units[VOX_H_HIGH]);
+    fprintf(f, "footprint=%.3f\ntilt_scale=%.3f\n",
+            g_tune.footprint, g_tune.tilt_scale);
+    fprintf(f, "chase_back=%.3f\nchase_height=%.3f\nchase_fov=%.3f\n"
+               "chase_hpx=%.3f\nfog_start=%.3f\nfog_max=%.3f\n",
+            g_tune.chase_back, g_tune.chase_height, g_tune.chase_fov,
+            g_tune.chase_hpx, g_tune.fog_start, g_tune.fog_max);
+    fclose(f);
+    fprintf(stderr, "[VOXEL] tuning saved to %s\n", TUNE_PATH);
+}
+
+void voxel_tuning_load(void) {
+    voxel_tuning_reset();
+    FILE* f = fopen(TUNE_PATH, "r");
+    if (!f) return;
+    char key[64];
+    float val;
+    char line[160];
+    while (fgets(line, sizeof(line), f)) {
+        if (line[0] == '#') continue;
+        if (sscanf(line, "%63[^=]=%f", key, &val) != 2) continue;
+        if      (!strcmp(key, "water"))        g_tune.units[VOX_H_WATER] = val;
+        else if (!strcmp(key, "low"))          g_tune.units[VOX_H_LOW]   = val;
+        else if (!strcmp(key, "mid"))          g_tune.units[VOX_H_MID]   = val;
+        else if (!strcmp(key, "high"))         g_tune.units[VOX_H_HIGH]  = val;
+        else if (!strcmp(key, "footprint"))    g_tune.footprint    = val;
+        else if (!strcmp(key, "tilt_scale"))   g_tune.tilt_scale   = val;
+        else if (!strcmp(key, "chase_back"))   g_tune.chase_back   = val;
+        else if (!strcmp(key, "chase_height")) g_tune.chase_height = val;
+        else if (!strcmp(key, "chase_fov"))    g_tune.chase_fov    = val;
+        else if (!strcmp(key, "chase_hpx"))    g_tune.chase_hpx    = val;
+        else if (!strcmp(key, "fog_start"))    g_tune.fog_start    = val;
+        else if (!strcmp(key, "fog_max"))      g_tune.fog_max      = val;
+    }
+    fclose(f);
+    fprintf(stderr, "[VOXEL] tuning loaded from %s\n", TUNE_PATH);
+}
 
 int voxel_get_mode(void) { return g_mode; }
 
@@ -132,7 +211,8 @@ static inline float height_at(const VoxTileGrid* grid, float x, float y) {
     float h = VOX_UNITS[grid->height[ty][tx]];
     if (h <= 0.0f || !grid->leafy[ty][tx]) return h;
 
-    const float EDGE = 3.0f;           /* px of falloff inside an 8px tile */
+    const float EDGE = g_tune.footprint;
+    if (EDGE <= 0.01f) return h;   /* 0 = hard-edged cells */
     float u = px - (float)(tx * 8);
     float v = py - (float)(ty * 8);
     float k = 1.0f;
@@ -249,7 +329,7 @@ static void render_chase(GBContext* ctx, const VoxTileGrid* grid,
     const int OW = GB_SCREEN_WIDTH * S;
     const int OH = GB_SCREEN_HEIGHT * S;
     const int world_top = grid->hud_rows;
-    const float HPX = 3.2f;             /* vertical px per height unit */
+    const float HPX = g_tune.chase_hpx;
     const float FAR = 230.0f;
 
     /* Sky first; the ground overwrites what it owns. */
@@ -303,8 +383,8 @@ static void render_chase(GBContext* ctx, const VoxTileGrid* grid,
     const float fxv = cosf(yaw), fyv = sinf(yaw);
     const float rxv = fyv, ryv = -fxv;      /* screen-space right vector */
 
-    const float BACK = 62.0f;               /* camera behind the player */
-    const float CAMH = 32.0f;               /* and above their ground */
+    const float BACK = g_tune.chase_back;   /* camera behind the player */
+    const float CAMH = g_tune.chase_height; /* and above their ground */
     /* Ease the camera's position so Link's whole-pixel steps (and room
      * transitions) glide instead of ticking. */
     static float scx_f = 0.0f, scy_f = 0.0f;
@@ -319,7 +399,7 @@ static void render_chase(GBContext* ctx, const VoxTileGrid* grid,
     if (cg < 0.0f) cg = 0.0f;
     const float cz = cg * HPX + CAMH;
 
-    const float focal = (float)OW * 0.62f;  /* ~78 degree field of view */
+    const float focal = (float)OW * g_tune.chase_fov;
     const int horizon = (int)((float)OH * 0.36f);
     const uint32_t fog = (grid->sky != VOX_SKY_NONE)
         ? VOX_SKIES[grid->sky].horizon : 0xFF2C2620u;
@@ -376,9 +456,10 @@ static void render_chase(GBContext* ctx, const VoxTileGrid* grid,
                     c = (c & 0xFFFFFF00u) | 0x00000050u;
                 }
                 if (!inside) c = lerp_color(c, fog, 96);
-                int t = (int)((d - 70.0f) * 256.0f / (FAR - 70.0f));
+                int t = (int)((d - g_tune.fog_start) * 256.0f /
+                              (FAR - g_tune.fog_start));
                 if (t < 0) t = 0;
-                if (t > 150) t = 150;
+                if (t > (int)g_tune.fog_max) t = (int)g_tune.fog_max;
                 c = lerp_color(c, fog, t);
                 /* A step up in height means this span is mostly the riser's
                  * front face: darken it below a thin lit rim, so cliffs and
@@ -541,7 +622,7 @@ void vox_render(GBContext* ctx, const VoxTileGrid* grid,
 
     /* Squashing the world frees vertical room; spend it lifting the diorama
      * so tall geometry has somewhere to go without clipping off the top. */
-    const float headroom = VOX_UNITS[VOX_H_HIGH] * cam.lift;
+    const float headroom = VOX_UNITS[VOX_H_HIGH] * cam.lift * g_tune.tilt_scale;
     float y_off = (float)world_top + ((float)world_h * (1.0f - cam.squash)) * 0.5f;
     y_off += headroom * 0.55f;
 
@@ -578,7 +659,7 @@ void vox_render(GBContext* ctx, const VoxTileGrid* grid,
     was_extruded = extruded;
     grow += (1.0f - grow) * 0.18f;
     if (grow > 0.999f) grow = 1.0f;
-    const float lift = cam.lift * grow;
+    const float lift = cam.lift * grow * g_tune.tilt_scale;
 
     /* Link's ground height, eased over a few frames: point-sampling the
      * cell under his feet made his billboard teleport a full step the
@@ -827,6 +908,7 @@ static const uint32_t* voxel_frame_hook(GBContext* ctx, const uint32_t* fb,
 }
 
 void voxel_install(void) {
+    voxel_tuning_load();
     const char* s = getenv("VOXEL_SCALE");
     if (s) {
         int v = atoi(s);

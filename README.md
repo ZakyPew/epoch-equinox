@@ -198,6 +198,24 @@ at the addresses named by
 Output is a normal 160×144 frame handed back through the runtime's present
 path, so shaders, scaling and screenshots all still apply.
 
+### Tuning the look live
+
+The override files decide *which* height class a cell is; the Esc menu's
+**Voxel Diorama** section decides what a height class **looks like** — and
+the sliders reshape the world under the menu as you drag them:
+
+| | |
+|---|---|
+| **Shape** | height of grass, bushes and trees; water depth; foliage footprint; tilt height |
+| **Chase camera** | distance, height, field of view, vertical scale, fog start and strength |
+
+*Foliage footprint* is how far a tree pulls back from its cell edge — `0`
+gives hard blocks, high values give tufts standing in the grass.
+
+**Save tuning** writes `voxel/tuning.ini` next to the binary: a plain text
+file you can share, commit, or delete to go back to the defaults. Finding a
+better look is a slider and a save, not a rebuild.
+
 ### Sculpting rooms by hand
 
 Collision decides what rises — which is right until a room decorates itself
