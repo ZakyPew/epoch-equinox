@@ -18,8 +18,11 @@
  *
  * VOXEL_EDIT=1 writes a ready-to-edit template (all '.') for any room
  * you stand in that has no file yet, with the collision-derived heights
- * included as a comment so you can see what you are overriding. Edit,
- * walk out, walk back in: the file reloads on room entry.
+ * included as a comment so you can see what you are overriding.
+ *
+ * Editing is live: the file's timestamp is polled a few times a second
+ * while you stand in the room, so saving in a text editor reshapes the
+ * terrain in front of you. No restart, no leaving the room.
  */
 #include "voxel_internal.h"
 
@@ -27,11 +30,11 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <sys/stat.h>
 #ifdef _WIN32
 #include <direct.h>
 #define vox_mkdir(p) _mkdir(p)
 #else
-#include <sys/stat.h>
 #define vox_mkdir(p) mkdir(p, 0755)
 #endif
 
@@ -43,6 +46,7 @@ typedef struct {
     bool present;        /* file existed and parsed */
     bool is_seasons;
     int group, room;
+    long mtime;          /* file timestamp the cache was built from */
     uint8_t grid[OV_H * OV_W];   /* height class, or 0xFF = keep */
 } VoxOverride;
 
@@ -115,7 +119,23 @@ const uint8_t* vox_override_lookup(bool is_seasons, int group, int room,
                                    const uint8_t* collisions) {
     if (g_cache.valid && g_cache.is_seasons == is_seasons &&
         g_cache.group == group && g_cache.room == room) {
-        return g_cache.present ? g_cache.grid : NULL;
+        /* Same room as last frame. Poll the file a couple of times a
+         * second so an edit lands while you are standing in the room --
+         * save the file, watch the terrain change. Cheap: this runs once
+         * per frame, and a stat of a warm path costs microseconds. */
+        static int poll = 0;
+        if (++poll < 20) {
+            return g_cache.present ? g_cache.grid : NULL;
+        }
+        poll = 0;
+        char probe[256];
+        override_path(probe, sizeof(probe), is_seasons, group, room);
+        struct stat st;
+        long now = (stat(probe, &st) == 0) ? (long)st.st_mtime : -1;
+        if (now == g_cache.mtime) {
+            return g_cache.present ? g_cache.grid : NULL;
+        }
+        /* Changed on disk: fall through and re-read it. */
     }
 
     g_cache.valid = true;
@@ -126,6 +146,10 @@ const uint8_t* vox_override_lookup(bool is_seasons, int group, int room,
 
     char path[256];
     override_path(path, sizeof(path), is_seasons, group, room);
+    {
+        struct stat st;
+        g_cache.mtime = (stat(path, &st) == 0) ? (long)st.st_mtime : -1;
+    }
     FILE* f = fopen(path, "r");
     if (!f) {
         if (getenv("VOXEL_EDIT")) {
