@@ -307,13 +307,24 @@ static int run_game(const EpochGame* game, unsigned long long frame_limit) {
     bool running = true;
     int exit_code = 0;
 
+    /* Boot boost: the known carts spend their first seconds on licensing
+     * splashes. Run the console unpaced through those frames so they flash
+     * past in a blink and the title appears immediately. Nothing is
+     * patched or skipped -- the game still plays every frame, just not at
+     * 60Hz. EPOCH_NO_BOOT_BOOST=1 restores the leisurely original. */
+    unsigned long long boost_frames = 0;
+    if (game->expected_sha256 && !getenv("EPOCH_NO_BOOT_BOOST")) {
+        boost_frames = 160;
+    }
+
     while (running) {
         uint32_t paced_cycles = 0;
         gb_reset_frame(ctx);
         ctx->stopped = 0;
 
+        bool boosting = frame_index < boost_frames;
         while (!ctx->frame_done) {
-            bool smooth = gb_platform_get_smooth_lcd_transitions();
+            bool smooth = gb_platform_get_smooth_lcd_transitions() && !boosting;
             uint32_t budget = smooth ? slice_cycles_budget : 0xFFFFFFFFu;
             uint32_t slice_start = ctx->frame_cycles;
             gb_run_cycles(ctx, budget);
@@ -342,7 +353,7 @@ static int run_game(const EpochGame* game, unsigned long long frame_limit) {
 
         uint32_t remaining = ctx->frame_cycles > paced_cycles
                                  ? ctx->frame_cycles - paced_cycles : 0;
-        if (remaining > 0) gb_platform_vsync(remaining);
+        if (remaining > 0 && !boosting) gb_platform_vsync(remaining);
 
         if (frame_limit > 0 && frame_index >= frame_limit) {
             fprintf(stderr, "[LIMIT] Reached frame limit %llu\n", frame_limit);
