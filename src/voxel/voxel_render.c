@@ -94,8 +94,32 @@ static inline uint32_t shade(uint32_t c, int mul /* 0..~272 */) {
     return 0xFF000000u | (b << 16) | (g << 8) | r;
 }
 
-/* Height in extrusion units at a world (screen-space) position. Float in,
- * so at render scale the dome profiles resolve smoothly. */
+/* Height class of one tile, clamped to the grid. */
+static inline float cell_h(const VoxTileGrid* grid, int tx, int ty) {
+    if (tx < 0) tx = 0;
+    if (tx >= VOX_TILES_W) tx = VOX_TILES_W - 1;
+    if (ty < 0) ty = 0;
+    if (ty >= VOX_TILES_H) ty = VOX_TILES_H - 1;
+    return VOX_UNITS[grid->height[ty][tx]];
+}
+
+/* Height at a world (screen-space) position, with a footprint for growing
+ * things.
+ *
+ * Raising a vegetation cell to its full height across its whole square is
+ * what made forests read as terraced mesas: the grass around a tree rose
+ * with the tree. Foliage now tapers to ground level at whichever of its
+ * edges face something shorter, so a lone tree becomes a rounded mass
+ * standing IN the meadow while a run of adjacent trees keeps its shared
+ * interior flat and only rounds off at the outside of the clump.
+ *
+ * This replaces the old per-cell dome, which put a peak in the middle of
+ * every cell -- charming from above, and the source of the striped
+ * shark-fins when the chase camera looked at a treeline edge-on.
+ *
+ * Walls, cliffs and fences are left alone: architecture should have
+ * corners.
+ */
 static inline float height_at(const VoxTileGrid* grid, float x, float y) {
     float px = x + (float)grid->fine_x;
     float py = y + (float)grid->fine_y;
@@ -106,21 +130,19 @@ static inline float height_at(const VoxTileGrid* grid, float x, float y) {
     if (ty < 0) ty = 0;
     if (ty >= VOX_TILES_H) ty = VOX_TILES_H - 1;
     float h = VOX_UNITS[grid->height[ty][tx]];
+    if (h <= 0.0f || !grid->leafy[ty][tx]) return h;
 
-    /* Raised foliage gets a domed top: height peaks at the centre of the
-     * 16px room cell and rounds off toward its edges, so trees and bushes
-     * read as canopies instead of flat-topped crates. Everything
-     * non-leafy (walls, cliffs, fences) stays architectural and flat. */
-    if (h >= VOX_UNITS[VOX_H_MID] && grid->leafy[ty][tx]) {
-        float cx = px - 16.0f * floorf(px / 16.0f);
-        float cy = py - 16.0f * floorf(py / 16.0f);
-        float dx = (cx - 7.5f) / 8.0f;
-        float dy = (cy - 7.5f) / 8.0f;
-        float k = 1.0f - 0.22f * (dx * dx + dy * dy);
-        if (k < 0.62f) k = 0.62f;
-        h *= k;
-    }
-    return h;
+    const float EDGE = 3.0f;           /* px of falloff inside an 8px tile */
+    float u = px - (float)(tx * 8);
+    float v = py - (float)(ty * 8);
+    float k = 1.0f;
+    if (cell_h(grid, tx - 1, ty) < h && u < EDGE)        k = fminf(k, u / EDGE);
+    if (cell_h(grid, tx + 1, ty) < h && u > 8.0f - EDGE) k = fminf(k, (8.0f - u) / EDGE);
+    if (cell_h(grid, tx, ty - 1) < h && v < EDGE)        k = fminf(k, v / EDGE);
+    if (cell_h(grid, tx, ty + 1) < h && v > 8.0f - EDGE) k = fminf(k, (8.0f - v) / EDGE);
+    if (k < 0.0f) k = 0.0f;
+    k = k * k * (3.0f - 2.0f * k);     /* smoothstep, so the edge rolls */
+    return h * k;
 }
 
 /* ------------------------------------------------------------------ */
@@ -188,17 +210,10 @@ static void vox_paint_sky(int kind, uint32_t* out, int S) {
 
 static inline int top_rim(int S) { return 2 * S; }
 
-/* Raw cell height, no dome shaping. The dome is a top-down flourish: seen
- * edge-on it puts a peak in the middle of every cell, and a row of them
- * aliases into the striped shark-fins that made tree lines look crazy. */
+/* The chase camera samples the same footprint-shaped field the diorama
+ * does; the cross filter below only removes sampling aliasing. */
 static inline float height_raw(const VoxTileGrid* grid, float x, float y) {
-    int tx = (int)(x + (float)grid->fine_x) >> 3;
-    int ty = (int)(y + (float)grid->fine_y) >> 3;
-    if (tx < 0) tx = 0;
-    if (tx >= VOX_TILES_W) tx = VOX_TILES_W - 1;
-    if (ty < 0) ty = 0;
-    if (ty >= VOX_TILES_H) ty = VOX_TILES_H - 1;
-    return VOX_UNITS[grid->height[ty][tx]];
+    return height_at(grid, x, y);
 }
 
 /* Tent-filtered height for the perspective camera: 3x3 taps at 5px
