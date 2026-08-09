@@ -89,6 +89,11 @@ typedef struct {
     int hcls;                  /* VOX_H_MID = shrub, VOX_H_HIGH = tree */
     uint32_t lit, mid, dark;   /* canopy shades, bright to shadow */
     uint32_t bark;             /* trunk */
+    /* The tree's own 16x16 tile art, upright: the canopy billboard is
+     * textured with this (masked to a rounded silhouette), so a tree in
+     * 3D is literally the tree the 2D game draws -- and modded tilesets
+     * carry over for free. */
+    uint32_t tex[16 * 16];
 } VoxTree;
 
 #define VOX_MAX_TREES 64

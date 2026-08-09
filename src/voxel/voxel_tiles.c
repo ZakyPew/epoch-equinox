@@ -568,7 +568,9 @@ scan_sprites:
                 }
                 if (!all) continue;
 
-                /* Palette from the art block: brightest, darkest, mean. */
+                /* Copy the art block (clamped at grid edges) and pull a
+                 * palette from it: brightest, darkest, mean. */
+                VoxTree* t = &grid->trees[grid->tree_count];
                 uint32_t lit = 0, dark = 0;
                 int lb = -1, db = 0x7FFFFFFF, n = 0;
                 long ar = 0, ag = 0, ab = 0;
@@ -576,9 +578,12 @@ scan_sprites:
                     for (int px = 0; px < 16; px++) {
                         int gx = sx + px + grid->fine_x;
                         int gy = sy + py + grid->fine_y;
-                        if (gx < 0 || gy < 0 ||
-                            gx >= VOX_TEX_W || gy >= VOX_TEX_H) continue;
+                        if (gx < 0) gx = 0;
+                        if (gy < 0) gy = 0;
+                        if (gx >= VOX_TEX_W) gx = VOX_TEX_W - 1;
+                        if (gy >= VOX_TEX_H) gy = VOX_TEX_H - 1;
                         uint32_t c = grid->tex[gy * VOX_TEX_W + gx];
+                        t->tex[py * 16 + px] = c;
                         int r8 = (c >> 16) & 0xFF;
                         int g8 = (c >> 8) & 0xFF;
                         int b8 = c & 0xFF;
@@ -590,7 +595,7 @@ scan_sprites:
                 }
                 if (n == 0) continue;
 
-                VoxTree* t = &grid->trees[grid->tree_count++];
+                grid->tree_count++;
                 t->sx = sx;
                 t->sy = sy;
                 t->hcls = hmin;

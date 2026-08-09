@@ -710,22 +710,27 @@ static void render_chase(GBContext* ctx, const VoxTileGrid* grid,
                         ? shade(bark, 150) : bark;
                 }
             }
+            /* The canopy is the tree's own 16x16 tile art stood upright,
+             * masked to a rounded-square silhouette (superellipse) so the
+             * block's corners -- neighbouring ground or the next tree's
+             * leaves -- don't float. The art carries the shading; a dark
+             * rim at the silhouette edge gives it body. */
+            (void)lit; (void)mid; (void)dk;
             int cyc = byp - th2 - chh / 2;
             for (int yy = cyc - chh / 2; yy <= cyc + chh / 2; yy++) {
                 if (yy < 0 || yy >= OH) continue;
                 float v = (float)(yy - cyc) / ((float)chh * 0.5f);
+                int ay = (int)((v * 0.5f + 0.5f) * 15.99f);
                 for (int xx = cxp - cww / 2; xx <= cxp + cww / 2; xx++) {
                     if (xx < 0 || xx >= OW) continue;
                     float u = (float)(xx - cxp) / ((float)cww * 0.5f);
-                    float r2 = u * u + v * v;
+                    float r2 = u * u * u * u + v * v * v * v;
                     if (r2 > 1.0f) continue;
                     if (s_zbuf[yy * OW + xx] < dep - 3.0f) continue;
-                    float sv = v + 0.40f * u * u
-                             + (((xx ^ yy) & 1) ? 0.05f : -0.05f);
-                    uint32_t c2 = sv < -0.20f ? lit
-                                 : (sv < 0.40f ? mid : dk);
-                    if (r2 > 0.82f) c2 = shade(c2, 132);
-                    out[yy * OW + xx] = c2;
+                    int ax = (int)((u * 0.5f + 0.5f) * 15.99f);
+                    uint32_t c2 = t->tex[ay * 16 + ax];
+                    if (r2 > 0.62f) c2 = shade(c2, 148);   /* dark rim */
+                    out[yy * OW + xx] = lerp_color(c2, fog, t2);
                 }
             }
             continue;
