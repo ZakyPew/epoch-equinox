@@ -1,16 +1,30 @@
-# Stream overlay
+# Stream overlays
 
-`overlay.html` is a 1920×1080 transparent overlay for OBS: project name,
-one-line description, and the repository link, plus a "now building" pill
-you can change without touching OBS.
+Two layouts, both transparent, both driven by the same `now.txt`:
+
+| file | canvas | for |
+|---|---|---|
+| `overlay.html` | 1920×1080 | Twitch / YouTube landscape |
+| `overlay-vertical.html` | 1080×1920 | TikTok, Reels, Shorts, vertical Twitch |
+
+Each carries the project name, a one-line description and the repository
+link, plus a "now building" pill you can change without touching OBS.
+
+The vertical layout keeps the middle of the canvas empty for gameplay and a
+facecam, and stays out of the two places mobile platforms draw their own UI:
+the right-hand button column and the bottom caption strip. Both insets are
+CSS variables at the top of the file (`--side-safe`, `--bottom-safe`) if your
+platform wants more or less room.
+
+![vertical overlay](../docs/stream-overlay-vertical.png)
 
 ![overlay composited over gameplay](../docs/stream-overlay.png)
 
 ## Add it in OBS
 
 1. **Sources → + → Browser**
-2. Tick **Local file**, choose `stream/overlay.html`
-3. Width **1920**, height **1080**
+2. Tick **Local file**, choose `stream/overlay.html` (or `overlay-vertical.html`)
+3. Width **1920**, height **1080** — or **1080**×**1920** for the vertical one
 4. Leave "Shutdown source when not visible" **off** so the ticker keeps polling
 
 That's it — the background is transparent, so it composites over whatever

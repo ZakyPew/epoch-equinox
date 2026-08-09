@@ -389,9 +389,11 @@ that one run only.
 
 ## Streaming
 
-`stream/overlay.html` is a transparent 1920×1080 OBS overlay with the project
-name and repo link, plus a "now building" line you can edit live in
-`stream/now.txt`. Setup is three clicks — see [stream/README.md](stream/README.md).
+Transparent OBS overlays with the project name and repo link, plus a "now
+building" line you can edit live in `stream/now.txt`: `stream/overlay.html`
+(1920×1080) and `stream/overlay-vertical.html` (1080×1920, laid out around the
+UI mobile platforms draw over the frame). Setup is three clicks — see
+[stream/README.md](stream/README.md).
 
 ## Roadmap
 
