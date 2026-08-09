@@ -113,6 +113,19 @@ int main(int argc, char* argv[]) {
                 }
                 fprintf(stderr, "\n");
             }
+            if (getenv("VOX_DUMP_LAYOUT")) {
+                /* wRoomLayout $CF00: one byte per 16x16 cell naming the
+                 * OBJECT there (tree, bush, sign...), not just whether it
+                 * blocks. This is the table a shape-based renderer needs. */
+                for (int row = 0; row < 12; row++) {
+                    fprintf(stderr, "  layout %2d:", row);
+                    for (int c = 0; c < 16; c++) {
+                        fprintf(stderr, " %02X",
+                                ctx->wram[0xCF00 + row * 16 + c - 0xC000]);
+                    }
+                    fprintf(stderr, "\n");
+                }
+            }
             if (getenv("VOX_DUMP_COLL")) {
                 for (int row = 0; row < 12; row++) {
                     fprintf(stderr, "  coll %2d:", row);

@@ -106,6 +106,8 @@ button labels for Xbox, PlayStation, Switch Pro and Joy-Con.
 | `F1` | Toggle FPS overlay | — |
 | `M` | Mute | — |
 | **`F3`** | **Cycle voxel mode** (off → 15° → 30° → 45° → chase cam) | — |
+| **`R`** *(hold)* | **Rewind** — step back through the last ~12 seconds | — |
+| **`F9`** | Jump back to the moment you entered this room | — |
 
 The Esc menu opens with a **Display** section — fullscreen, scaling mode
 (Pixel Perfect / Aspect Fit / Aspect Fill / Stretch), scale filter, window
@@ -115,6 +117,25 @@ letterboxes the rest — that is what keeps it razor sharp; use Aspect Fit to
 fill the window instead. Below it: the voxel diorama section, then the rest
 (savestates, palettes, shader presets, SGB borders, hardware mode, audio and
 input remapping).
+
+### Rewind and room checkpoints
+
+Old games are unforgiving in ways that stopped being fun; these give the time
+back without touching the game.
+
+**Hold `R`** and play runs backwards through the last twelve seconds or so —
+let go and it continues from wherever you stopped. A bad jump, a cheap hit, a
+puzzle you'd rather retry costs a second instead of a walk.
+
+**`F9`** returns you to the moment you walked into the room you're standing in.
+The player watches the game's own `wActiveRoom` and drops a checkpoint on every
+room change, which is LynnaLab's "quickstart" idea from the other side of the
+screen — the editor boots you into a room, this puts you back at the start of
+one.
+
+A corner readout shows the room you're in (`Room 0-6A`) while you play, which is
+also the number you need to name its
+[height-override file](#sculpting-rooms-by-hand).
 
 ## Launch options
 

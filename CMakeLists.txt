@@ -68,6 +68,9 @@ FetchContent_Declare(gb_recompiled
         COMMAND ${CMAKE_COMMAND}
         -DPATCH_FILE=${CMAKE_CURRENT_SOURCE_DIR}/patches/gbrt-audio-latency.patch
         -P ${CMAKE_CURRENT_SOURCE_DIR}/patches/apply_gbrt_patch.cmake
+        COMMAND ${CMAKE_COMMAND}
+        -DPATCH_FILE=${CMAKE_CURRENT_SOURCE_DIR}/patches/gbrt-host-overlay.patch
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/patches/apply_gbrt_patch.cmake
 )
 FetchContent_GetProperties(gb_recompiled)
 if(NOT gb_recompiled_POPULATED)
@@ -80,7 +83,9 @@ add_subdirectory(${gb_recompiled_SOURCE_DIR}/runtime ${CMAKE_BINARY_DIR}/_gbrt_b
 # ---------------------------------------------------------------------------
 set(EPOCH_SUPPORT_SOURCES
     src/mod_loader.c
-    src/platform_compat.c)
+    src/platform_compat.c
+    src/epoch_rewind.c
+    src/epoch_rewind_hud.cpp)
 if(EPOCH_WITH_VOXEL)
     list(APPEND EPOCH_SUPPORT_SOURCES
         src/voxel/voxel_tiles.c
