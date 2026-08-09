@@ -535,11 +535,25 @@ scan_sprites:
      * winter and Subrosia keep their palettes. */
     grid->tree_count = 0;
     memset(grid->treecell, 0, sizeof(grid->treecell));
-    if (use_oracle) {
+    /* Outdoors only: wRoomLayout's object IDs are read against the
+     * overworld tileset, and interiors reuse the same numbers for
+     * furniture. */
+    if (use_oracle && oracle.active_group <= 1) {
         for (int row = 0; row < 12; row++) {
             for (int col = 0; col < 16; col++) {
                 if (grid->tree_count >= VOX_MAX_TREES) break;
                 if (oracle.collisions[row * 16 + col] != 0x0F) continue;
+                /* The layout ID names the object, which colour guessing
+                 * could not: verified live in Ages, the forest border is
+                 * a mosaic of $20-$3F tree-mass tiles while the cuttable
+                 * bushes and grass tufts standing in the meadow are $C5 --
+                 * the same cells the colour classifier scored identically.
+                 * Trees stand tall; destructibles hug the ground; anything
+                 * unrecognised stays extruded terrain. */
+                uint8_t id = oracle.layout[row * 16 + col];
+                bool is_tree = (id >= 0x20 && id <= 0x3F);
+                bool is_tuft = (id >= 0xC0 && id <= 0xCF);
+                if (!is_tree && !is_tuft) continue;
                 int sx = col * 16 - oracle.cam_x - oracle.off_x;
                 int sy = row * 16 - oracle.cam_y - oracle.off_y
                          + grid->hud_rows;
@@ -548,13 +562,11 @@ scan_sprites:
                 if (tx0 < 0 || ty0 < 0 ||
                     tx0 + 1 >= VOX_TILES_W || ty0 + 1 >= VOX_TILES_H)
                     continue;
-                /* All four tiles leafy and raised = one growing thing.
-                 * The minimum height class across the cell sizes the
-                 * billboard: MID cells (bushes, squat trees -- the colour
-                 * classifier rarely awards HIGH) become shrubs, HIGH
-                 * cells full trees. */
+                /* The cell must still LOOK like vegetation on screen --
+                 * the layout ID names the object, the leafy check guards
+                 * against a season or mod restyling the same ID into
+                 * something that shouldn't billboard. */
                 bool all = true;
-                int hmin = VOX_H_HIGH;
                 for (int dy = 0; dy < 2 && all; dy++) {
                     for (int dx = 0; dx < 2; dx++) {
                         if (!grid->leafy[ty0 + dy][tx0 + dx] ||
@@ -562,11 +574,10 @@ scan_sprites:
                             all = false;
                             break;
                         }
-                        if (grid->height[ty0 + dy][tx0 + dx] < hmin)
-                            hmin = grid->height[ty0 + dy][tx0 + dx];
                     }
                 }
                 if (!all) continue;
+                int hmin = is_tree ? VOX_H_HIGH : VOX_H_MID;
 
                 /* Copy the art block (clamped at grid edges) and pull a
                  * palette from it: brightest, darkest, mean. */

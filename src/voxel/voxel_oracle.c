@@ -44,6 +44,7 @@
 #define A_wScreenOffsetY  0xCD08
 #define A_wScreenOffsetX  0xCD09
 #define A_wRoomCollisions 0xCE00
+#define A_wRoomLayout     0xCF00
 #define A_w1Link          0xD000   /* SpecialObjectStruct, WRAM bank 1 */
 
 #define COLL_W 16
@@ -175,6 +176,7 @@ bool vox_oracle_read(GBContext* ctx, VoxOracleState* st) {
     for (int i = 0; i < COLL_W * COLL_H; i++) {
         uint8_t v = wram0(ctx, A_wRoomCollisions + i);
         st->collisions[i] = v;
+        st->layout[i] = wram0(ctx, A_wRoomLayout + i);
         if (!seen[v]) { seen[v] = 1; distinct++; }
     }
     if (distinct < 2) {

@@ -686,13 +686,15 @@ static void render_chase(GBContext* ctx, const VoxTileGrid* grid,
                            (FAR - g_tune.fog_start));
             if (t2 < 0) t2 = 0;
             if (t2 > (int)g_tune.fog_max) t2 = (int)g_tune.fog_max;
-            /* Proportions by height class: HIGH cells are full trees,
-             * MID cells squat shrubs (bushes keep reading as cuttable). */
+            /* Proportions by kind: trees get a trunk and a tall canopy;
+             * destructibles (bushes, cuttable grass) are trunkless tufts
+             * hugging the ground -- a tuft with a trunk read as a small
+             * tree, and nobody swings a sword at a tree. */
             bool big = t->hcls >= VOX_H_HIGH;
-            int th2 = (int)((big ? 9.0f : 4.0f) * sc);
+            int th2 = big ? (int)(9.0f * sc) : 0;
             int tw2 = (int)((big ? 6.0f : 5.0f) * sc);
-            int chh = (int)((big ? 22.0f : 13.0f) * sc);
-            int cww = (int)((big ? 24.0f : 17.0f) * sc);
+            int chh = (int)((big ? 22.0f : 10.0f) * sc);
+            int cww = (int)((big ? 24.0f : 16.0f) * sc);
             ti++;
             if (chh < 3 || cww < 3) continue;
             if (tw2 < 2) tw2 = 2;
