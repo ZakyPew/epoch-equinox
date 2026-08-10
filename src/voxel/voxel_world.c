@@ -31,8 +31,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define ROOM_W  160            /* room pixels */
-#define ROOM_H  128
+#define ROOM_W  VOX_ROOM_W     /* room pixels */
+#define ROOM_H  VOX_ROOM_H
 #define ROOM_TW (ROOM_W / 8)   /* 8px tiles */
 #define ROOM_TH (ROOM_H / 8)
 #define ROOM_GRID 16           /* rooms per overworld axis */

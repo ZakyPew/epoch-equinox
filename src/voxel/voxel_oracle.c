@@ -149,7 +149,19 @@ bool vox_oracle_read(GBContext* ctx, VoxOracleState* st) {
                 ((int)ctx->hram[prof->cam_y_off + 1] << 8);
     st->cam_x = (int)ctx->hram[prof->cam_x_off] |
                 ((int)ctx->hram[prof->cam_x_off + 1] << 8);
-    st->off_y = (int8_t)wram0(ctx, A_wScreenOffsetY);
+    /* wScreenOffsetY carries two different things in one byte. Small values
+     * are the transient draw shift this field is named for (screen shake),
+     * and screen->room conversions have to undo them. But a room whose
+     * tilemap lives in the lower half of the 256px-tall BG map reports a
+     * whole room height here -- 0x80, seen on every odd overworld row in
+     * Ages (SCY 112 there against 240 on even rows) -- and that is where
+     * the room was *drawn*, not where it moved to. Feeding it to the
+     * converters pushed every collision and layout lookup a full room off
+     * the table, which is why odd-row rooms rendered as bare smeared ground
+     * with no trees and never made it into the world cache. Page offsets
+     * are whole rooms, shakes never are, so fold them out here. */
+    int8_t oy = (int8_t)wram0(ctx, A_wScreenOffsetY);
+    st->off_y = (oy % VOX_ROOM_H == 0) ? 0 : oy;
     st->off_x = (int8_t)wram0(ctx, A_wScreenOffsetX);
     st->is_seasons = prof->is_seasons;
     st->active_group = wram0(ctx, prof->group_addr);

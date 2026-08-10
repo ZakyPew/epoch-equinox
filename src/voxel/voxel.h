@@ -71,12 +71,18 @@ typedef struct {
     float chase_height;   /* camera height above the player's ground */
     float chase_fov;      /* focal length as a fraction of output width */
     float chase_hpx;      /* screen px per height unit in perspective */
+    float chase_follow;   /* how fast yaw swings behind Link, 0 = never */
     float fog_start;      /* distance where distance fog begins */
     float fog_max;        /* strongest fog blend, 0-256 */
 } VoxelTuning;
 
 /** The live tuning block. Safe to mutate; the renderer reads it per frame. */
 VoxelTuning* voxel_tuning(void);
+
+/** Where the chase camera is looking, in radians (-pi/2 is north). Exposed
+ *  so a headless probe can watch the follow ease instead of guessing from
+ *  pixels. */
+float voxel_chase_yaw(void);
 
 /** Restore the shipped defaults. */
 void voxel_tuning_reset(void);

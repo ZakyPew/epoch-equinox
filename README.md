@@ -191,13 +191,23 @@ at the addresses named by
   the past — with slow procedural clouds. Interiors keep a neutral backdrop
 - the status bar stays flat and composites back on top
 - **chase cam** (`F3` to the last stop): a third-person camera floating
-  behind Link, looking where he faces, raycasting the same heightfield in
-  true perspective — distance fog, depth-scaled sprite billboards, and a
-  camera that sweeps around when he turns
+  behind Link, raycasting the same heightfield in true perspective —
+  distance fog and depth-scaled sprite billboards. It swings around behind
+  him while he **walks**, eased over about a second, and ignores a standing
+  turn, so tapping a direction to face a sign doesn't whip the world
+  around. The right stick (or `Q`/`E`) takes the camera and holds it there
+  until he walks again
 - **the world persists**: every room you visit is remembered, and the chase
   camera draws remembered neighbours past the room border — terrain, cliff
-  faces, billboard trees — so the world runs to the horizon and fills in as
+  faces, tree masses — so the world runs to the horizon and fills in as
   you explore instead of ending at the edge of the screen
+
+<p align="center">
+  <img src="docs/persistent-world.png" alt="The same step, with and without the remembered room" width="900">
+  <br>
+  <em>Walking back the way he came: the room he already crossed is still
+  there (left) where it used to end in fog (right)</em>
+</p>
 
 Output is a normal 160×144 frame handed back through the runtime's present
 path, so shaders, scaling and screenshots all still apply.
@@ -212,6 +222,10 @@ the sliders reshape the world under the menu as you drag them:
 |---|---|
 | **Shape** | height of grass, bushes and trees; water depth; foliage footprint; tilt height |
 | **Chase camera** | distance, height, field of view, vertical scale, fog start and strength |
+
+`chase_follow` in `voxel/tuning.ini` is how fast the camera swings behind
+Link, per frame: `0.06` ships, higher snaps harder, and `0` pins the camera
+to a fixed heading the way earlier builds did.
 
 *Foliage footprint* is how far a tree pulls back from its cell edge — `0`
 gives hard blocks, high values give tufts standing in the grass.
@@ -301,11 +315,14 @@ mods/my-randomizer/
 ```
 
 The `voxel/` images are plain 16×16 P6 PPMs (`magick art.png art.ppm`).
-When present, every billboard tree or tuft in the chase camera wears the
-mod's art instead of the cart's tiles; trunk and canopy shading are derived
-from whatever art is used, so they match automatically. When several
-enabled mods supply the same file, the highest-priority mod wins — the same
-order the ROM patches apply in.
+They are what *turns on* billboards: without them a tree is extruded
+terrain like everything else, because the cart's tree tiles were drawn to
+be seen from above and standing one upright reads as a cardboard cutout.
+Supply `voxel/tree.ppm` — art drawn to be looked at from the side — and
+every tree cell in the chase camera stands up wearing it, with trunk and
+canopy shading derived from the art so they match automatically. When
+several enabled mods supply the same file, the highest-priority mod wins —
+the same order the ROM patches apply in.
 
 ```json
 {
@@ -440,6 +457,9 @@ If any of this sounds fun, open an issue or just send a PR:
 - **Testing** (`tools/vox_shot.c`): boots a ROM headless, drives it with
   an input script, dumps frame pairs — the whole voxel pipeline was built
   against it. More scripted routes (dungeons!) directly increase coverage.
+  `VOX_SHOT_NOCACHE=1` renders the same frame as if no room had ever been
+  visited, which turns "does the persistent world do anything here?" into a
+  pixel diff, and `VOX_DUMP_WORLD=1` prints hit/miss past each border.
 
 **Never attach a ROM or ROM-derived asset to an issue or PR.** Battery
 saves (`.sav`) are your own play data and are welcome — `tests/saves/`
