@@ -535,6 +535,24 @@ void gb_mods_set_enabled(int index, bool enabled) {
     g_mods[index].enabled = enabled;
 }
 
+bool gb_mods_find_asset(const char* rel, char* out, size_t out_cap) {
+    if (!rel || !*rel || !out || out_cap == 0) return false;
+    /* The list is sorted by ascending priority and applies front to back,
+     * so the last mod holding the file is the one whose word is final. */
+    for (int i = g_mod_count - 1; i >= 0; i--) {
+        const GBModInfo* m = &g_mods[i];
+        if (!m->enabled) continue;
+        char path[GB_MOD_PATH_MAX];
+        int n = snprintf(path, sizeof(path), "%s/%s", m->dir, rel);
+        if (n < 0 || (size_t)n >= sizeof(path)) continue;
+        if (!file_exists(path)) continue;
+        if ((size_t)n >= out_cap) return false;
+        memcpy(out, path, (size_t)n + 1);
+        return true;
+    }
+    return false;
+}
+
 /* ------------------------------------------------------------------ */
 /* applying                                                            */
 /* ------------------------------------------------------------------ */

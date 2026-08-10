@@ -7,9 +7,82 @@
  */
 #include "voxel_internal.h"
 
+#include "mod_loader.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+/* ------------------------------------------------------------------ */
+/* mod-supplied billboard art                                          */
+/* ------------------------------------------------------------------ */
+
+/* A 16x16 P6 PPM, packed to the framebuffer's 0xAARRGGBB. PPM because it
+ * is the repo's native image format -- every probe tool reads and writes
+ * it, and `magick tree.png tree.ppm` is the whole conversion story. */
+static bool load_ppm_16(const char* path, uint32_t out[16 * 16]) {
+    FILE* f = fopen(path, "rb");
+    if (!f) return false;
+    char magic[3] = {0};
+    int w = 0, h = 0, maxv = 0;
+    uint8_t px[16 * 16 * 3];
+    if (fscanf(f, "%2s", magic) != 1 || strcmp(magic, "P6") != 0) goto bad;
+    {
+        /* Header fields, with the #-comments editors like to leave. */
+        int* fields[3] = {&w, &h, &maxv};
+        for (int i = 0; i < 3; i++) {
+            int ch;
+            do {
+                ch = fgetc(f);
+                if (ch == '#') {
+                    while ((ch = fgetc(f)) != '\n' && ch != EOF) {}
+                }
+            } while (ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r');
+            if (ch == EOF) goto bad;
+            ungetc(ch, f);
+            if (fscanf(f, "%d", fields[i]) != 1) goto bad;
+        }
+    }
+    if (fgetc(f) == EOF) goto bad;   /* the single whitespace after maxval */
+    if (w != 16 || h != 16 || maxv != 255) {
+        fprintf(stderr,
+                "[VOXEL] %s: want a 16x16 P6 with maxval 255, got %dx%d/%d\n",
+                path, w, h, maxv);
+        goto bad;
+    }
+    if (fread(px, 1, sizeof(px), f) != sizeof(px)) goto bad;
+    fclose(f);
+    for (int i = 0; i < 16 * 16; i++) {
+        out[i] = 0xFF000000u | ((uint32_t)px[i * 3] << 16) |
+                 ((uint32_t)px[i * 3 + 1] << 8) | (uint32_t)px[i * 3 + 2];
+    }
+    return true;
+bad:
+    fclose(f);
+    return false;
+}
+
+/* Billboard art from an enabled mod: voxel/tree.ppm dresses every tree,
+ * voxel/tuft.ppm every bush and grass tuft. Probed once and cached --
+ * mods are fixed at launch, same as the ROM bytes they patch. The canopy
+ * palette (lit/dark/bark) is pulled from whatever art is worn, so a modded
+ * canopy gets a matching trunk for free. */
+static const uint32_t* vox_mod_tree_art(bool is_tree) {
+    static uint32_t tex[2][16 * 16];
+    static int state[2] = {0, 0};   /* 0 unprobed, 1 loaded, -1 absent */
+    int k = is_tree ? 0 : 1;
+    if (state[k] == 0) {
+        state[k] = -1;
+        char path[GB_MOD_PATH_MAX];
+        if (gb_mods_find_asset(is_tree ? "voxel/tree.ppm" : "voxel/tuft.ppm",
+                               path, sizeof(path)) &&
+            load_ppm_16(path, tex[k])) {
+            state[k] = 1;
+            fprintf(stderr, "[VOXEL] billboard art from mod: %s\n", path);
+        }
+    }
+    return state[k] == 1 ? tex[k] : NULL;
+}
 
 /* ------------------------------------------------------------------ */
 /* raw PPU access                                                      */
@@ -589,32 +662,42 @@ scan_sprites:
                 if (!all) continue;
                 int hmin = is_tree ? VOX_H_HIGH : VOX_H_MID;
 
-                /* Copy the art block (clamped at grid edges) and pull a
-                 * palette from it: brightest, darkest, mean. */
+                /* The billboard's art: the cell's own 16x16 tiles, unless
+                 * an enabled mod supplies its own. */
                 VoxTree* t = &grid->trees[grid->tree_count];
+                const uint32_t* mod_art = vox_mod_tree_art(is_tree);
+                if (mod_art) {
+                    memcpy(t->tex, mod_art, sizeof(t->tex));
+                } else {
+                    for (int py = 0; py < 16; py++) {
+                        for (int px = 0; px < 16; px++) {
+                            int gx = sx + px + grid->fine_x;
+                            int gy = sy + py + grid->fine_y;
+                            if (gx < 0) gx = 0;
+                            if (gy < 0) gy = 0;
+                            if (gx >= VOX_TEX_W) gx = VOX_TEX_W - 1;
+                            if (gy >= VOX_TEX_H) gy = VOX_TEX_H - 1;
+                            t->tex[py * 16 + px] =
+                                grid->tex[gy * VOX_TEX_W + gx];
+                        }
+                    }
+                }
+
+                /* Pull a palette from the art the canopy will wear:
+                 * brightest, darkest, mean. */
                 uint32_t lit = 0, dark = 0;
                 int lb = -1, db = 0x7FFFFFFF, n = 0;
                 long ar = 0, ag = 0, ab = 0;
-                for (int py = 0; py < 16; py++) {
-                    for (int px = 0; px < 16; px++) {
-                        int gx = sx + px + grid->fine_x;
-                        int gy = sy + py + grid->fine_y;
-                        if (gx < 0) gx = 0;
-                        if (gy < 0) gy = 0;
-                        if (gx >= VOX_TEX_W) gx = VOX_TEX_W - 1;
-                        if (gy >= VOX_TEX_H) gy = VOX_TEX_H - 1;
-                        uint32_t c = grid->tex[gy * VOX_TEX_W + gx];
-                        t->tex[py * 16 + px] = c;
-                        int r8 = (c >> 16) & 0xFF;
-                        int g8 = (c >> 8) & 0xFF;
-                        int b8 = c & 0xFF;
-                        int br = r8 + g8 * 2 + b8;
-                        if (br > lb) { lb = br; lit = c; }
-                        if (br < db) { db = br; dark = c; }
-                        ar += r8; ag += g8; ab += b8; n++;
-                    }
+                for (int i = 0; i < 16 * 16; i++) {
+                    uint32_t c = t->tex[i];
+                    int r8 = (c >> 16) & 0xFF;
+                    int g8 = (c >> 8) & 0xFF;
+                    int b8 = c & 0xFF;
+                    int br = r8 + g8 * 2 + b8;
+                    if (br > lb) { lb = br; lit = c; }
+                    if (br < db) { db = br; dark = c; }
+                    ar += r8; ag += g8; ab += b8; n++;
                 }
-                if (n == 0) continue;
 
                 grid->tree_count++;
                 t->sx = sx;

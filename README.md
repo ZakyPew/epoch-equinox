@@ -292,7 +292,16 @@ mods/my-randomizer/
   manifest.json      required
   seed.bps           patch named by the manifest
   overlay/           optional raw byte splices
+  voxel/tree.ppm     optional 16x16 billboard art for trees (chase cam)
+  voxel/tuft.ppm     ... and for bushes and grass tufts
 ```
+
+The `voxel/` images are plain 16×16 P6 PPMs (`magick art.png art.ppm`).
+When present, every billboard tree or tuft in the chase camera wears the
+mod's art instead of the cart's tiles; trunk and canopy shading are derived
+from whatever art is used, so they match automatically. When several
+enabled mods supply the same file, the highest-priority mod wins — the same
+order the ROM patches apply in.
 
 ```json
 {
