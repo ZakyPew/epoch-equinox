@@ -87,6 +87,14 @@ void              gb_mods_set_enabled(int index, bool enabled);
  */
 int gb_mods_apply_buffer(uint8_t* rom, uint32_t rom_size);
 
+/**
+ * Find @p rel (a path relative to a mod's directory, e.g. "voxel/tree.ppm")
+ * among the enabled mods that matched the active game. Later-applying mods
+ * win, mirroring patch order: the mod with the last word on ROM bytes gets
+ * it on assets too. On success @p out holds "mods/<dir>/<rel>".
+ */
+bool gb_mods_find_asset(const char* rel, char* out, size_t out_cap);
+
 #ifdef __cplusplus
 }
 #endif

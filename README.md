@@ -194,6 +194,10 @@ at the addresses named by
   behind Link, looking where he faces, raycasting the same heightfield in
   true perspective — distance fog, depth-scaled sprite billboards, and a
   camera that sweeps around when he turns
+- **the world persists**: every room you visit is remembered, and the chase
+  camera draws remembered neighbours past the room border — terrain, cliff
+  faces, billboard trees — so the world runs to the horizon and fills in as
+  you explore instead of ending at the edge of the screen
 
 Output is a normal 160×144 frame handed back through the runtime's present
 path, so shaders, scaling and screenshots all still apply.
@@ -292,7 +296,16 @@ mods/my-randomizer/
   manifest.json      required
   seed.bps           patch named by the manifest
   overlay/           optional raw byte splices
+  voxel/tree.ppm     optional 16x16 billboard art for trees (chase cam)
+  voxel/tuft.ppm     ... and for bushes and grass tufts
 ```
+
+The `voxel/` images are plain 16×16 P6 PPMs (`magick art.png art.ppm`).
+When present, every billboard tree or tuft in the chase camera wears the
+mod's art instead of the cart's tiles; trunk and canopy shading are derived
+from whatever art is used, so they match automatically. When several
+enabled mods supply the same file, the highest-priority mod wins — the same
+order the ROM patches apply in.
 
 ```json
 {

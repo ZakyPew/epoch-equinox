@@ -74,6 +74,23 @@ int main(int argc, char* argv[]) {
     ctx->mbc_type = rom[0x147];
     gb_context_reset(ctx, true);
 
+    /* VOX_SHOT_STATE=<path>: resume from a savestate instead of cold boot.
+     * Menus cost a thousand frames of scripted input to cross and the
+     * interesting rooms sit far beyond them; a rewind snapshot from a real
+     * session (states/rewind/NN.state) starts the probe already standing
+     * there. Frame numbers then count from the state, not from power-on. */
+    {
+        const char* st = getenv("VOX_SHOT_STATE");
+        if (st && *st) {
+            if (gb_context_load_state_file(ctx, st)) {
+                fprintf(stderr, "resumed from %s\n", st);
+            } else {
+                fprintf(stderr, "failed to load state %s\n", st);
+                return 1;
+            }
+        }
+    }
+
     static VoxTileGrid grid;
     static VoxSpriteList sprites;
     int shot_scale = 3;
