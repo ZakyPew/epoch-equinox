@@ -455,8 +455,15 @@ static void render_chase(GBContext* ctx, const VoxTileGrid* grid,
             int tex_col = (int)(sx2 + (float)grid->fine_x);
             if (tex_col < 0) tex_col = 0;
             if (tex_col >= VOX_TEX_W) tex_col = VOX_TEX_W - 1;
-            float h = chase_height_at(grid, sx2, sy2);
-            if (!inside) {
+            /* Past the room's edge, the persistent world answers first: a
+             * neighbouring room seen earlier this session continues the
+             * terrain for real. Only where nobody has walked yet does the
+             * border-clamp fade below take over. */
+            float h;
+            bool remembered = false;
+            if (!inside) remembered = vox_world_height(wx2, wy2, &h);
+            if (!remembered) h = chase_height_at(grid, sx2, sy2);
+            if (!inside && !remembered) {
                 /* Outside the room the border cell repeats, so a treeline
                  * at the edge keeps going instead of ending at a cliff of
                  * flat ground -- then settles to the fog plane over ~70px
@@ -479,12 +486,15 @@ static void render_chase(GBContext* ctx, const VoxTileGrid* grid,
             }
             int sy = horizon + (int)((cz - h * HPX) * focal / d);
             if (sy < ybuf) {
-                uint32_t c = chase_tex_at(grid, sx2, sy2);
+                uint32_t c;
+                if (!(remembered && vox_world_tex(wx2, wy2, &c)))
+                    c = chase_tex_at(grid, sx2, sy2);
+                const uint32_t ground_raw = c;
                 if (h < 0.0f) {
                     c = shade(c, 190);
                     c = (c & 0xFFFFFF00u) | 0x00000050u;
                 }
-                if (!inside) c = lerp_color(c, fog, 96);
+                if (!inside && !remembered) c = lerp_color(c, fog, 96);
                 int t = (int)((d - g_tune.fog_start) * 256.0f /
                               (FAR - g_tune.fog_start));
                 if (t < 0) t = 0;
@@ -517,11 +527,14 @@ static void render_chase(GBContext* ctx, const VoxTileGrid* grid,
                      * winter palettes still land. */
                     bool leafy_face =
                         grid->leafy[tile_top >> 3][tex_col >> 3] != 0;
+                    if (remembered) {
+                        uint32_t dummy;
+                        vox_world_face(wx2, wy2, 0, &dummy, &leafy_face);
+                    }
                     int trunk_y = (leafy_face && span >= 8 * S)
                         ? top + (span * 3) / 5 : ybuf;
-                    uint32_t bark = lerp_color(
-                        shade(chase_tex_at(grid, sx2, sy2), 70),
-                        0xFF3A2A20u, 120);
+                    uint32_t bark = lerp_color(shade(ground_raw, 70),
+                                               0xFF3A2A20u, 120);
                     bark = lerp_color(bark, fog, t2);
                     for (int yy = top; yy < ybuf; yy++) {
                         uint32_t wc;
@@ -531,7 +544,10 @@ static void render_chase(GBContext* ctx, const VoxTileGrid* grid,
                             wc = bark;
                         } else {
                             int art = ((yy - top) / S) & 7;
-                            wc = grid->tex[(tile_top + art) * VOX_TEX_W + tex_col];
+                            if (!(remembered &&
+                                  vox_world_face(wx2, wy2, art, &wc, NULL)))
+                                wc = grid->tex[(tile_top + art) * VOX_TEX_W
+                                               + tex_col];
                             wc = lerp_color(shade(wc, 168), fog, t2);
                         }
                         out[yy * OW + X] = wc;
@@ -642,18 +658,38 @@ static void render_chase(GBContext* ctx, const VoxTileGrid* grid,
     /* Billboard trees, depth-sorted into the same painter's pass as the
      * sprites, so a character walks behind one trunk and in front of the
      * next tree down the row. */
-    int nt = 0;
-    float tdep[VOX_MAX_TREES], tlat[VOX_MAX_TREES], tg[VOX_MAX_TREES];
-    const VoxTree* tptr[VOX_MAX_TREES];
+    /* Candidates: the live room's trees, then the remembered neighbours' --
+     * a forest keeps its far ranks across the room border. */
+    enum { VOX_MAX_BILLBOARDS = VOX_MAX_TREES + 192 };
+    static VoxWorldTree cand[VOX_MAX_BILLBOARDS];
+    int nc = 0;
     for (int i = 0; i < grid->tree_count; i++) {
-        const VoxTree* t = &grid->trees[i];
-        float pxc = (float)t->sx + 8.0f;
-        float pyc = (float)t->sy + 16.0f;
+        cand[nc].t = &grid->trees[i];
+        cand[nc].sx = grid->trees[i].sx;
+        cand[nc].sy = grid->trees[i].sy;
+        nc++;
+    }
+    const int live_trees = nc;
+    nc += vox_world_neighbor_trees(cand + nc, VOX_MAX_BILLBOARDS - nc);
+
+    int nt = 0;
+    static float tdep[VOX_MAX_BILLBOARDS], tlat[VOX_MAX_BILLBOARDS],
+                 tg[VOX_MAX_BILLBOARDS];
+    static const VoxTree* tptr[VOX_MAX_BILLBOARDS];
+    for (int i = 0; i < nc; i++) {
+        const VoxTree* t = cand[i].t;
+        float pxc = (float)cand[i].sx + 8.0f;
+        float pyc = (float)cand[i].sy + 16.0f;
         float dep = (pxc - cx) * fxv + (pyc - cy) * fyv;
         if (dep < 16.0f || dep > FAR) continue;
         tdep[nt] = dep;
         tlat[nt] = (pxc - cx) * rxv + (pyc - cy) * ryv;
-        float gh = chase_height_at(grid, pxc, pyc);
+        float gh;
+        if (i < live_trees) {
+            gh = chase_height_at(grid, pxc, pyc);
+        } else if (!vox_world_height(pxc, pyc, &gh)) {
+            gh = 0.0f;
+        }
         tg[nt] = gh < 0.0f ? 0.0f : gh;
         tptr[nt] = t;
         nt++;

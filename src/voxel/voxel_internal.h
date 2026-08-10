@@ -194,6 +194,35 @@ void vox_decode_sprite_row(GBContext* ctx, const VoxSprite* s, int row,
 /* Debug: write the full 32x32 BG map as a PPM (see voxel_tiles.c). */
 void vox_dump_bg_map(GBContext* ctx, const char* path);
 
+/* ---- persistent world (voxel_world.c) ----------------------------- */
+
+/* Remember the on-screen room in the world cache and anchor the samplers
+ * to it. Call once per trusted scrape; frames that can't be trusted call
+ * vox_world_lose() instead and every sampler answers "unknown" until the
+ * next good frame. */
+void vox_world_remember(const VoxOracleState* st, const VoxTileGrid* grid);
+void vox_world_lose(void);
+
+/* Sample the remembered world at SCREEN coordinates -- which may run off
+ * any edge of the screen; that is the point. All return false where the
+ * position is unknown or the room there has never been visited (or was
+ * last seen in a different season). Heights use chase-camera semantics:
+ * billboard tree cells read as open ground. */
+bool vox_world_height(float sx, float sy, float* out);
+bool vox_world_tex(float sx, float sy, uint32_t* out);
+/* The 8px tile art under a position, one row of it, for texturing riser
+ * faces; leafy (optional) tells trunk shading from cliff courses. */
+bool vox_world_face(float sx, float sy, int art_row, uint32_t* out,
+                    bool* leafy);
+
+/* Billboard trees of the cached rooms around the current one (the current
+ * room's own trees stay live in the grid). Screen-space positions. */
+typedef struct {
+    const VoxTree* t;
+    int sx, sy;
+} VoxWorldTree;
+int vox_world_neighbor_trees(VoxWorldTree* out, int max);
+
 /* Render the diorama into out, at an integer scale above the GB screen
  * (out must hold GB_FRAMEBUFFER_SIZE * scale^2 pixels). fb is the game's
  * own composed frame, used for the HUD rows and flat passthrough. */

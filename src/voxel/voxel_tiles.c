@@ -722,6 +722,16 @@ scan_sprites:
     }
     }   /* !frozen */
 
+    /* Feed the persistent world: a trusted frame both refreshes this
+     * room's memory and anchors the neighbour samplers to it; an
+     * untrusted one (scroll, cinematic) drops the anchor so the renderer
+     * falls back to its edge fade. Frozen dialog frames touch neither --
+     * the world under the dialog stays exactly as it was. */
+    if (!frozen) {
+        if (use_oracle) vox_world_remember(&oracle, grid);
+        else vox_world_lose();
+    }
+
     /* OAM scrape: raw entries, decoded lazily at draw time. */
     sprites->count = 0;
     bool tall = (lcdc & 0x04) != 0;

@@ -17,6 +17,9 @@ The player itself is done and distributable — everything below builds on it.
 | **Voxel diorama** | Terrain from the game's real collision data, 3× internal resolution, game-state skies, domed foliage, textured faces |
 | **Chase camera** | Third-person perspective raycast, camera on the right stick |
 | **Room overrides** | Hand-sculpt any room's heights in a text file; `VOXEL_EDIT=1` writes the template |
+| **Object-aware terrain** | `wRoomLayout` names what each cell *is*: trees stand as trunk-and-canopy billboards wearing their own tile art, tufts hug the ground, cliff faces tile their own rock courses |
+| **Persistent world** | Every visited room is remembered; the chase cam draws remembered neighbours past the room border, so the world fills in as you explore |
+| **Mod billboard art** | A mod's `voxel/tree.ppm` / `voxel/tuft.ppm` dresses every billboard in the chase cam |
 | **Rewind** | Hold `R` for ~12 s of history; `F9` restarts the current room |
 | **Quality of life** | 40 ms audio latency, instant boot past the splashes, display options with a live scale readout |
 
@@ -31,15 +34,6 @@ The voxel mode has only ever been verified outdoors. Interiors use the same
 collision data, so this is mostly *checking* rather than building: do holes
 sink, do walls read, does the scroll gate hold in large scrolling rooms.
 **Blocked on:** a battery save parked in a dungeon (`tests/saves/`).
-
-### Object-aware terrain — **M**
-The single biggest visual gap to the reference voxel mods. Today every solid
-cell extrudes into the same block. The game keeps a second map, `wRoomLayout`,
-naming *what each cell is* — and multi-cell objects carry a distinct id per
-quadrant, so a 2×2 tree is identifiable as one tree. Using it means trees can
-be trunk-plus-canopy instead of a mesa.
-**Unlocks:** per-face texturing (bark on the sides, canopy on top), which is
-the other half of the same gap.
 
 ### Secret generator — **M**
 See [Secrets](#secrets) below. Generate valid codes from the player's own save
@@ -58,11 +52,6 @@ achievement pack is just a data file.
 Drive the in-game password screen with the runtime's input-script system so the
 player never types a code. Fiddly (cursor navigation on a symbol grid) but the
 infrastructure exists — it is how the renderer gets tested headlessly.
-
-### Room cache / persistent world — **M**
-The games keep one room in memory, so the 3D view ends at the room border.
-Caching each room's heightfield as it is visited lets the world extend to the
-horizon and fill in as you explore.
 
 ### Voice packs — **L**
 Dialogue open/close is already detected and text ids sit beside the flag.

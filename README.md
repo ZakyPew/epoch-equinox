@@ -194,6 +194,10 @@ at the addresses named by
   behind Link, looking where he faces, raycasting the same heightfield in
   true perspective — distance fog, depth-scaled sprite billboards, and a
   camera that sweeps around when he turns
+- **the world persists**: every room you visit is remembered, and the chase
+  camera draws remembered neighbours past the room border — terrain, cliff
+  faces, billboard trees — so the world runs to the horizon and fills in as
+  you explore instead of ending at the edge of the screen
 
 Output is a normal 160×144 frame handed back through the runtime's present
 path, so shaders, scaling and screenshots all still apply.
