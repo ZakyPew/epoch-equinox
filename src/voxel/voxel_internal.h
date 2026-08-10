@@ -22,6 +22,12 @@
  * tiles (see VoxTileGrid::hud_rows). */
 #define VOX_HUD_MAP_ROW 30
 
+/* One overworld room, in pixels: the play area below the HUD, exactly. Both
+ * the world cache's grid and the screen-offset paging in voxel_oracle.c are
+ * measured in these. */
+#define VOX_ROOM_W 160
+#define VOX_ROOM_H 128
+
 /* Terrain height classes, in pixels of extrusion at full tilt. */
 typedef enum {
     VOX_H_WATER  = 0,   /* sinks below ground level */

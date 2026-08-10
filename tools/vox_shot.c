@@ -8,6 +8,9 @@
  *   ./vox_shot <rom> <frame[,frame...]> <mode 1-3> <out_prefix> [script]
  *
  * writes <prefix>-<frame>-flat.ppm and <prefix>-<frame>-vox.ppm.
+ *
+ * Env knobs: VOX_SHOT_SCALE (1-4), VOX_SHOT_STATE (resume from a savestate),
+ * VOX_SHOT_NOCACHE (render as if no room had ever been visited).
  */
 #include "gbrt.h"
 #include "platform_sdl.h"
@@ -130,16 +133,35 @@ int main(int argc, char* argv[]) {
             }
         }
 
-        for (int w = 0; w < want_n; w++) {
-            if (want[w] != i) continue;
-            /* Scrape + render FIRST: the diagnostic dumps below read the
-             * grid, and printing it before this frame's scrape showed the
-             * previous wanted frame's world -- all zeros on the first. */
+        /* Scrape and render EVERY frame, not just the wanted ones. Both
+         * carry state across frames -- the world cache remembers each room
+         * walked through, the chase camera eases its yaw and position --
+         * and sampling only the frames being written left that state as it
+         * was a thousand frames ago: rooms never remembered, the camera
+         * still snapped to wherever it last looked. Off-frames render at
+         * 1x, which is cheap, and only wanted frames pay for the scale. */
+        bool wanted = false;
+        for (int w = 0; w < want_n; w++) if (want[w] == i) wanted = true;
+
+        bool scraped = vox_scrape(ctx, fb, &grid, &sprites);
+        if (scraped) {
+            /* VOX_SHOT_NOCACHE=1: drop the world anchor between the scrape
+             * and the render, so the chase cam falls back to the edge fade.
+             * The frame is otherwise identical, which is what makes a
+             * persistent-world before/after pair comparable pixel for
+             * pixel. The rooms stay remembered -- only this frame's view of
+             * them is withheld. */
+            if (getenv("VOX_SHOT_NOCACHE")) vox_world_lose();
+            vox_render(ctx, &grid, &sprites, fb, mode,
+                       wanted ? shot_scale : 1, out);
+        }
+        if (!wanted) continue;
+
+        {
             char path[512];
             snprintf(path, sizeof(path), "%s-%lu-flat.ppm", argv[4], i);
             write_ppm(path, fb, GB_SCREEN_WIDTH, GB_SCREEN_HEIGHT);
-            if (vox_scrape(ctx, fb, &grid, &sprites)) {
-                vox_render(ctx, &grid, &sprites, fb, mode, shot_scale, out);
+            if (scraped) {
                 snprintf(path, sizeof(path), "%s-%lu-vox.ppm", argv[4], i);
                 write_ppm(path, out, GB_SCREEN_WIDTH * shot_scale,
                           GB_SCREEN_HEIGHT * shot_scale);
@@ -148,12 +170,34 @@ int main(int argc, char* argv[]) {
             }
             fprintf(stderr,
                     "frame %lu: scroll=%02X menu=%02X scy=%3u scx=%3u "
-                    "camY=%u%u dirty=%02X trees=%d text=%02X\n",
+                    "camY=%u%u dirty=%02X trees=%d text=%02X dir=%d "
+                    "link=(%d,%d) yaw=%+.3f\n",
                     i, ctx->wram[0xCD00 - 0xC000], ctx->wram[0xCBCB - 0xC000],
                     ctx->io[0x42], ctx->io[0x43],
                     ctx->hram[0x2B], ctx->hram[0x2A],
                     ctx->wram[0xCD01 - 0xC000], grid.tree_count,
-                    ctx->wram[0xCBA0 - 0xC000]);
+                    ctx->wram[0xCBA0 - 0xC000], grid.link_dir,
+                    grid.link_sx, grid.link_feet_sy, voxel_chase_yaw());
+            if (getenv("VOX_DUMP_WORLD")) {
+                /* Ask the persistent world what it knows just past each
+                 * border of the room on screen. A row of misses means the
+                 * chase cam has nothing to draw out there and will fall
+                 * back to the edge fade, however many rooms were walked. */
+                const int HUDR = 16, W = GB_SCREEN_WIDTH, H = GB_SCREEN_HEIGHT;
+                struct { const char* n; float x, y; } p[] = {
+                    { "north", W * 0.5f, HUDR - 40.0f },
+                    { "south", W * 0.5f, H + 40.0f },
+                    { "west",  -40.0f,   (HUDR + H) * 0.5f },
+                    { "east",  W + 40.0f,(HUDR + H) * 0.5f },
+                };
+                fprintf(stderr, "  world:");
+                for (int q = 0; q < 4; q++) {
+                    float h;
+                    fprintf(stderr, " %s=%s", p[q].n,
+                            vox_world_height(p[q].x, p[q].y, &h) ? "hit" : "miss");
+                }
+                fprintf(stderr, "\n");
+            }
             if (getenv("VOX_DUMP_CC")) {
                 fprintf(stderr, "  CC2C:");
                 for (int c = 0; c < 12; c++) {

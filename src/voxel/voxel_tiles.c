@@ -637,6 +637,16 @@ scan_sprites:
                 bool is_tree = (id >= 0x20 && id <= 0x3F);
                 bool is_tuft = (id >= 0xC0 && id <= 0xCF);
                 if (!is_tree && !is_tuft) continue;
+                /* Billboards are opt-in art now. Standing the cell's own
+                 * 16x16 tile upright reads as a cardboard cutout of a tree
+                 * rather than a tree -- the art was drawn to be looked at
+                 * from above, and no amount of trunk shading fixes that.
+                 * Extruded terrain is the honest default until someone
+                 * draws art meant to stand up, so a cell only becomes a
+                 * billboard when a mod supplies voxel/tree.ppm (or
+                 * voxel/tuft.ppm) to dress it with. */
+                const uint32_t* mod_art = vox_mod_tree_art(is_tree);
+                if (!mod_art) continue;
                 int sx = col * 16 - oracle.cam_x - oracle.off_x;
                 int sy = row * 16 - oracle.cam_y - oracle.off_y
                          + grid->hud_rows;
@@ -662,26 +672,9 @@ scan_sprites:
                 if (!all) continue;
                 int hmin = is_tree ? VOX_H_HIGH : VOX_H_MID;
 
-                /* The billboard's art: the cell's own 16x16 tiles, unless
-                 * an enabled mod supplies its own. */
+                /* The billboard wears the mod's art. */
                 VoxTree* t = &grid->trees[grid->tree_count];
-                const uint32_t* mod_art = vox_mod_tree_art(is_tree);
-                if (mod_art) {
-                    memcpy(t->tex, mod_art, sizeof(t->tex));
-                } else {
-                    for (int py = 0; py < 16; py++) {
-                        for (int px = 0; px < 16; px++) {
-                            int gx = sx + px + grid->fine_x;
-                            int gy = sy + py + grid->fine_y;
-                            if (gx < 0) gx = 0;
-                            if (gy < 0) gy = 0;
-                            if (gx >= VOX_TEX_W) gx = VOX_TEX_W - 1;
-                            if (gy >= VOX_TEX_H) gy = VOX_TEX_H - 1;
-                            t->tex[py * 16 + px] =
-                                grid->tex[gy * VOX_TEX_W + gx];
-                        }
-                    }
-                }
+                memcpy(t->tex, mod_art, sizeof(t->tex));
 
                 /* Pull a palette from the art the canopy will wear:
                  * brightest, darkest, mean. */
