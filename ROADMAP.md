@@ -23,6 +23,7 @@ The player itself is done and distributable — everything below builds on it.
 | **Rewind** | Hold `R` for ~12 s of history; `F9` restarts the current room |
 | **Self-update** | The launcher notices a new release, shows its notes, and installs it over itself — ROMs, mods, covers and saves untouched |
 | **Achievements** | Data-driven packs watched over WRAM, popped as Steam-style toasts over the window; moddable, one text file per pack |
+| **Secret generator** | Every code your save can produce — game, ring, and all twenty NPC secrets — generated in the launcher with the game's own cipher |
 | **Quality of life** | 40 ms audio latency, instant boot past the splashes, display options with a live scale readout |
 
 ---
@@ -37,15 +38,10 @@ collision data, so this is mostly *checking* rather than building: do holes
 sink, do walls read, does the scroll gate hold in large scrolling rooms.
 **Blocked on:** a battery save parked in a dungeon (`tests/saves/`).
 
-### Secret generator — **M**
-See [Secrets](#secrets) below. Generate valid codes from the player's own save
-and show them in the launcher.
-
-### Achievement browser + custom icons — **S**
-The engine and toasts shipped. What remains is seeing them: a page in the
-launcher and one in the Esc menu listing earned/unearned, and per-achievement
-icons (`achievements/icons/<id>.ppm`) drawn in the toast in place of the
-built-in medal.
+### Auto-entered secrets — **M**
+The generator shipped; the codes are proven against the save format. Next is
+driving the in-game password grid with the runtime's input-script system so the
+player never types a code.
 
 ### Save import / export — **S**
 The runner already keeps ordinary battery saves (`<title>.sav` beside the
@@ -55,11 +51,6 @@ backup of what it replaces) and export the current one.
 ---
 
 ## Bigger swings
-
-### Auto-entered secrets — **M**, after the generator
-Drive the in-game password screen with the runtime's input-script system so the
-player never types a code. Fiddly (cursor navigation on a symbol grid) but the
-infrastructure exists — it is how the renderer gets tested headlessly.
 
 ### Voice packs — **L**
 Dialogue open/close is already detected and text ids sit beside the flag.

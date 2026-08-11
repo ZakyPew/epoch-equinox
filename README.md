@@ -340,6 +340,27 @@ Nothing can unlock outside actual play: evaluation is gated on both
 select — which loads a file's data into WRAM just to draw its preview
 card — stay inert.
 
+## Secrets
+
+Oracle secrets are not universal passwords: every save carries a random
+Game ID, and every code is encoded against it with a cipher and a
+checksum, so a code from a website will not validate on your file.
+**Secrets** in the launcher menu generates yours — from your own save,
+using the game's own algorithm (ported from the
+[disassembly](https://github.com/Stewmath/oracles-disasm)'s bank 3):
+
+- the **game secret** that starts your linked game in the other cart
+  (or the hero's secret, if this file is already linked),
+- the **ring secret** that carries your ring collection across,
+- and all twenty **NPC memory secrets** with their return codes —
+  labelled by who to tell, so the tedious half of linking is a
+  read-off instead of a scavenger hunt.
+
+Codes are spelled in the games' symbol alphabet (♠ ♥ ● ▲ → …), grouped
+in fives the way the entry grid expects. A file that has never used a
+secret has no Game ID yet; its codes are accepted by any file, which is
+the game's own behaviour, and the dialog says so when it applies.
+
 ## Mods
 
 Mods are applied to the extracted ROM *before* the cart boots, which is why the

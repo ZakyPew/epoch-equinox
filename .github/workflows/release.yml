@@ -36,6 +36,11 @@ jobs:
       # download and install driven over a server on localhost.
       - name: Updater checks
         run: python3 tools/updater_test.py
+      # The Oracle secret generator: encode/decode round trips, tamper
+      # rejection, and (when a real save is present) ground-truth layout
+      # checks. Stdlib only.
+      - name: Secret generator checks
+        run: python3 tools/secrets_test.py
       # The achievements engine against a synthetic WRAM buffer, plus a
       # parse of the shipped packs.
       - name: Achievements checks
