@@ -55,6 +55,10 @@ leans nature/green).
 | `ganon-ending.ppm` | a dark horned silhouette behind a cracked triangle |
 | `hero-file.ppm` | a heroic banner or crest |
 | `maku-saved.ppm` | a great tree with a serene face |
+| `ten-secrets.ppm` | a sealed scroll with ten wax marks |
+| `victory-ring.ppm` | a gold ring over a fallen crown |
+| `all-rings.ppm` | a jeweler's case, all slots filled |
+| `vasu-100.ppm` | a snake coiled around a loupe |
 
 ### `tlozoos/` — Oracle of Seasons
 
@@ -80,6 +84,10 @@ leans nature/green).
 | `finished.ppm` | a laurel over a sunrise |
 | `ganon-ending.ppm` | a dark horned silhouette behind a cracked triangle |
 | `hero-file.ppm` | a heroic banner or crest |
+| `ten-secrets.ppm` | a sealed scroll with ten wax marks |
+| `golden-beasts.ppm` | four golden beast silhouettes |
+| `victory-ring.ppm` | a gold ring over a fallen crown |
+| `all-rings.ppm` | a jeweler's case, all slots filled |
 
 Mods that add packs (`achievements/<cart>.<name>.txt`) use the same
 folders: an icon file named for the achievement id, beside these.

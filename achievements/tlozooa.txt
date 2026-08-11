@@ -108,3 +108,38 @@ when = byte c613 >= 1
 title = Rooted in Time
 desc = Save the Maku Tree
 when = flag c6d2 2
+
+# Secrets and deep hunts. The ten linked-secret DONE flags live in the
+# "both games" global-flag range ($5a-$63); each one means that NPC's
+# exchange was carried through to the end. Ring lore: wRingsObtained
+# ($c616) is the 64-ring bitset, wNumRingsAppraised ($c6ce) is Vasu's
+# lifetime count, GLOBALFLAG_GOT_VICTORY_RING is bit $06.
+
+[ten-secrets]
+title = Keeper of Ten Secrets
+desc = Carry every linked secret of Labrynna through to its reward
+when = flag c6db 2
+when = flag c6db 3
+when = flag c6db 4
+when = flag c6db 5
+when = flag c6db 6
+when = flag c6db 7
+when = flag c6dc 0
+when = flag c6dc 1
+when = flag c6dc 2
+when = flag c6dc 3
+
+[victory-ring]
+title = Spoils of the Final Battle
+desc = Receive the Victory Ring for felling Ganon
+when = flag c6d0 6
+
+[all-rings]
+title = The Sixty-Four
+desc = Complete the entire ring collection
+when = bitset c616 8 >= 64
+
+[vasu-100]
+title = Vasu's Century
+desc = Have one hundred rings appraised
+when = byte c6ce >= 100

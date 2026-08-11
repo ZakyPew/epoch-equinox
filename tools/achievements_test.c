@@ -194,6 +194,29 @@ int main(void) {
     ea_toast_advance(10.0f);
     CHECK(ea_toast_current() == NULL, "the queue drains");
 
+    /* -- ten ANDed flags (the linked-secrets roll-up shape) --------- */
+    {
+        FILE* tf = fopen(pack_path, "w");
+        fputs("[tensecrets]\ntitle = Ten\n", tf);
+        for (int b = 2; b <= 7; b++) fprintf(tf, "when = flag c6db %d\n", b);
+        for (int b = 0; b <= 3; b++) fprintf(tf, "when = flag c6dc %d\n", b);
+        fclose(tf);
+
+        static EaSet ten;
+        memset(&ten, 0, sizeof(ten));
+        CHECK(ea_load_pack(&ten, pack_path) == 1 && ten.list[0].n_conds == 10,
+              "ten conditions fit one achievement");
+
+        memset(wram, 0, sizeof(wram));
+        w8(0xC6DB, 0xFC);            /* bits 2..7 */
+        w8(0xC6DC, 0x07);            /* bits 0..2: one secret short */
+        CHECK(ea_evaluate(&ten, wram, newly, 16) == 0,
+              "nine of ten secrets is not ten");
+        w8(0xC6DC, 0x0F);            /* the tenth */
+        CHECK(ea_evaluate(&ten, wram, newly, 16) == 1,
+              "all ten flags fire the roll-up");
+    }
+
     /* -- icons ------------------------------------------------------ */
     {
         static EaIcon icon;

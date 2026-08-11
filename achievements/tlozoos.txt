@@ -108,3 +108,40 @@ when = flag c6ca 2
 title = The Hero's Path
 desc = Begin a game with the Hero's Secret
 when = byte c613 >= 1
+
+# Secrets and deep hunts. The ten linked-secret DONE flags live in the
+# "both games" global-flag range ($6e-$77); each one means that NPC's
+# exchange was carried through to the end. wKilledGoldenEnemies ($c6c9)
+# tracks the four hidden golden beasts, one bit each.
+# (No Vasu's-Century here: the Seasons address for the appraisal counter
+# is not named in the disassembly, and a guessed address is how phantom
+# unlocks happen.)
+
+[ten-secrets]
+title = Keeper of Ten Secrets
+desc = Carry every linked secret of Holodrum through to its reward
+when = flag c6d7 6
+when = flag c6d7 7
+when = flag c6d8 0
+when = flag c6d8 1
+when = flag c6d8 2
+when = flag c6d8 3
+when = flag c6d8 4
+when = flag c6d8 5
+when = flag c6d8 6
+when = flag c6d8 7
+
+[golden-beasts]
+title = The Golden Ones
+desc = Hunt down all four golden beasts
+when = bits c6c9 >= 4
+
+[victory-ring]
+title = Spoils of the Final Battle
+desc = Receive the Victory Ring for felling Ganon
+when = flag c6ca 6
+
+[all-rings]
+title = The Sixty-Four
+desc = Complete the entire ring collection
+when = bitset c616 8 >= 64
