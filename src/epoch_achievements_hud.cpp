@@ -18,6 +18,10 @@ extern "C" {
 #include <math.h>
 #include <stdio.h>
 
+/* MSVC does not define M_PI without _USE_MATH_DEFINES, and the rest of
+ * the tree avoids the macro entirely rather than depend on that. */
+static const float EPOCH_PI = 3.14159265358979323846f;
+
 /* Timeline, in seconds of toast age. Total must stay in sync with
  * TOAST_LIFETIME in epoch_achievements.c. */
 static const float SLIDE_IN  = 0.45f;
@@ -81,7 +85,7 @@ static void draw_medal(ImDrawList* dl, float cx, float cy, float r,
     const float sr = r * 0.55f, ir = r * 0.22f;
     ImVec2 pts[10];
     for (int i = 0; i < 10; i++) {
-        const float a = (float)(i * M_PI / 5.0 - M_PI / 2.0);
+        const float a = (float)i * EPOCH_PI / 5.0f - EPOCH_PI / 2.0f;
         const float rr = (i & 1) ? ir : sr;
         pts[i] = ImVec2(cx + cosf(a) * rr, cy + sinf(a) * rr);
     }
