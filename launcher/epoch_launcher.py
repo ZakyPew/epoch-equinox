@@ -93,6 +93,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+import oracle_secrets
 import updater
 from gamepad import GamepadBridge
 
@@ -416,7 +417,10 @@ def draw_seasons_motif(pr: QPainter, c: QPointF, r: float, col: QColor) -> None:
 # main view
 # --------------------------------------------------------------------------
 
-MENU_ITEMS = ["Start game", "Mods", "Achievements", "Install ROM", "Updates", "Exit"]
+MENU_ITEMS = [
+    "Start game", "Mods", "Achievements", "Secrets", "Install ROM",
+    "Updates", "Exit",
+]
 
 
 class LauncherView(QWidget):
@@ -763,6 +767,155 @@ class LauncherView(QWidget):
 # --------------------------------------------------------------------------
 # mods dialog
 # --------------------------------------------------------------------------
+
+
+# --------------------------------------------------------------------------
+# secrets dialog
+# --------------------------------------------------------------------------
+
+
+class SecretsDialog(QDialog):
+    """Every code this save can produce, spelled in the game's symbols.
+
+    Oracle secrets are per-file: each save carries a random Game ID and
+    every code validates against it, so codes from a website will not
+    work. These are generated from the save itself — the same codes the
+    NPCs would speak.
+    """
+
+    def __init__(self, runner: Runner, game: Game, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(f"Secrets - {game.title}")
+        self.setMinimumSize(600, 520)
+        self.setStyleSheet(
+            """
+            QDialog { background: #12151a; }
+            QLabel { color: #d6dde4; }
+            QPushButton {
+                background: #23303a; color: #dfe8ee; border: 0; padding: 8px 18px;
+                border-radius: 6px;
+            }
+            QPushButton:hover { background: #2e414f; }
+            """
+        )
+
+        layout = QVBoxLayout(self)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet("QScrollArea { border: 0; background: #12151a; }")
+        inner = QWidget()
+        inner.setStyleSheet("background: #12151a;")
+        rows = QVBoxLayout(inner)
+
+        sav = oracle_secrets.find_saves(runner.root).get(game.id)
+        saves = oracle_secrets.read_save(sav) if sav else []
+
+        if not saves:
+            empty = QLabel(
+                "No save file found for this game yet. Play once and save, "
+                "then come back — secrets are made from your own file."
+            )
+            empty.setWordWrap(True)
+            rows.addWidget(empty)
+        for save in saves:
+            rows.addWidget(self._save_header(save))
+            other = "Seasons" if save.game == "ages" else "Ages"
+            kind = "hero's secret" if (save.is_linked or save.is_hero) \
+                else "linked-game secret"
+            self._add_secret(
+                rows, f"Game secret — start a new game in {other} ({kind})",
+                oracle_secrets.game_secret(save))
+            self._add_secret(
+                rows,
+                f"Ring secret — carries your {oracle_secrets.ring_count(save)}"
+                f" ring(s) to the linked game (tell it to Red Snake in Vasu's)",
+                oracle_secrets.ring_secret(save))
+
+            for title, table in (
+                ("Secrets to tell in Oracle of Ages",
+                 oracle_secrets.AGES_NPC_SECRETS),
+                ("Secrets to tell in Oracle of Seasons",
+                 oracle_secrets.SEASONS_NPC_SECRETS),
+            ):
+                head = QLabel(title)
+                head.setStyleSheet(
+                    "font-size: 13px; font-weight: bold; color: #d0aa55; "
+                    "margin-top: 10px;"
+                )
+                rows.addWidget(head)
+                note = QLabel(
+                    "Each NPC answers with a return secret for Farore; "
+                    "it is shown dimmed in case you lose it."
+                )
+                note.setWordWrap(True)
+                note.setStyleSheet("color: #6b7680; font-size: 10px;")
+                rows.addWidget(note)
+                for index, npc in table.items():
+                    code = oracle_secrets.to_text(
+                        oracle_secrets.short_secret(save, index))
+                    ret = oracle_secrets.to_text(
+                        oracle_secrets.short_secret(
+                            save, index + oracle_secrets.RETURN_OFFSET))
+                    row = QHBoxLayout()
+                    name = QLabel(npc)
+                    name.setFixedWidth(130)
+                    name.setStyleSheet("color: #a8b3bd; font-size: 12px;")
+                    row.addWidget(name)
+                    row.addWidget(self._code_label(code))
+                    ret_label = self._code_label(ret)
+                    ret_label.setStyleSheet(
+                        ret_label.styleSheet() + " color: #566068;")
+                    row.addWidget(ret_label)
+                    row.addStretch(1)
+                    rows.addLayout(row)
+
+        rows.addStretch(1)
+        scroll.setWidget(inner)
+        layout.addWidget(scroll, 1)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def _save_header(self, save) -> QLabel:
+        badges = []
+        if save.is_hero:
+            badges.append("hero's game")
+        elif save.is_linked:
+            badges.append("linked game")
+        if save.game_id:
+            badges.append(f"Game ID {save.game_id:04X}")
+        else:
+            badges.append(
+                "no Game ID yet — the game assigns one on first secret use; "
+                "codes made now are accepted by any file"
+            )
+        head = QLabel(
+            f"File {save.slot + 1}:  {save.hero_name}   ·   "
+            + "   ·   ".join(badges)
+        )
+        head.setWordWrap(True)
+        head.setStyleSheet(
+            "font-size: 14px; font-weight: bold; margin-top: 6px;"
+        )
+        return head
+
+    def _add_secret(self, rows, caption: str, cells: list[int]) -> None:
+        label = QLabel(caption)
+        label.setWordWrap(True)
+        label.setStyleSheet("color: #a8b3bd; font-size: 12px; margin-top: 8px;")
+        rows.addWidget(label)
+        rows.addWidget(self._code_label(oracle_secrets.to_text(cells)))
+
+    def _code_label(self, text: str) -> QLabel:
+        code = QLabel(text)
+        code.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse)
+        code.setStyleSheet(
+            "font-family: monospace; font-size: 15px; color: #f2ecda; "
+            "background: #1a2030; border-radius: 4px; padding: 4px 8px;"
+        )
+        return code
 
 
 # --------------------------------------------------------------------------
@@ -1337,6 +1490,8 @@ class MainWindow(QWidget):
             self.install_rom(game)
         elif item == "Achievements":
             AchievementsDialog(self.runner, game, self).exec()
+        elif item == "Secrets":
+            SecretsDialog(self.runner, game, self).exec()
         elif item == "Mods":
             if game.playable:
                 ModsDialog(self.runner, game, self).exec()
