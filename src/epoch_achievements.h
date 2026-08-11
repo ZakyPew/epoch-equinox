@@ -21,7 +21,7 @@
 extern "C" {
 #endif
 
-enum { EA_MAX_ACHIEVEMENTS = 128, EA_MAX_CONDS = 8 };
+enum { EA_MAX_ACHIEVEMENTS = 128, EA_MAX_CONDS = 16 };
 
 typedef enum {
     EA_BYTE,     /* one byte at addr                     */
