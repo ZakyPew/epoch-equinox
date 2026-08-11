@@ -66,6 +66,7 @@ except ImportError:
 from PySide6.QtGui import (
     QBrush,
     QColor,
+    QImage,
     QFont,
     QFontMetricsF,
     QLinearGradient,
@@ -774,6 +775,44 @@ class LauncherView(QWidget):
 # --------------------------------------------------------------------------
 
 
+def load_icon_pixmap(folder: Path, achievement_id: str) -> QPixmap:
+    """An achievement's icon as a pixmap, PAM first then legacy PPM.
+
+    Qt reads PPM but not PAM, and the icons carry real alpha now, so the
+    PAM is decoded here: a short text header, then RGBA bytes. Falls back
+    to the chroma-keyed PPM a mod might still ship, turning its magenta
+    into transparency the way the player does.
+    """
+    pam = folder / f"{achievement_id}.pam"
+    if pam.is_file():
+        try:
+            data = pam.read_bytes()
+            head, _, body = data.partition(b"ENDHDR\n")
+            fields = dict(
+                line.split(maxsplit=1)  # WIDTH 48 -> ("WIDTH", "48")
+                for line in (l.strip().decode("ascii", "replace")
+                             for l in head.splitlines()[1:])
+                if line and " " in line
+            )
+            w, h = int(fields["WIDTH"]), int(fields["HEIGHT"])
+            if int(fields.get("DEPTH", 4)) == 4 and len(body) >= w * h * 4:
+                img = QImage(body[: w * h * 4], w, h, w * 4,
+                             QImage.Format.Format_RGBA8888)
+                # QImage does not copy the buffer it is handed.
+                return QPixmap.fromImage(img.copy())
+        except (OSError, KeyError, ValueError):
+            pass
+
+    ppm = folder / f"{achievement_id}.ppm"
+    pm = QPixmap(str(ppm))
+    if pm.isNull():
+        return pm
+    img = pm.toImage().convertToFormat(QImage.Format.Format_ARGB32)
+    img.setAlphaChannel(img.createMaskFromColor(0xFFFF00FF,
+                                                Qt.MaskMode.MaskOutColor))
+    return QPixmap.fromImage(img)
+
+
 class SecretsDialog(QDialog):
     """Every code this save can produce, spelled in the game's symbols.
 
@@ -1012,7 +1051,7 @@ class AchievementsDialog(QDialog):
 
             icon = QLabel()
             icon.setFixedSize(48, 48)
-            pm = QPixmap(str(icon_dir / f"{e['id']}.ppm"))
+            pm = load_icon_pixmap(icon_dir, e["id"])
             if pm.isNull():
                 # No art yet: a plain medal dot keeps the rows aligned.
                 icon.setText("\U0001F3C5")
@@ -1056,7 +1095,7 @@ class AchievementsDialog(QDialog):
         note = QLabel(
             "Earned across every playthrough of this cart. Unlocks pop as a "
             "toast over the window during play; the list also lives in the "
-            "in-game Esc menu."
+            "in-game panel on F2."
         )
         note.setWordWrap(True)
         note.setStyleSheet("color: #8b97a2; font-size: 11px;")

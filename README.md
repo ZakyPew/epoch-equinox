@@ -338,10 +338,10 @@ kinds over WRAM addresses) is documented in
 without earning anything.
 
 Browse them in two places: **Achievements** in the launcher menu, and the
-in-game panel on **F10** — earned entries lit, the rest dimmed, with the
+in-game panel on **F2** — earned entries lit, the rest dimmed, with the
 tally up top. (The panel is ours; the emulator's Esc menu stays for
 display and emulator settings.) Each achievement can carry its own 48×48
-icon (`achievements/icons/<cart>/<id>.ppm`, magenta = transparent); the
+icon (`achievements/icons/<cart>/<id>.pam`, with real per-pixel alpha); the
 gilded card and the lists use it, and anything without art gets the
 built-in medal. The wanted list and exact spec live in
 [achievements/icons/README.md](achievements/icons/README.md).

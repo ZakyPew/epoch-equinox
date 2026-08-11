@@ -99,9 +99,9 @@ void epoch_achievements_progress(int* unlocked, int* total);
 
 /* ---- icons ---------------------------------------------------------- */
 
-/* Custom art: achievements/icons/<cart>/<id>.ppm, a 48x48 binary P6 with
- * maxval 255. Magenta (255,0,255) reads as transparent. Missing icons
- * fall back to the built-in medal. See achievements/icons/README.md. */
+/* Custom art: achievements/icons/<cart>/<id>.pam, a 48x48 PAM RGBA image.
+ * Legacy PPM icons remain supported as a fallback. Missing icons fall back
+ * to the built-in medal. See achievements/icons/README.md. */
 enum { EA_ICON_DIM = 48 };
 
 typedef struct {
@@ -112,6 +112,9 @@ typedef struct {
 /** Parse a P6 PPM into `out`. Any size up to EA_ICON_DIM squared is
  *  accepted (the drawers scale); bigger is refused. */
 bool ea_load_ppm(const char* path, EaIcon* out);
+
+/** Parse a PAM RGBA image into `out`, preserving its alpha channel. */
+bool ea_load_pam(const char* path, EaIcon* out);
 
 /** The icon for an achievement of the running cart, lazily loaded and
  *  cached. NULL when the file is absent or malformed. */
