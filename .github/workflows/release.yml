@@ -32,6 +32,10 @@ jobs:
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
           cmake --build build -j"$(nproc)"
           ./build/epoch --list-games
+      # Stdlib only, no network: the updater's own checks, including a
+      # download and install driven over a server on localhost.
+      - name: Updater checks
+        run: python3 tools/updater_test.py
       - name: Package
         run: |
           staging=epoch-equinox-linux-x64
@@ -106,6 +110,18 @@ jobs:
       # Checkout first: it cleans the workspace, so running it after the
       # download would delete the artifacts we are about to upload.
       - uses: actions/checkout@v4
+      # The launcher compares its own APP_VERSION against the release tags
+      # to decide whether an update exists. If the two ever disagree the
+      # updater goes quietly wrong -- either never offering an update or
+      # offering one forever -- so refuse to publish the mismatch.
+      - name: Version stamp matches the tag
+        run: |
+          stamped=$(sed -n 's/^APP_VERSION = "\(.*\)"$/\1/p' launcher/epoch_launcher.py)
+          echo "stamp v$stamped, tag $GITHUB_REF_NAME"
+          if [ "v$stamped" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::launcher APP_VERSION is $stamped but the tag is $GITHUB_REF_NAME" >&2
+            exit 1
+          fi
       - uses: actions/download-artifact@v4
         with:
           merge-multiple: true

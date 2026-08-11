@@ -22,6 +22,8 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -83,15 +85,20 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMessageBox,
+    QProgressBar,
     QPushButton,
     QScrollArea,
     QVBoxLayout,
     QWidget,
 )
 
+import updater
 from gamepad import GamepadBridge
 
-APP_VERSION = "1.0.0"
+# The version this build was released as. The updater compares it against
+# the repository's release tags, so it has to match the tag it ships under
+# -- the release workflow refuses to publish a tag that disagrees with it.
+APP_VERSION = "0.3.0"
 
 # The diagonal that splits the two panels. x is a fraction of the window
 # width; the seam runs from (TOP, 0) down to (BOTTOM, height).
@@ -408,7 +415,7 @@ def draw_seasons_motif(pr: QPainter, c: QPointF, r: float, col: QColor) -> None:
 # main view
 # --------------------------------------------------------------------------
 
-MENU_ITEMS = ["Start game", "Mods", "Install ROM", "Exit"]
+MENU_ITEMS = ["Start game", "Mods", "Install ROM", "Updates", "Exit"]
 
 
 class LauncherView(QWidget):
@@ -421,6 +428,7 @@ class LauncherView(QWidget):
         self.active = 0
         self.menu_index = 0
         self.pad_name = ""
+        self.update_note = ""
         self._menu_rects: list[QRectF] = []
         self._covers: dict[str, QPixmap | None] = {}
         self.setMouseTracking(True)
@@ -493,6 +501,10 @@ class LauncherView(QWidget):
 
     def set_pad_name(self, name: str) -> None:
         self.pad_name = name
+        self.update()
+
+    def set_update_note(self, note: str) -> None:
+        self.update_note = note
         self.update()
 
     def mouseMoveEvent(self, event) -> None:
@@ -571,6 +583,8 @@ class LauncherView(QWidget):
         footer = f"v{APP_VERSION}"
         if self.pad_name:
             footer += f"   ·   {self.pad_name}"
+        if self.update_note:
+            footer += f"   ·   {self.update_note}"
         pr.drawText(QRectF(18, h - 30, w * 0.6, 20), Qt.AlignmentFlag.AlignVCenter, footer)
 
     def _paint_panel(
@@ -865,14 +879,233 @@ class ModsDialog(QDialog):
 
 
 # --------------------------------------------------------------------------
+# updates
+# --------------------------------------------------------------------------
+
+DIALOG_STYLE = """
+    QDialog { background: #12151a; }
+    QLabel { color: #d6dde4; }
+    QPushButton {
+        background: #23303a; color: #dfe8ee; border: 0; padding: 8px 18px;
+        border-radius: 6px;
+    }
+    QPushButton:hover { background: #2e414f; }
+    QPushButton:disabled { background: #1b232b; color: #63707c; }
+    QProgressBar {
+        background: #1b232b; border: 0; border-radius: 5px; height: 10px;
+        text-align: center; color: #8b97a2;
+    }
+    QProgressBar::chunk { background: #3f6f8f; border-radius: 5px; }
+"""
+
+
+class UpdateDialog(QDialog):
+    """Check for a newer release, then download and unpack it in place.
+
+    The work happens on plain threads and reports back through signals; Qt
+    delivers those to the widgets on the UI thread, which is the only place
+    they may be touched.
+    """
+
+    found = Signal(object)          # updater.Update | None
+    failed = Signal(str)
+    progressed = Signal(int, int)   # bytes so far, bytes total
+    installed = Signal()
+
+    def __init__(self, install_dir: Path, known: object = None, parent=None):
+        super().__init__(parent)
+        self.install_dir = install_dir
+        self.update: updater.Update | None = None
+        self.cancel = threading.Event()
+        self.busy = False
+
+        self.setWindowTitle("Updates")
+        self.setMinimumSize(560, 420)
+        self.setStyleSheet(DIALOG_STYLE)
+
+        layout = QVBoxLayout(self)
+
+        self.status = QLabel()
+        self.status.setWordWrap(True)
+        self.status.setStyleSheet("font-size: 14px;")
+        layout.addWidget(self.status)
+
+        self.scroll = QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setStyleSheet("QScrollArea { border: 0; }")
+        self.notes = QLabel()
+        self.notes.setWordWrap(True)
+        self.notes.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self.notes.setTextInteractionFlags(Qt.TextInteractionFlag.TextBrowserInteraction)
+        self.notes.setOpenExternalLinks(True)
+        self.notes.setStyleSheet("color: #a8b3bd; font-size: 12px;")
+        self.scroll.setWidget(self.notes)
+        layout.addWidget(self.scroll, 1)
+
+        self.bar = QProgressBar()
+        self.bar.setTextVisible(False)
+        self.bar.hide()
+        layout.addWidget(self.bar)
+
+        self.footnote = QLabel(
+            f"Installed version v{APP_VERSION}.  Your ROMs, mods, covers and "
+            "saves are left untouched by an update."
+        )
+        self.footnote.setWordWrap(True)
+        self.footnote.setStyleSheet("color: #8b97a2; font-size: 11px;")
+        layout.addWidget(self.footnote)
+
+        row = QHBoxLayout()
+        self.install_btn = QPushButton("Download and install")
+        self.install_btn.setEnabled(False)
+        self.install_btn.clicked.connect(self.start_install)
+        self.recheck_btn = QPushButton("Check again")
+        self.recheck_btn.clicked.connect(self.start_check)
+        row.addWidget(self.install_btn)
+        row.addWidget(self.recheck_btn)
+        row.addStretch(1)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        buttons.rejected.connect(self.reject)
+        row.addWidget(buttons)
+        layout.addLayout(row)
+
+        self.found.connect(self.on_found)
+        self.failed.connect(self.on_failed)
+        self.progressed.connect(self.on_progress)
+        self.installed.connect(self.on_installed)
+
+        if isinstance(known, updater.Update):
+            # The startup check already found this; no need to ask again.
+            self.on_found(known)
+        else:
+            self.start_check()
+
+    # -- checking --------------------------------------------------------
+
+    def start_check(self) -> None:
+        if self.busy:
+            return
+        self.busy = True
+        self.install_btn.setEnabled(False)
+        self.recheck_btn.setEnabled(False)
+        self.status.setText("Checking for updates…")
+        self.notes.setText("")
+
+        def work() -> None:
+            try:
+                self.found.emit(updater.check(APP_VERSION))
+            except updater.UpdateError as exc:
+                self.failed.emit(str(exc))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def on_found(self, update: object) -> None:
+        self.busy = False
+        self.recheck_btn.setEnabled(True)
+        if not isinstance(update, updater.Update):
+            self.update = None
+            self.status.setText(f"You are up to date on v{APP_VERSION}.")
+            self.notes.setText("")
+            return
+
+        self.update = update
+        size = update.asset_size / (1024 * 1024)
+        self.status.setText(f"v{update.version} is available  ·  {size:.0f} MB")
+        self.notes.setText(
+            f"{update.notes}\n\n{update.page_url}" if update.notes else update.page_url
+        )
+        if FROZEN:
+            self.install_btn.setEnabled(True)
+        else:
+            # Overwriting a git checkout with a release archive would be a
+            # rude surprise. Say so instead of offering the button.
+            self.footnote.setText(
+                "This launcher is running from a source checkout, so it will "
+                "not install over itself. Update with: git pull"
+            )
+
+    def on_failed(self, message: str) -> None:
+        self.busy = False
+        self.recheck_btn.setEnabled(True)
+        self.bar.hide()
+        self.status.setText("Could not check for updates.")
+        self.notes.setText(f"{message}\n\n{updater.RELEASES_PAGE}")
+
+    # -- installing ------------------------------------------------------
+
+    def start_install(self) -> None:
+        if self.busy or self.update is None:
+            return
+        self.busy = True
+        self.cancel.clear()
+        self.install_btn.setEnabled(False)
+        self.recheck_btn.setEnabled(False)
+        self.bar.setValue(0)
+        self.bar.show()
+        self.status.setText(f"Downloading v{self.update.version}…")
+
+        update = self.update
+        install_dir = self.install_dir
+
+        def work() -> None:
+            staging = None
+            try:
+                staging = Path(tempfile.mkdtemp(prefix=".download-", dir=install_dir))
+                archive = updater.download(
+                    update,
+                    staging,
+                    progress=lambda done, total: self.progressed.emit(done, total),
+                    cancelled=self.cancel.is_set,
+                )
+                updater.install(archive, install_dir)
+                self.installed.emit()
+            except updater.UpdateError as exc:
+                self.failed.emit(str(exc))
+            except OSError as exc:
+                self.failed.emit(f"Could not write to {install_dir}: {exc}")
+            finally:
+                if staging is not None:
+                    shutil.rmtree(staging, ignore_errors=True)
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def on_progress(self, done: int, total: int) -> None:
+        if total > 0:
+            self.bar.setRange(0, total)
+            self.bar.setValue(done)
+        else:
+            self.bar.setRange(0, 0)  # unknown length: let it sweep
+
+    def on_installed(self) -> None:
+        self.busy = False
+        self.bar.hide()
+        version = self.update.version if self.update else ""
+        self.status.setText(f"v{version} installed. Close and reopen to run it.")
+        self.notes.setText(
+            "The new build is in place. The launcher you are looking at is "
+            "still the old one until you restart it."
+        )
+        self.footnote.setText(
+            "Your ROMs, mods, covers and saves were left exactly as they were."
+        )
+
+    def reject(self) -> None:
+        self.cancel.set()
+        super().reject()
+
+
+# --------------------------------------------------------------------------
 # window
 # --------------------------------------------------------------------------
 
 
 class MainWindow(QWidget):
+    update_found = Signal(object)   # updater.Update, from the startup check
+
     def __init__(self, runner: Runner):
         super().__init__()
         self.runner = runner
+        self.pending_update: updater.Update | None = None
         self.setWindowTitle("Epoch & Equinox")
         self.resize(1180, 660)
 
@@ -903,15 +1136,49 @@ class MainWindow(QWidget):
         layout.addWidget(self.view)
         self.view.setFocus()
 
+        self.update_found.connect(self.on_update_found)
+        self.start_update_check()
+
     def reload_games(self) -> None:
         try:
             self.view.refresh(self.runner.query_games())
         except Exception as exc:  # noqa: BLE001
             print(f"[launcher] refresh failed: {exc}", file=sys.stderr)
 
+    def start_update_check(self) -> None:
+        """Ask about updates in the background, and fail quiet if offline.
+
+        Nothing here interrupts the launcher: a hit adds a line to the
+        footer, and every failure -- no network, GitHub down, a proxy
+        answering with nonsense -- is swallowed. The Updates menu item is
+        where someone who wants an answer goes.
+        """
+
+        def work() -> None:
+            try:
+                found = updater.check(APP_VERSION, timeout=6.0)
+            except updater.UpdateError:
+                return
+            except Exception:  # noqa: BLE001 - a background check never bites
+                return
+            if found is not None:
+                self.update_found.emit(found)
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def on_update_found(self, update: object) -> None:
+        if not isinstance(update, updater.Update):
+            return
+        self.pending_update = update
+        self.view.set_update_note(f"v{update.version} available")
+
     def on_action(self, item: str, game: Game | None) -> None:
         if item == "Exit":
             self.close()
+            return
+        if item == "Updates":
+            # The only item that does not need a playable game behind it.
+            UpdateDialog(PROJECT_ROOT, self.pending_update, self).exec()
             return
         if game is None:
             return
@@ -1042,6 +1309,11 @@ def main() -> int:
     if args.smoke_test:
         runner.query_games()
         return 0
+
+    if FROZEN:
+        # An update that had to rename a locked executable out of the way
+        # leaves it behind; this is the next start it was waiting for.
+        updater.sweep_old_files(PROJECT_ROOT)
 
     window = MainWindow(runner)
     window.show()
