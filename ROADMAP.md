@@ -33,11 +33,15 @@ The player itself is done and distributable — everything below builds on it.
 
 Highest value per unit of work, and nothing here is blocked.
 
-### Dungeon terrain — **S**
-The voxel mode has only ever been verified outdoors. Interiors use the same
-collision data, so this is mostly *checking* rather than building: do holes
-sink, do walls read, does the scroll gate hold in large scrolling rooms.
-**Blocked on:** a battery save parked in a dungeon (`tests/saves/`).
+### Dungeon terrain — **M** *(was S; no longer blocked)*
+`tests/saves/` now has two endgame files, both parked inside a dungeon, so
+this is finally checkable — and the first look says it needs building, not
+just checking. In Veran's tower the terrain gate passes and the floor reads,
+but most of the room renders as void and Link comes out as an untextured
+slab (`docs/dungeon-chase.png`). Interior tilesets clearly do not classify
+the way the overworld's do. Wants: a look at how `wRoomCollisions` differs
+indoors, and a sprite-billboard path that survives whatever the dungeon
+tileset does to the lookup.
 
 ### Save import / export — **S**
 The runner already keeps ordinary battery saves (`<title>.sav` beside the

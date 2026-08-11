@@ -156,9 +156,16 @@ def main() -> int:
             check(f"C == Python for {kind} {index:#04x} id {game_id:#06x} "
                   f"linked={linked}", mine, cells)
 
-    # -- ground truth: a save the game itself wrote -------------------
-    build = Path(__file__).resolve().parent.parent / "build"
-    real = osec.find_saves(build)
+    # -- ground truth: real battery saves ------------------------------
+    # tests/saves holds two endgame files (see its README); anything the
+    # runner has written into build/ is checked too.
+    root = Path(__file__).resolve().parent.parent
+    real = dict(osec.find_saves(root / "build"))
+    for name, cart in (("ages-veran-tower.sav", "tlozooa"),
+                       ("seasons-room-of-rites.sav", "tlozoos")):
+        p = root / "tests" / "saves" / name
+        if p.exists():
+            real[cart] = p
     if not real:
         print("[secrets_test] note: no real .sav beside build/; "
               "ground-truth checks skipped")

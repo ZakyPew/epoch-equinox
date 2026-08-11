@@ -87,7 +87,10 @@ when = bcd c61e == 0
 [linked-quest]
 title = Two Worlds Entwined
 desc = Begin a linked quest with a secret from Holodrum
-when = byte cc01 >= 1
+# wFileIsLinkedGame, not the wIsLinkedGame copy at $cc01: this one lives
+# in the save block, so it is right from the first frame of a load and can
+# be checked against a save file rather than only in play.
+when = byte c612 >= 1
 
 [finished]
 title = Hero of Labrynna
