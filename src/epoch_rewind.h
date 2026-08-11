@@ -18,9 +18,6 @@
 extern "C" {
 #endif
 
-/** Install the HUD hook. Call after gb_platform_init(). */
-void epoch_rewind_install(void);
-
 /** Call once per emulated frame, after the frame completes. Captures
  *  snapshots, services a held rewind key, and drives the HUD. */
 void epoch_rewind_tick(GBContext* ctx, const char* game_id);

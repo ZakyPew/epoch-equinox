@@ -85,7 +85,10 @@ set(EPOCH_SUPPORT_SOURCES
     src/mod_loader.c
     src/platform_compat.c
     src/epoch_rewind.c
-    src/epoch_rewind_hud.cpp)
+    src/epoch_rewind_hud.cpp
+    src/epoch_achievements.c
+    src/epoch_achievements_hud.cpp
+    src/epoch_overlay.cpp)
 if(EPOCH_WITH_VOXEL)
     list(APPEND EPOCH_SUPPORT_SOURCES
         src/voxel/voxel_tiles.c

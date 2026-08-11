@@ -304,6 +304,34 @@ Colour-only vs the game's own collision data, same frame:
 
 </details>
 
+## Achievements
+
+![Achievement toast over gameplay](docs/achievement-toast.png)
+
+The player watches the game's own memory and pops a toast over the window
+— Steam-style, top right — when you earn something. The game is never
+touched: no patched ROM, no injected sprites, just the host reading WRAM
+and drawing over the presented frame.
+
+The shipped packs cover essences, sword and heart upgrades, rings, kill
+counts and a few signature treasures per cart, with every address taken
+from the [oracles disassembly](https://github.com/Stewmath/oracles-disasm).
+Unlocks live in `states/achievements-<cart>.txt` — plain text, one id per
+line, delete a line to earn it again.
+
+Packs are just data: `achievements/<cart>.txt` ships with the player, and
+any `achievements/<cart>.<yourname>.txt` beside it loads too, so a mod or
+a player can add achievements without code. The format (six condition
+kinds over WRAM addresses) is documented in
+[achievements/README.md](achievements/README.md), and
+`EPOCH_TOAST_TEST=1` pops a sample toast at boot so you can see the card
+without earning anything.
+
+Nothing can unlock outside actual play: evaluation is gated on both
+`wLinkMaxHealth` and `wScrollMode`, so the title screen and the file
+select — which loads a file's data into WRAM just to draw its preview
+card — stay inert.
+
 ## Mods
 
 Mods are applied to the extracted ROM *before* the cart boots, which is why the

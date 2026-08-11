@@ -1,0 +1,86 @@
+# Epoch & Equinox achievements — Oracle of Seasons
+#
+# Format: see achievements/README.md. Every address is from the oracles
+# disassembly (include/wram.s, Seasons column). Conditions on one
+# achievement AND together.
+
+[first-essence]
+title = First Sprout
+desc = Claim your first Essence of Nature
+when = bits c6bb >= 1
+
+[half-essences]
+title = Half the Harvest
+desc = Hold four Essences of Nature
+when = bits c6bb >= 4
+
+[all-essences]
+title = Master of Seasons
+desc = Hold all eight Essences of Nature
+when = bits c6bb >= 8
+
+[noble-sword]
+title = A Keener Edge
+desc = Upgrade your sword
+when = byte c6ac >= 2
+
+[ten-hearts]
+title = Stout Heart
+desc = Reach ten heart containers
+when = byte c6a3 >= 40
+
+[full-hearts]
+title = Unbreakable
+desc = Reach fourteen heart containers
+when = byte c6a3 >= 56
+
+[first-ring]
+title = Ring Bearer
+desc = Appraise your first ring
+when = bitset c616 8 >= 1
+
+[ten-rings]
+title = Jeweler's Friend
+desc = Collect ten rings
+when = bitset c616 8 >= 10
+
+[slayer-100]
+title = Centurion
+desc = Defeat one hundred enemies
+when = word c620 >= 100
+
+[slayer-1000]
+title = The Slayer
+desc = Defeat one thousand enemies — Vasu would be proud
+when = word c620 >= 1000
+
+[rupee-fortune]
+title = Fortune of Holodrum
+desc = Collect ten thousand rupees over your adventure
+when = word c627 >= 10000
+
+[rod-of-seasons]
+title = Season's Wand
+desc = Take up the Rod of Seasons
+when = flag c692 7
+
+[all-seasons]
+title = The Year Entire
+desc = Command all four seasons
+when = bits c6b0 >= 4
+
+[flippers]
+title = Swimmer
+desc = Learn to swim
+when = flag c697 6
+
+[magnet-gloves]
+title = Opposites Attract
+desc = Obtain the Magnetic Gloves
+when = flag c693 0
+
+[survivor]
+title = Still Standing
+desc = Hold four essences without ever having fallen
+when = bits c6bb >= 4
+when = bcd c61e == 0

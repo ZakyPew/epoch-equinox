@@ -37,6 +37,8 @@ extern "C" {
 #include "mod_loader.h"
 #include "platform_compat.h"
 #include "epoch_rewind.h"
+#include "epoch_achievements.h"
+#include "epoch_overlay.h"
 #if EPOCH_HAVE_VOXEL
 #include "voxel/voxel.h"
 #endif
@@ -359,6 +361,7 @@ static int run_game(const EpochGame* game, unsigned long long frame_limit) {
          * state is what gets presented rather than the frame we just
          * ran and threw away. */
         epoch_rewind_tick(ctx, game->id);
+        epoch_achievements_tick(ctx, game->id);
         const uint32_t* fb = gb_get_framebuffer(ctx);
         if (fb) gb_platform_render_frame(fb);
 
@@ -468,7 +471,7 @@ int main(int argc, char* argv[]) {
     voxel_install();
     voxel_menu_install();
 #endif
-    epoch_rewind_install();
+    epoch_overlay_install();
 
     /* "Restart Game" from the Esc menu loops back around; everything is
      * rebuilt from the stock file, so a restart also re-applies mods

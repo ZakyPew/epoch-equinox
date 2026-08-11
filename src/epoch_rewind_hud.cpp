@@ -27,7 +27,7 @@ struct EpochHudState {
 
 extern "C" const EpochHudState* epoch_rewind_hud_state(void);
 
-static void draw_hud(void) {
+extern "C" void epoch_rewind_hud_draw(void) {
     const EpochHudState* s = epoch_rewind_hud_state();
     if (!s) return;
     const bool show_room = (s->room >= 0);
@@ -76,8 +76,4 @@ static void draw_hud(void) {
         }
     }
     ImGui::End();
-}
-
-extern "C" void epoch_rewind_install(void) {
-    gb_platform_set_host_overlay(draw_hud);
 }

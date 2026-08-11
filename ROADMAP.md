@@ -22,6 +22,7 @@ The player itself is done and distributable — everything below builds on it.
 | **Mod billboard art** | A mod's `voxel/tree.ppm` / `voxel/tuft.ppm` dresses every billboard in the chase cam |
 | **Rewind** | Hold `R` for ~12 s of history; `F9` restarts the current room |
 | **Self-update** | The launcher notices a new release, shows its notes, and installs it over itself — ROMs, mods, covers and saves untouched |
+| **Achievements** | Data-driven packs watched over WRAM, popped as Steam-style toasts over the window; moddable, one text file per pack |
 | **Quality of life** | 40 ms audio latency, instant boot past the splashes, display options with a live scale readout |
 
 ---
@@ -40,10 +41,16 @@ sink, do walls read, does the scroll gate hold in large scrolling rooms.
 See [Secrets](#secrets) below. Generate valid codes from the player's own save
 and show them in the launcher.
 
-### Achievements — **M**
-The memory-watch machinery already exists for the renderer. What's missing is a
-condition format, a definitions file, and a toast. Naturally moddable: an
-achievement pack is just a data file.
+### Achievement browser + custom icons — **S**
+The engine and toasts shipped. What remains is seeing them: a page in the
+launcher and one in the Esc menu listing earned/unearned, and per-achievement
+icons (`achievements/icons/<id>.ppm`) drawn in the toast in place of the
+built-in medal.
+
+### Save import / export — **S**
+The runner already keeps ordinary battery saves (`<title>.sav` beside the
+binary). Add launcher buttons to import a `.sav` from any emulator (with a
+backup of what it replaces) and export the current one.
 
 ---
 
