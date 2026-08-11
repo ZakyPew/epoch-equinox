@@ -36,6 +36,16 @@ jobs:
       # download and install driven over a server on localhost.
       - name: Updater checks
         run: python3 tools/updater_test.py
+      # The achievements engine against a synthetic WRAM buffer, plus a
+      # parse of the shipped packs.
+      - name: Achievements checks
+        run: |
+          cd build
+          cc -O2 -o achievements_test ../tools/achievements_test.c -I ../src \
+             -I _deps/gb_recompiled-src/runtime/include \
+             $(sdl2-config --cflags) libepoch_support.a _gbrt_build/libgbrt.a \
+             $(sdl2-config --libs) -lGL -lcurl -lm -lstdc++
+          ./achievements_test
       - name: Package
         run: |
           staging=epoch-equinox-linux-x64

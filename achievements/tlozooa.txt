@@ -1,0 +1,81 @@
+# Epoch & Equinox achievements — Oracle of Ages
+#
+# Format: see achievements/README.md. Every address is from the oracles
+# disassembly (include/wram.s, Ages column). Conditions on one
+# achievement AND together.
+
+[first-essence]
+title = Echo of the Beginning
+desc = Claim your first Essence of Time
+when = bits c6bf >= 1
+
+[half-essences]
+title = Turning the Hourglass
+desc = Hold four Essences of Time
+when = bits c6bf >= 4
+
+[all-essences]
+title = Master of Ages
+desc = Hold all eight Essences of Time
+when = bits c6bf >= 8
+
+[noble-sword]
+title = A Keener Edge
+desc = Upgrade your sword
+when = byte c6b2 >= 2
+
+[ten-hearts]
+title = Stout Heart
+desc = Reach ten heart containers
+when = byte c6ab >= 40
+
+[full-hearts]
+title = Unbreakable
+desc = Reach fourteen heart containers
+when = byte c6ab >= 56
+
+[first-ring]
+title = Ring Bearer
+desc = Appraise your first ring
+when = bitset c616 8 >= 1
+
+[ten-rings]
+title = Jeweler's Friend
+desc = Collect ten rings
+when = bitset c616 8 >= 10
+
+[slayer-100]
+title = Centurion
+desc = Defeat one hundred enemies
+when = word c620 >= 100
+
+[slayer-1000]
+title = The Slayer
+desc = Defeat one thousand enemies — Vasu would be proud
+when = word c620 >= 1000
+
+[rupee-fortune]
+title = Fortune of Labrynna
+desc = Collect ten thousand rupees over your adventure
+when = word c627 >= 10000
+
+[flippers]
+title = Swimmer
+desc = Learn to swim
+when = flag c69f 6
+
+[mermaid-suit]
+title = Of the Sea
+desc = Don the Mermaid Suit
+when = flag c6a3 2
+
+[harp]
+title = Strings of Time
+desc = Receive the Harp of Ages
+when = flag c69c 1
+
+[survivor]
+title = Still Standing
+desc = Hold four essences without ever having fallen
+when = bits c6bf >= 4
+when = bcd c61e == 0
