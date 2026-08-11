@@ -8,10 +8,10 @@ built-in gold medal, so partial sets are fine.
 
 | | |
 |---|---|
-| **Path** | `achievements/icons/<cart>/<id>.ppm` |
-| **Format** | Binary PPM (`P6`), maxval 255 |
+| **Path** | `achievements/icons/<cart>/<id>.pam` |
+| **Format** | PAM (`P7`) RGBA, maxval 255 |
 | **Size** | **48×48** (anything up to 48×48 works; smaller is scaled) |
-| **Transparency** | Pure magenta `(255, 0, 255)` renders as transparent |
+| **Transparency** | Real per-pixel alpha; no chroma-key color is needed |
 | **Style** | Pixel art reads best — the renderer draws each pixel as a crisp rectangle, no smoothing |
 
 Carts: `tlozooa` (Oracle of Ages), `tlozoos` (Oracle of Seasons).
@@ -19,7 +19,11 @@ Carts: `tlozooa` (Oracle of Ages), `tlozoos` (Oracle of Seasons).
 Converting from PNG is one ImageMagick call:
 
 ```sh
-magick icon.png -resize 48x48 icon.ppm
+magick icon.png -resize 48x48 RGBA:icon.rgba
+{
+  printf 'P7\nWIDTH 48\nHEIGHT 48\nDEPTH 4\nMAXVAL 255\nTUPLTYPE RGB_ALPHA\nENDHDR\n'
+  cat icon.rgba
+} > icon.pam
 ```
 
 Preview without earning anything: `EPOCH_TOAST_TEST=1 ./epoch --game tlozooa`

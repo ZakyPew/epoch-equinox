@@ -309,6 +309,47 @@ bad:
     return false;
 }
 
+bool ea_load_pam(const char* path, EaIcon* out) {
+    out->w = out->h = 0;
+    FILE* f = fopen(path, "rb");
+    if (!f) return false;
+    char line[128];
+    int w = 0, h = 0, depth = 0, maxv = 0;
+    bool endhdr = false;
+    if (!fgets(line, sizeof(line), f) || strcmp(line, "P7\n") != 0) goto bad;
+    while (fgets(line, sizeof(line), f)) {
+        if (strcmp(line, "ENDHDR\n") == 0 || strcmp(line, "ENDHDR\r\n") == 0) {
+            endhdr = true;
+            break;
+        }
+        if (sscanf(line, "WIDTH %d", &w) == 1) continue;
+        if (sscanf(line, "HEIGHT %d", &h) == 1) continue;
+        if (sscanf(line, "DEPTH %d", &depth) == 1) continue;
+        if (sscanf(line, "MAXVAL %d", &maxv) == 1) continue;
+    }
+    if (!endhdr || w < 1 || h < 1 || w > EA_ICON_DIM || h > EA_ICON_DIM ||
+        depth != 4 || maxv != 255) {
+        LOG("%s: want a PAM RGBA up to %dx%d with maxval 255, got %dx%d/%d",
+            path, EA_ICON_DIM, EA_ICON_DIM, w, h, maxv);
+        goto bad;
+    }
+    for (int i = 0; i < w * h; i++) {
+        uint8_t rgba[4];
+        if (fread(rgba, 1, 4, f) != 4) goto bad;
+        out->px[i] = ((uint32_t)rgba[3] << 24) |
+                     ((uint32_t)rgba[0] << 16) |
+                     ((uint32_t)rgba[1] << 8) | (uint32_t)rgba[2];
+    }
+    fclose(f);
+    out->w = w;
+    out->h = h;
+    return true;
+bad:
+    fclose(f);
+    out->w = out->h = 0;
+    return false;
+}
+
 /* One cached icon per achievement, loaded on first ask. `tried` keeps a
  * missing file from being stat'ed every frame the toast is up. */
 static EaIcon g_icons[EA_MAX_ACHIEVEMENTS];
@@ -321,9 +362,14 @@ const EaIcon* ea_icon_get(const char* id) {
         if (!g_icon_tried[i]) {
             g_icon_tried[i] = 1;
             char path[256];
-            snprintf(path, sizeof(path), "achievements/icons/%s/%s.ppm",
+            snprintf(path, sizeof(path), "achievements/icons/%s/%s.pam",
                      g_cart, id);
-            ea_load_ppm(path, &g_icons[i]);
+            if (!ea_load_pam(path, &g_icons[i])) {
+                /* Mods made for the original icon format still work. */
+                snprintf(path, sizeof(path), "achievements/icons/%s/%s.ppm",
+                         g_cart, id);
+                ea_load_ppm(path, &g_icons[i]);
+            }
         }
         return g_icons[i].w > 0 ? &g_icons[i] : NULL;
     }

@@ -28,6 +28,6 @@ __pycache__/
 
 # Local capture scratch
 *.ppm
-!achievements/icons/**/*.ppm
+!achievements/icons/**/*.pam
 /*.png
 shot_pylauncher.sh
