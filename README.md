@@ -117,6 +117,7 @@ button labels for Xbox, PlayStation, Switch Pro and Joy-Con.
 | **`F3`** | **Cycle voxel mode** (off → 15° → 30° → 45° → chase cam) | — |
 | **`R`** *(hold)* | **Rewind** — step back through the last ~12 seconds | — |
 | **`F9`** | Jump back to the moment you entered this room | — |
+| **`C`** | Chase cam: swing behind Link (hold to keep following) | **R3** |
 
 The Esc menu opens with a **Display** section — fullscreen, scaling mode
 (Pixel Perfect / Aspect Fit / Aspect Fill / Stretch), scale filter, window
@@ -201,11 +202,13 @@ at the addresses named by
 - the status bar stays flat and composites back on top
 - **chase cam** (`F3` to the last stop): a third-person camera floating
   behind Link, raycasting the same heightfield in true perspective —
-  distance fog and depth-scaled sprite billboards. It swings around behind
-  him while he **walks**, eased over about a second, and ignores a standing
-  turn, so tapping a direction to face a sign doesn't whip the world
-  around. The right stick (or `Q`/`E`) takes the camera and holds it there
-  until he walks again
+  distance fog and depth-scaled sprite billboards. **The camera orbits Link
+  and the stick owns it**: the right stick (or `Q`/`E`) swings it and it
+  stays exactly where you left it while he runs around underneath.
+  Recentring is asked for, never assumed — click the right stick (or press
+  `C`) to swing behind him, hold it to keep following. If you preferred the
+  camera taking itself back behind him as he walks, the Esc menu has a
+  checkbox for it (off by default)
 - **the world persists**: every room you visit is remembered, and the chase
   camera draws remembered neighbours past the room border — terrain, cliff
   faces, tree masses — so the world runs to the horizon and fills in as

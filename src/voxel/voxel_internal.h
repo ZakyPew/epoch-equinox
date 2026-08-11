@@ -236,4 +236,10 @@ void vox_render(GBContext* ctx, const VoxTileGrid* grid,
                 const VoxSpriteList* sprites, const uint32_t* fb,
                 int mode, int scale, uint32_t* out);
 
+/** One frame of chase-camera aim: reads the stick and the recentre
+ *  button, updates the heading, and reports Link's held anchor. Split out
+ *  of the renderer so tools/chasecam_test.c can drive the yaw rules with
+ *  no window and no cart. Either out-param may be NULL. */
+void vox_chase_step(const VoxTileGrid* grid, float* out_lx, float* out_ly);
+
 #endif /* EPOCH_VOXEL_INTERNAL_H */

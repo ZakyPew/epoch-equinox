@@ -60,10 +60,10 @@ jobs:
 
       # The achievements engine against a synthetic WRAM buffer, plus a
       # parse of the shipped packs.
-      - name: Achievements, secrets and typist checks
+      - name: Achievements, secrets, typist and camera checks
         run: |
           cd build
-          for t in achievements_test secrets_c_test typist_test; do
+          for t in achievements_test secrets_c_test typist_test chasecam_test; do
             cc -O2 -o $t ../tools/$t.c -I ../src \
                -I _deps/gb_recompiled-src/runtime/include \
                $(sdl2-config --cflags) libepoch_support.a _gbrt_build/libgbrt.a \
