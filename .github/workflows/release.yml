@@ -103,16 +103,33 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     steps:
+      # Checkout first: it cleans the workspace, so running it after the
+      # download would delete the artifacts we are about to upload.
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           merge-multiple: true
+      # Hand-written notes win when the tag has them; otherwise fall back to
+      # the standard blurb. Either way action-gh-release appends the
+      # generated pull request list underneath.
+      - name: Assemble release body
+        run: |
+          notes="docs/release-notes-${GITHUB_REF_NAME}.md"
+          if [ -f "$notes" ]; then
+            echo "Using $notes"
+            cp "$notes" release-body.md
+          else
+            echo "No $notes; falling back to the default blurb"
+            cat > release-body.md <<'EOF'
+          Prebuilt player. **No game data included** — drop your own ROMs
+          into `roms/` next to the binary and run it. The optional launcher
+          UI is `launcher/epoch_launcher.py` (needs Python + PySide6).
+          EOF
+          fi
       - uses: softprops/action-gh-release@v2
         with:
           files: |
             *.tar.gz
             *.zip
           generate_release_notes: true
-          body: |
-            Prebuilt player. **No game data included** — drop your own ROMs
-            into `roms/` next to the binary and run it. The optional launcher
-            UI is `launcher/epoch_launcher.py` (needs Python + PySide6).
+          body_path: release-body.md
