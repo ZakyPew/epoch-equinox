@@ -90,6 +90,7 @@ static const VoxCam VOX_CAMS[VOXEL_MODE_COUNT] = {
     .chase_hpx    = 3.2f,                   \
     .chase_follow = 0.0f,                   \
     .chase_recenter = 0.16f,                \
+    .cliff_unify = 1.0f,                    \
     .fog_start    = 70.0f,                  \
     .fog_max      = 150.0f,                 \
 }
@@ -132,11 +133,12 @@ void voxel_tuning_save(void) {
             g_tune.footprint, g_tune.tilt_scale);
     fprintf(f, "chase_back=%.3f\nchase_height=%.3f\nchase_fov=%.3f\n"
                "chase_hpx=%.3f\nchase_follow=%.3f\nchase_recenter=%.3f\n"
+               "cliff_unify=%.0f\n"
                "fog_start=%.3f\n"
                "fog_max=%.3f\n",
             g_tune.chase_back, g_tune.chase_height, g_tune.chase_fov,
             g_tune.chase_hpx, g_tune.chase_follow,
-            g_tune.chase_recenter, g_tune.fog_start,
+            g_tune.chase_recenter, g_tune.cliff_unify, g_tune.fog_start,
             g_tune.fog_max);
     fclose(f);
     fprintf(stderr, "[VOXEL] tuning saved to %s\n", TUNE_PATH);
@@ -164,6 +166,7 @@ void voxel_tuning_load(void) {
         else if (!strcmp(key, "chase_hpx"))    g_tune.chase_hpx    = val;
         else if (!strcmp(key, "chase_follow")) g_tune.chase_follow = val;
         else if (!strcmp(key, "chase_recenter")) g_tune.chase_recenter = val;
+        else if (!strcmp(key, "cliff_unify")) g_tune.cliff_unify = val;
         else if (!strcmp(key, "fog_start"))    g_tune.fog_start    = val;
         else if (!strcmp(key, "fog_max"))      g_tune.fog_max      = val;
     }

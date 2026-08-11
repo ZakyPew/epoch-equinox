@@ -209,6 +209,12 @@ at the addresses named by
   `C`) to swing behind him, hold it to keep following. If you preferred the
   camera taking itself back behind him as he walks, the Esc menu has a
   checkbox for it (off by default)
+- **a cliff is one object**: the game says only that a cell is *solid* — how
+  tall it looks came from the tile's own colours, voted per 8px tile, so one
+  cliff could come out with a ragged top and notches where a shaded tile
+  disagreed with its neighbours. A connected mass now votes once, and the
+  diagonal shapes that sit inside a wall bevel instead of dropping to the
+  floor. "One height per cliff" in the Esc menu turns it off
 - **the world persists**: every room you visit is remembered, and the chase
   camera draws remembered neighbours past the room border — terrain, cliff
   faces, tree masses — so the world runs to the horizon and fills in as

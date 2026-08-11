@@ -51,6 +51,16 @@ extern "C" void voxel_menu_draw(void) {
                         "cell edge: 0 makes hard blocks, high makes tufts.");
     ImGui::SliderFloat("Tilt height", &t->tilt_scale, 0.2f, 2.5f, "%.2f");
 
+    /* The game says a cell is solid; the tile art says how tall. Voting
+     * per 8px tile gives one cliff a ragged top, so a connected mass
+     * votes once instead. Off restores the per-tile answer. */
+    bool unify = t->cliff_unify > 0.5f;
+    if (ImGui::Checkbox("One height per cliff", &unify)) {
+        t->cliff_unify = unify ? 1.0f : 0.0f;
+    }
+    ImGui::TextDisabled("Connected solid cells agree on one height, so a\n"
+                        "cliff stops coming out notched. Off votes per tile.");
+
     ImGui::Spacing();
     ImGui::TextDisabled("Chase camera");
     ImGui::SliderFloat("Distance", &t->chase_back, 20.0f, 130.0f, "%.0f");

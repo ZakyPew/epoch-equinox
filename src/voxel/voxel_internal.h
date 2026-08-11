@@ -242,4 +242,8 @@ void vox_render(GBContext* ctx, const VoxTileGrid* grid,
  *  no window and no cart. Either out-param may be NULL. */
 void vox_chase_step(const VoxTileGrid* grid, float* out_lx, float* out_ly);
 
+/** Give every connected mass of solid (MID/HIGH) cells a single height,
+ *  by majority vote of its members. Exposed for tools/cliff_test.c. */
+void vox_unify_solid_masses(uint8_t height[VOX_TILES_H][VOX_TILES_W]);
+
 #endif /* EPOCH_VOXEL_INTERNAL_H */

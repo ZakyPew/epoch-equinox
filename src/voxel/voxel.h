@@ -73,6 +73,7 @@ typedef struct {
     float chase_hpx;      /* screen px per height unit in perspective */
     float chase_follow;   /* auto-swing behind Link while walking, 0 = off */
     float chase_recenter; /* how fast the recenter button swings behind him */
+    float cliff_unify;    /* 1 = one height per connected solid mass */
     float fog_start;      /* distance where distance fog begins */
     float fog_max;        /* strongest fog blend, 0-256 */
 } VoxelTuning;

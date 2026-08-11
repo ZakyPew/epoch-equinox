@@ -5,6 +5,7 @@
  * tiles look like, so it holds up across both Oracles carts (and any other
  * top-down GBC cart, roughly).
  */
+#include "voxel.h"
 #include "voxel_internal.h"
 
 #include "mod_loader.h"
@@ -263,6 +264,96 @@ static int score_origin(GBContext* ctx, const uint32_t* fb, unsigned map_base,
         }
     }
     return score;
+}
+
+/* One cliff, one height.
+ *
+ * The game says only that a cell is solid ($0F); how TALL it is comes from
+ * the tile's own colours, and that vote happens per 8x8 tile. A cliff is
+ * one object made of many tiles whose art varies along its length -- lit
+ * tops, shaded faces, the odd decorated block -- so some tiles clear the
+ * "tall" threshold and their neighbours do not, and the cliff comes out
+ * with a ragged top and notches bitten out of it.
+ *
+ * So let a connected mass vote once: flood-fill each region of MID/HIGH
+ * cells, count how many wanted HIGH, and give the whole region the
+ * majority answer. The collision data still decides what is solid; the
+ * colours just stop re-deciding the height every eight pixels. Same idea
+ * as the leafy spread further down, one step earlier.
+ */
+void vox_unify_solid_masses(uint8_t height[VOX_TILES_H][VOX_TILES_W]) {
+    bool seen[VOX_TILES_H][VOX_TILES_W];
+    static int16_t stack[VOX_TILES_H * VOX_TILES_W][2];
+    static int16_t cells[VOX_TILES_H * VOX_TILES_W][2];
+    memset(seen, 0, sizeof(seen));
+
+    for (int sy = 0; sy < VOX_TILES_H; sy++) {
+        for (int sx = 0; sx < VOX_TILES_W; sx++) {
+            if (seen[sy][sx]) continue;
+            uint8_t h0 = height[sy][sx];
+            if (h0 != VOX_H_MID && h0 != VOX_H_HIGH) continue;
+
+            int top = 0, members = 0, high = 0;
+            stack[top][0] = (int16_t)sx; stack[top][1] = (int16_t)sy; top++;
+            seen[sy][sx] = true;
+            while (top > 0) {
+                top--;
+                int x = stack[top][0], y = stack[top][1];
+                cells[members][0] = (int16_t)x;
+                cells[members][1] = (int16_t)y;
+                members++;
+                if (height[y][x] == VOX_H_HIGH) high++;
+
+                static const int DX[4] = { 1, -1, 0, 0 };
+                static const int DY[4] = { 0, 0, 1, -1 };
+                for (int k = 0; k < 4; k++) {
+                    int nx = x + DX[k], ny = y + DY[k];
+                    if (nx < 0 || nx >= VOX_TILES_W ||
+                        ny < 0 || ny >= VOX_TILES_H) continue;
+                    if (seen[ny][nx]) continue;
+                    uint8_t hn = height[ny][nx];
+                    if (hn != VOX_H_MID && hn != VOX_H_HIGH) continue;
+                    seen[ny][nx] = true;
+                    stack[top][0] = (int16_t)nx;
+                    stack[top][1] = (int16_t)ny;
+                    top++;
+                }
+            }
+
+            /* Majority, ties going tall: a cliff misread as a row of rocks
+             * is the worse failure, and it is the one being fixed. */
+            uint8_t win = (high * 2 >= members) ? VOX_H_HIGH : VOX_H_MID;
+            for (int i = 0; i < members; i++)
+                height[cells[i][1]][cells[i][0]] = win;
+        }
+    }
+
+    /* Now the diagonals. The partial collision shapes ($01-$0E) that make
+     * a cliff's corners and sloped edges classify as LOW, which is right
+     * for a lip out in the open and badly wrong in the middle of a wall:
+     * a real Seasons room reads
+     *
+     *     0F 0F 0F 0C 0F 0F 0C 0F 0F 0F   |OOOoOOoOOO|
+     *
+     * so the wall gets two notches bitten clean out of it. Lift a LOW cell
+     * that touches a tall mass to one step below it -- still a bevel, so
+     * the slope stays readable, but no longer a hole. A LOW beside MID is
+     * already one step down, so it stays. */
+    {
+        uint8_t lifted[VOX_TILES_H][VOX_TILES_W];
+        memcpy(lifted, height, sizeof(lifted));
+        for (int y = 0; y < VOX_TILES_H; y++) {
+            for (int x = 0; x < VOX_TILES_W; x++) {
+                if (height[y][x] != VOX_H_LOW) continue;
+                bool tall = (x > 0                 && height[y][x - 1] == VOX_H_HIGH) ||
+                            (x < VOX_TILES_W - 1   && height[y][x + 1] == VOX_H_HIGH) ||
+                            (y > 0                 && height[y - 1][x] == VOX_H_HIGH) ||
+                            (y < VOX_TILES_H - 1   && height[y + 1][x] == VOX_H_HIGH);
+                if (tall) lifted[y][x] = VOX_H_MID;
+            }
+        }
+        memcpy(height, lifted, sizeof(lifted));
+    }
 }
 
 bool vox_scrape(GBContext* ctx, const uint32_t* fb, VoxTileGrid* grid,
@@ -581,6 +672,11 @@ bool vox_scrape(GBContext* ctx, const uint32_t* fb, VoxTileGrid* grid,
     }
 
     s_have_world = use_oracle;
+
+    /* A cliff is one object: let it agree with itself before the
+     * renderer extrudes it. Off restores the per-tile colour vote. */
+    if (use_oracle && voxel_tuning()->cliff_unify > 0.5f)
+        vox_unify_solid_masses(grid->height);
 
 scan_sprites:
     /* Foliage is classified per 8px tile, but a tree is a 16px object: one
