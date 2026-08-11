@@ -469,9 +469,8 @@ int main(int argc, char* argv[]) {
     gb_platform_set_launcher_return_enabled(false);
 #if EPOCH_HAVE_VOXEL
     voxel_install();
-    voxel_menu_install();
 #endif
-    epoch_overlay_install();
+    epoch_overlay_install();   /* rewind HUD, toasts, and the Esc-menu pages */
 
     /* "Restart Game" from the Esc menu loops back around; everything is
      * rebuilt from the stock file, so a restart also re-applies mods

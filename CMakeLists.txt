@@ -121,3 +121,8 @@ file(GLOB _dev_roms "${CMAKE_CURRENT_SOURCE_DIR}/roms/*.gb"
 if(_dev_roms)
     file(COPY ${_dev_roms} DESTINATION "${CMAKE_BINARY_DIR}/roms")
 endif()
+
+# The runner reads achievement packs relative to its cwd; mirror them so a
+# dev build behaves like the shipped folder. Refreshed on reconfigure.
+file(COPY "${CMAKE_CURRENT_SOURCE_DIR}/achievements"
+     DESTINATION "${CMAKE_BINARY_DIR}")

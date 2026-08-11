@@ -55,6 +55,7 @@ jobs:
           # ship the repo's own art so the cards aren't blank on first run.
           cp -r art/covers/. "$staging/covers/"
           cp -r launcher "$staging/"
+          cp -r achievements "$staging/"
           cp README.md LICENSE CREDITS.md "$staging/"
           cp examples/mods/README.md "$staging/mods/"
           printf 'Drop your ROMs here:\n  tlozooa.gbc  Oracle of Ages (USA, Australia)\n  tlozoos.gbc  Oracle of Seasons (USA, Australia)\nAny other .gb/.gbc works too.\n' > "$staging/roms/README.txt"
@@ -99,6 +100,7 @@ jobs:
           Copy-Item "art/covers/*" -Destination "$staging/covers" -Recurse
           Copy-Item "dist\Epoch & Equinox Launcher.exe" $staging
           Copy-Item -Recurse launcher "$staging/launcher"
+          Copy-Item -Recurse achievements "$staging/achievements"
           Copy-Item README.md,LICENSE,CREDITS.md $staging
           Copy-Item examples/mods/README.md "$staging/mods/"
           Set-Content "$staging/roms/README.txt" "Drop your ROMs here:`n  tlozooa.gbc  Oracle of Ages (USA, Australia)`n  tlozoos.gbc  Oracle of Seasons (USA, Australia)`nAny other .gb/.gbc works too."

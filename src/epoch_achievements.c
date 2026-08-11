@@ -250,6 +250,90 @@ void ea_save_unlock(const char* path, const char* id) {
 }
 
 /* ------------------------------------------------------------------ */
+/* the live set (loaded per cart by the runner glue below)             */
+/* ------------------------------------------------------------------ */
+
+static EaSet  g_set;
+static char   g_state_path[128];
+static char   g_cart[16];
+static bool   g_ready = false;
+
+/* ------------------------------------------------------------------ */
+/* icons                                                               */
+/* ------------------------------------------------------------------ */
+
+bool ea_load_ppm(const char* path, EaIcon* out) {
+    out->w = out->h = 0;
+    FILE* f = fopen(path, "rb");
+    if (!f) return false;
+    char magic[3] = {0};
+    int w = 0, h = 0, maxv = 0;
+    if (fscanf(f, "%2s", magic) != 1 || strcmp(magic, "P6") != 0) goto bad;
+    {
+        /* Header fields, with the #-comments editors like to leave. */
+        int* fields[3] = {&w, &h, &maxv};
+        for (int i = 0; i < 3; i++) {
+            int ch;
+            do {
+                ch = fgetc(f);
+                if (ch == '#') {
+                    while ((ch = fgetc(f)) != '\n' && ch != EOF) {}
+                }
+            } while (ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r');
+            if (ch == EOF) goto bad;
+            ungetc(ch, f);
+            if (fscanf(f, "%d", fields[i]) != 1) goto bad;
+        }
+    }
+    if (fgetc(f) == EOF) goto bad;   /* the single whitespace after maxval */
+    if (w < 1 || h < 1 || w > EA_ICON_DIM || h > EA_ICON_DIM || maxv != 255) {
+        LOG("%s: want a P6 up to %dx%d with maxval 255, got %dx%d/%d",
+            path, EA_ICON_DIM, EA_ICON_DIM, w, h, maxv);
+        goto bad;
+    }
+    for (int i = 0; i < w * h; i++) {
+        uint8_t rgb[3];
+        if (fread(rgb, 1, 3, f) != 3) goto bad;
+        /* Magenta is the transparent key, same as the mod billboard art. */
+        uint32_t a = (rgb[0] == 255 && rgb[1] == 0 && rgb[2] == 255) ? 0 : 0xFF;
+        out->px[i] = (a << 24) | ((uint32_t)rgb[0] << 16) |
+                     ((uint32_t)rgb[1] << 8) | (uint32_t)rgb[2];
+    }
+    fclose(f);
+    out->w = w;
+    out->h = h;
+    return true;
+bad:
+    fclose(f);
+    out->w = out->h = 0;
+    return false;
+}
+
+/* One cached icon per achievement, loaded on first ask. `tried` keeps a
+ * missing file from being stat'ed every frame the toast is up. */
+static EaIcon g_icons[EA_MAX_ACHIEVEMENTS];
+static uint8_t g_icon_tried[EA_MAX_ACHIEVEMENTS];
+
+const EaIcon* ea_icon_get(const char* id) {
+    if (!id || !id[0]) return NULL;
+    for (int i = 0; i < g_set.count; i++) {
+        if (strcmp(g_set.list[i].id, id) != 0) continue;
+        if (!g_icon_tried[i]) {
+            g_icon_tried[i] = 1;
+            char path[256];
+            snprintf(path, sizeof(path), "achievements/icons/%s/%s.ppm",
+                     g_cart, id);
+            ea_load_ppm(path, &g_icons[i]);
+        }
+        return g_icons[i].w > 0 ? &g_icons[i] : NULL;
+    }
+    return NULL;
+}
+
+const EaSet* epoch_achievements_set(void)  { return &g_set; }
+const char*  epoch_achievements_cart(void) { return g_cart; }
+
+/* ------------------------------------------------------------------ */
 /* toast queue                                                         */
 /* ------------------------------------------------------------------ */
 
@@ -258,9 +342,10 @@ void ea_save_unlock(const char* path, const char* id) {
 static EaToast g_toasts[TOAST_QUEUE];
 static int g_toast_head = 0, g_toast_count = 0;
 
-void ea_toast_push(const char* title, const char* desc) {
+void ea_toast_push(const char* id, const char* title, const char* desc) {
     if (g_toast_count >= TOAST_QUEUE) return;   /* queue full: drop, shrug */
     EaToast* t = &g_toasts[(g_toast_head + g_toast_count) % TOAST_QUEUE];
+    snprintf(t->id, sizeof(t->id), "%s", id ? id : "");
     snprintf(t->title, sizeof(t->title), "%s", title);
     snprintf(t->desc, sizeof(t->desc), "%s", desc);
     t->age = 0.0f;
@@ -288,13 +373,9 @@ void ea_toast_advance(float dt) {
 /* runner glue                                                         */
 /* ------------------------------------------------------------------ */
 
-static EaSet  g_set;
-static char   g_state_path[128];
-static char   g_cart[16];
-static bool   g_ready = false;
-
 static void load_for_cart(const char* game_id) {
     memset(&g_set, 0, sizeof(g_set));
+    memset(g_icon_tried, 0, sizeof(g_icon_tried));   /* new cart, new icons */
     snprintf(g_cart, sizeof(g_cart), "%s", game_id);
     snprintf(g_state_path, sizeof(g_state_path),
              "states/achievements-%s.txt", game_id);
@@ -373,7 +454,7 @@ void epoch_achievements_tick(GBContext* ctx, const char* game_id) {
          * authors (and screenshots) can see the card without earning
          * anything. */
         if (getenv("EPOCH_TOAST_TEST"))
-            ea_toast_push("Master of Ages",
+            ea_toast_push("all-essences", "Master of Ages",
                           "Hold all eight Essences of Time");
     }
     if (g_set.count == 0) return;
@@ -383,7 +464,7 @@ void epoch_achievements_tick(GBContext* ctx, const char* game_id) {
     for (int i = 0; i < n && i < 8; i++) {
         const EaAchievement* a = &g_set.list[newly[i]];
         ea_save_unlock(g_state_path, a->id);
-        ea_toast_push(a->title[0] ? a->title : a->id, a->desc);
+        ea_toast_push(a->id, a->title[0] ? a->title : a->id, a->desc);
         LOG("unlocked: %s", a->id);
     }
 }

@@ -97,9 +97,34 @@ void epoch_achievements_tick(GBContext* ctx, const char* game_id);
 /** How many are unlocked / defined, for the HUD's little tally. */
 void epoch_achievements_progress(int* unlocked, int* total);
 
+/* ---- icons ---------------------------------------------------------- */
+
+/* Custom art: achievements/icons/<cart>/<id>.ppm, a 48x48 binary P6 with
+ * maxval 255. Magenta (255,0,255) reads as transparent. Missing icons
+ * fall back to the built-in medal. See achievements/icons/README.md. */
+enum { EA_ICON_DIM = 48 };
+
+typedef struct {
+    int      w, h;                /* 0x0 = no icon */
+    uint32_t px[EA_ICON_DIM * EA_ICON_DIM];   /* 0xAARRGGBB */
+} EaIcon;
+
+/** Parse a P6 PPM into `out`. Any size up to EA_ICON_DIM squared is
+ *  accepted (the drawers scale); bigger is refused. */
+bool ea_load_ppm(const char* path, EaIcon* out);
+
+/** The icon for an achievement of the running cart, lazily loaded and
+ *  cached. NULL when the file is absent or malformed. */
+const EaIcon* ea_icon_get(const char* id);
+
+/** The live set and cart id, for the Esc-menu browser. */
+const EaSet* epoch_achievements_set(void);
+const char*  epoch_achievements_cart(void);
+
 /* ---- toast queue (drawn by epoch_achievements_hud.cpp) -------------- */
 
 typedef struct {
+    char  id[48];     /* names the icon */
     char  title[64];
     char  desc[96];
     float age;        /* seconds since queued; drawer advances it */
@@ -111,7 +136,7 @@ const EaToast* ea_toast_current(void);
 void ea_toast_advance(float dt);
 
 /** Queue a toast (used by the tick; exposed for a --toast-test). */
-void ea_toast_push(const char* title, const char* desc);
+void ea_toast_push(const char* id, const char* title, const char* desc);
 
 #ifdef __cplusplus
 }
