@@ -23,6 +23,7 @@ The player itself is done and distributable — everything below builds on it.
 | **Rewind** | Hold `R` for ~12 s of history; `F9` restarts the current room |
 | **Self-update** | The launcher notices a new release, shows its notes, and installs it over itself — ROMs, mods, covers and saves untouched |
 | **Achievements** | Data-driven packs watched over WRAM, popped as Steam-style toasts over the window; moddable, one text file per pack |
+| **Auto-entered secrets** | The in-game panel walks the password grid and types any secret for you |
 | **Secret generator** | Every code your save can produce — game, ring, and all twenty NPC secrets — generated in the launcher with the game's own cipher |
 | **Quality of life** | 40 ms audio latency, instant boot past the splashes, display options with a live scale readout |
 
@@ -37,11 +38,6 @@ The voxel mode has only ever been verified outdoors. Interiors use the same
 collision data, so this is mostly *checking* rather than building: do holes
 sink, do walls read, does the scroll gate hold in large scrolling rooms.
 **Blocked on:** a battery save parked in a dungeon (`tests/saves/`).
-
-### Auto-entered secrets — **M**
-The generator shipped; the codes are proven against the save format. Next is
-driving the in-game password grid with the runtime's input-script system so the
-player never types a code.
 
 ### Save import / export — **S**
 The runner already keeps ordinary battery saves (`<title>.sav` beside the

@@ -127,6 +127,35 @@ def main() -> int:
              for g in range(1, 9)}
     check("cipher varies with game id", len(texts) > 1)
 
+    # -- the C encoder must agree symbol for symbol -------------------
+    # src/epoch_secrets.c generates the codes the player types for you;
+    # this module generates the ones you read. Two ports of one game
+    # routine is two chances to be wrong, so compare them directly.
+    import subprocess
+    build = Path(__file__).resolve().parent.parent / "build"
+    c_test = build / "secrets_c_test"
+    if not c_test.exists():
+        print("[secrets_test] note: build/secrets_c_test not built; "
+              "C/Python cross-check skipped")
+    else:
+        out = subprocess.run([str(c_test), "--dump"], capture_output=True,
+                             text=True, cwd=build)
+        rows = [l.split() for l in out.stdout.splitlines() if l.strip()]
+        check("C dump produced vectors", len(rows) > 0)
+        for row in rows:
+            game_id, linked, kind, index = int(row[0], 16), int(row[1]), row[2], int(row[3])
+            cells = [int(v) for v in row[4:]]
+            save = make_save(game_id, linked=linked,
+                             rings=bytes([1, 2, 3, 4, 5, 6, 7, 8]))
+            if kind == "game":
+                mine = osec.game_secret(save)
+            elif kind == "ring":
+                mine = osec.ring_secret(save)
+            else:
+                mine = osec.short_secret(save, index)
+            check(f"C == Python for {kind} {index:#04x} id {game_id:#06x} "
+                  f"linked={linked}", mine, cells)
+
     # -- ground truth: a save the game itself wrote -------------------
     build = Path(__file__).resolve().parent.parent / "build"
     real = osec.find_saves(build)

@@ -189,20 +189,21 @@ extern "C" void epoch_achievements_hud_draw(void) {
 /* the Esc-menu page                                                   */
 /* ------------------------------------------------------------------ */
 
-extern "C" void epoch_achievements_menu_draw(void) {
+extern "C" void epoch_achievements_panel_draw(void) {
     const EaSet* set = epoch_achievements_set();
-    if (!set || set->count == 0) return;
+    if (!set || set->count == 0) {
+        ImGui::TextDisabled("No achievement pack loaded for this cart.");
+        return;
+    }
 
     int unlocked = 0, total = 0;
     epoch_achievements_progress(&unlocked, &total);
-
-    char header[64];
-    snprintf(header, sizeof(header), "Achievements  %d / %d###achievements",
-             unlocked, total);
-    if (!ImGui::CollapsingHeader(header)) return;
-
+    ImGui::Text("%d / %d earned", unlocked, total);
+    ImGui::ProgressBar(total ? (float)unlocked / (float)total : 0.0f,
+                       ImVec2(-1.0f, 0.0f));
     ImGui::TextDisabled("Earned over every playthrough of this cart. The\n"
                         "toast pops over the window, never in the game.");
+    ImGui::Separator();
     ImGui::Spacing();
 
     const float row = ImGui::GetTextLineHeight() * 2.6f;
