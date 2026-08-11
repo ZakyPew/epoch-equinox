@@ -11,6 +11,11 @@ name: Release builds
 on:
   push:
     tags: ["v*"]
+    # Build main on every merge too. The release job stays gated on a
+    # tag, so this publishes nothing -- it exists because a Windows-only
+    # compile error (MSVC and M_PI) sat unnoticed on main between
+    # releases, and the first sign of it was a release build failing.
+    branches: [main]
   workflow_dispatch:
     inputs:
       tag:
