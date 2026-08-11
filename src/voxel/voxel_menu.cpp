@@ -57,6 +57,22 @@ extern "C" void voxel_menu_draw(void) {
     ImGui::SliderFloat("Height", &t->chase_height, 6.0f, 90.0f, "%.0f");
     ImGui::SliderFloat("Field of view", &t->chase_fov, 0.35f, 1.20f, "%.2f");
     ImGui::SliderFloat("Vertical scale", &t->chase_hpx, 0.8f, 9.0f, "%.2f");
+
+    /* The camera holds still by default and is recentred on request. The
+     * checkbox is the old walk-follow, off unless someone wants it. */
+    bool follow = t->chase_follow > 0.0f;
+    if (ImGui::Checkbox("Auto-swing behind Link while walking", &follow)) {
+        t->chase_follow = follow ? 0.06f : 0.0f;
+    }
+    if (follow) {
+        ImGui::SliderFloat("Auto-swing speed", &t->chase_follow,
+                           0.01f, 0.40f, "%.3f");
+    }
+    ImGui::SliderFloat("Recentre speed", &t->chase_recenter,
+                       0.02f, 0.60f, "%.2f");
+    ImGui::TextDisabled("Right stick (or Q/E) turns the camera and it stays\n"
+                        "put. Click the right stick (or C) to swing behind\n"
+                        "Link -- hold it to keep following him.");
     ImGui::SliderFloat("Fog begins", &t->fog_start, 0.0f, 200.0f, "%.0f");
     ImGui::SliderFloat("Fog strength", &t->fog_max, 0.0f, 256.0f, "%.0f");
 
