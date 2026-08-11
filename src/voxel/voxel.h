@@ -95,8 +95,9 @@ void voxel_tuning_load(void);
 void voxel_install(void);
 
 /** Register the diorama's section in the runtime's Esc settings menu.
- * Call after gb_platform_init(). Implemented in voxel_menu.cpp. */
-void voxel_menu_install(void);
+ * Drawn from the shared Esc-menu dispatcher (epoch_overlay.cpp).
+ * Implemented in voxel_menu.cpp. */
+void voxel_menu_draw(void);
 
 /** Rotate the pressed d-pad direction into the chase camera's frame.
  *  Call once per frame after input is polled; a no-op in every other

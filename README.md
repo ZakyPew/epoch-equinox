@@ -327,6 +327,14 @@ kinds over WRAM addresses) is documented in
 `EPOCH_TOAST_TEST=1` pops a sample toast at boot so you can see the card
 without earning anything.
 
+Browse them in two places: **Achievements** in the launcher menu, and an
+Achievements page in the in-game Esc menu — earned entries lit, the rest
+dimmed, with the tally up top. Each achievement can carry its own 48×48
+icon (`achievements/icons/<cart>/<id>.ppm`, magenta = transparent); the
+gilded card and the lists use it, and anything without art gets the
+built-in medal. The wanted list and exact spec live in
+[achievements/icons/README.md](achievements/icons/README.md).
+
 Nothing can unlock outside actual play: evaluation is gated on both
 `wLinkMaxHealth` and `wScrollMode`, so the title screen and the file
 select — which loads a file's data into WRAM just to draw its preview

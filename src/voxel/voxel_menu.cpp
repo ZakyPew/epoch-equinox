@@ -20,7 +20,7 @@ extern "C" {
 /* Height classes, matching voxel_internal.h without dragging it in. */
 enum { VX_WATER = 0, VX_FLOOR = 1, VX_LOW = 2, VX_MID = 3, VX_HIGH = 4 };
 
-static void draw_voxel_menu(void) {
+extern "C" void voxel_menu_draw(void) {
     if (!ImGui::CollapsingHeader("Voxel Diorama")) {
         return;
     }
@@ -72,6 +72,3 @@ static void draw_voxel_menu(void) {
                         "a plain text file you can share or commit.");
 }
 
-extern "C" void voxel_menu_install(void) {
-    gb_platform_set_host_menu(draw_voxel_menu);
-}

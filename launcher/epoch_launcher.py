@@ -82,6 +82,7 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFileDialog,
+    QGraphicsOpacityEffect,
     QHBoxLayout,
     QLabel,
     QMessageBox,
@@ -415,7 +416,7 @@ def draw_seasons_motif(pr: QPainter, c: QPointF, r: float, col: QColor) -> None:
 # main view
 # --------------------------------------------------------------------------
 
-MENU_ITEMS = ["Start game", "Mods", "Install ROM", "Updates", "Exit"]
+MENU_ITEMS = ["Start game", "Mods", "Achievements", "Install ROM", "Updates", "Exit"]
 
 
 class LauncherView(QWidget):
@@ -762,6 +763,155 @@ class LauncherView(QWidget):
 # --------------------------------------------------------------------------
 # mods dialog
 # --------------------------------------------------------------------------
+
+
+# --------------------------------------------------------------------------
+# achievements dialog
+# --------------------------------------------------------------------------
+
+
+def parse_achievement_packs(root: Path, cart: str) -> list[dict]:
+    """Read achievements/<cart>.txt plus <cart>.*.txt, the same files the
+    player loads. Returns [{id, title, desc}] in file order."""
+    folder = root / "achievements"
+    packs = [folder / f"{cart}.txt"]
+    if folder.is_dir():
+        packs += sorted(
+            p for p in folder.glob(f"{cart}.*.txt") if p.name != f"{cart}.txt"
+        )
+    entries: list[dict] = []
+    for pack in packs:
+        try:
+            text = pack.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        current: dict | None = None
+        for raw in text.splitlines():
+            line = raw.strip()
+            if not line or line.startswith("#"):
+                continue
+            if line.startswith("[") and line.endswith("]") and len(line) > 2:
+                current = {"id": line[1:-1], "title": "", "desc": ""}
+                entries.append(current)
+                continue
+            if current is None or "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            key = key.strip()
+            if key in ("title", "desc"):
+                current[key] = value.strip()
+    return entries
+
+
+def read_unlocked(root: Path, cart: str) -> set[str]:
+    try:
+        text = (root / "states" / f"achievements-{cart}.txt").read_text(
+            encoding="utf-8", errors="replace"
+        )
+    except OSError:
+        return set()
+    return {line.strip() for line in text.splitlines() if line.strip()}
+
+
+class AchievementsDialog(QDialog):
+    """The browser: everything the pack defines, earned entries lit."""
+
+    def __init__(self, runner: Runner, game: Game, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(f"Achievements - {game.title}")
+        self.setMinimumSize(560, 480)
+        self.setStyleSheet(
+            """
+            QDialog { background: #12151a; }
+            QLabel { color: #d6dde4; }
+            QPushButton {
+                background: #23303a; color: #dfe8ee; border: 0; padding: 8px 18px;
+                border-radius: 6px;
+            }
+            QPushButton:hover { background: #2e414f; }
+            """
+        )
+
+        entries = parse_achievement_packs(runner.root, game.id)
+        unlocked = read_unlocked(runner.root, game.id)
+        icon_dir = runner.root / "achievements" / "icons" / game.id
+
+        layout = QVBoxLayout(self)
+        tally = QLabel(
+            f"{sum(1 for e in entries if e['id'] in unlocked)} of "
+            f"{len(entries)} earned"
+        )
+        tally.setStyleSheet("font-size: 15px; font-weight: bold;")
+        layout.addWidget(tally)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet(
+            "QScrollArea { border: 0; background: #12151a; }"
+        )
+        inner = QWidget()
+        inner.setStyleSheet("background: #12151a;")
+        rows = QVBoxLayout(inner)
+
+        for e in entries:
+            earned = e["id"] in unlocked
+            row = QHBoxLayout()
+
+            icon = QLabel()
+            icon.setFixedSize(48, 48)
+            pm = QPixmap(str(icon_dir / f"{e['id']}.ppm"))
+            if pm.isNull():
+                # No art yet: a plain medal dot keeps the rows aligned.
+                icon.setText("\U0001F3C5")
+                icon.setStyleSheet("font-size: 30px;")
+                icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            else:
+                icon.setPixmap(
+                    pm.scaled(48, 48, Qt.AspectRatioMode.KeepAspectRatio)
+                )
+            row.addWidget(icon)
+
+            text = QVBoxLayout()
+            title = QLabel(e["title"] or e["id"])
+            desc = QLabel(e["desc"])
+            desc.setWordWrap(True)
+            if earned:
+                # Explicit colors: a per-widget stylesheet stops the
+                # dialog-level QLabel color from cascading in.
+                title.setStyleSheet(
+                    "font-size: 13px; font-weight: bold; color: #f2ecda;"
+                )
+                desc.setStyleSheet("color: #8b97a2; font-size: 11px;")
+            else:
+                title.setStyleSheet(
+                    "font-size: 13px; font-weight: bold; color: #5a636d;"
+                )
+                desc.setStyleSheet("color: #4a525b; font-size: 11px;")
+                effect = QGraphicsOpacityEffect(icon)
+                effect.setOpacity(0.35)
+                icon.setGraphicsEffect(effect)
+            text.addWidget(title)
+            text.addWidget(desc)
+            row.addLayout(text, 1)
+            rows.addLayout(row)
+            rows.addSpacing(6)
+
+        rows.addStretch(1)
+        scroll.setWidget(inner)
+        layout.addWidget(scroll, 1)
+
+        note = QLabel(
+            "Earned across every playthrough of this cart. Unlocks pop as a "
+            "toast over the window during play; the list also lives in the "
+            "in-game Esc menu."
+        )
+        note.setWordWrap(True)
+        note.setStyleSheet("color: #8b97a2; font-size: 11px;")
+        layout.addWidget(note)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
 
 
 class ModsDialog(QDialog):
@@ -1185,6 +1335,8 @@ class MainWindow(QWidget):
 
         if item == "Install ROM":
             self.install_rom(game)
+        elif item == "Achievements":
+            AchievementsDialog(self.runner, game, self).exec()
         elif item == "Mods":
             if game.playable:
                 ModsDialog(self.runner, game, self).exec()

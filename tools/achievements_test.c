@@ -184,8 +184,8 @@ int main(void) {
 
     /* -- toast queue ------------------------------------------------ */
     CHECK(ea_toast_current() == NULL, "no toast before any unlock");
-    ea_toast_push("First", "one");
-    ea_toast_push("Second", "two");
+    ea_toast_push("first", "First", "one");
+    ea_toast_push("second", "Second", "two");
     CHECK(ea_toast_current() && !strcmp(ea_toast_current()->title, "First"),
           "toasts show in order");
     ea_toast_advance(10.0f);                 /* well past one lifetime */
@@ -193,6 +193,35 @@ int main(void) {
           "a finished toast hands over to the next");
     ea_toast_advance(10.0f);
     CHECK(ea_toast_current() == NULL, "the queue drains");
+
+    /* -- icons ------------------------------------------------------ */
+    {
+        static EaIcon icon;
+        const char* icon_path = "achv_test_icon.ppm";
+        FILE* pf = fopen(icon_path, "wb");
+        /* 3x2, with a comment in the header and one magenta pixel. */
+        fprintf(pf, "P6\n# a comment\n3 2\n255\n");
+        const uint8_t px[18] = {
+            255, 0, 0,   0, 255, 0,   0, 0, 255,
+            255, 0, 255, 9, 9, 9,     255, 255, 255,
+        };
+        fwrite(px, 1, sizeof(px), pf);
+        fclose(pf);
+
+        CHECK(ea_load_ppm(icon_path, &icon), "ppm with comments loads");
+        CHECK(icon.w == 3 && icon.h == 2, "ppm size read");
+        CHECK(icon.px[0] == 0xFFFF0000u, "red pixel decoded");
+        CHECK((icon.px[3] >> 24) == 0, "magenta reads as transparent");
+        CHECK(icon.px[5] == 0xFFFFFFFFu, "white pixel decoded");
+
+        /* Oversize is refused rather than truncated. */
+        pf = fopen(icon_path, "wb");
+        fprintf(pf, "P6\n%d %d\n255\n", EA_ICON_DIM + 1, 1);
+        for (int i = 0; i < (EA_ICON_DIM + 1) * 3; i++) fputc(0, pf);
+        fclose(pf);
+        CHECK(!ea_load_ppm(icon_path, &icon), "oversize ppm refused");
+        remove(icon_path);
+    }
 
     /* -- shipped packs parse clean, from the repo root -------------- */
     {

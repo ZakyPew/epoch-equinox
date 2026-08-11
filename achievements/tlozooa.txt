@@ -79,3 +79,32 @@ title = Still Standing
 desc = Hold four essences without ever having fallen
 when = bits c6bf >= 4
 when = bcd c61e == 0
+
+# The linked-game arc. wIsLinkedGame ($cc01) is live during play; the
+# global flags ($c6d0 + GLOBALFLAG/8, bit GLOBALFLAG%8) are on the file,
+# so end-of-game flags unlock the next time that file is played.
+
+[linked-quest]
+title = Two Worlds Entwined
+desc = Begin a linked quest with a secret from Holodrum
+when = byte cc01 >= 1
+
+[finished]
+title = Hero of Labrynna
+desc = See the credits roll
+when = flag c6d2 4
+
+[ganon-ending]
+title = The Darkness Behind It All
+desc = Face what waited behind both oracles — the true ending
+when = flag c6d0 2
+
+[hero-file]
+title = The Hero's Path
+desc = Begin a game with the Hero's Secret
+when = byte c613 >= 1
+
+[maku-saved]
+title = Rooted in Time
+desc = Save the Maku Tree
+when = flag c6d2 2
