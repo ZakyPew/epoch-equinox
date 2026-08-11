@@ -51,12 +51,38 @@ extern "C" void voxel_menu_draw(void) {
                         "cell edge: 0 makes hard blocks, high makes tufts.");
     ImGui::SliderFloat("Tilt height", &t->tilt_scale, 0.2f, 2.5f, "%.2f");
 
+    /* The game says a cell is solid; the tile art says how tall. Voting
+     * per 8px tile gives one cliff a ragged top, so a connected mass
+     * votes once instead. Off restores the per-tile answer. */
+    bool unify = t->cliff_unify > 0.5f;
+    if (ImGui::Checkbox("One height per cliff", &unify)) {
+        t->cliff_unify = unify ? 1.0f : 0.0f;
+    }
+    ImGui::TextDisabled("Connected solid cells agree on one height, so a\n"
+                        "cliff stops coming out notched. Off votes per tile.");
+
     ImGui::Spacing();
     ImGui::TextDisabled("Chase camera");
     ImGui::SliderFloat("Distance", &t->chase_back, 20.0f, 130.0f, "%.0f");
     ImGui::SliderFloat("Height", &t->chase_height, 6.0f, 90.0f, "%.0f");
     ImGui::SliderFloat("Field of view", &t->chase_fov, 0.35f, 1.20f, "%.2f");
     ImGui::SliderFloat("Vertical scale", &t->chase_hpx, 0.8f, 9.0f, "%.2f");
+
+    /* The camera holds still by default and is recentred on request. The
+     * checkbox is the old walk-follow, off unless someone wants it. */
+    bool follow = t->chase_follow > 0.0f;
+    if (ImGui::Checkbox("Auto-swing behind Link while walking", &follow)) {
+        t->chase_follow = follow ? 0.06f : 0.0f;
+    }
+    if (follow) {
+        ImGui::SliderFloat("Auto-swing speed", &t->chase_follow,
+                           0.01f, 0.40f, "%.3f");
+    }
+    ImGui::SliderFloat("Recentre speed", &t->chase_recenter,
+                       0.02f, 0.60f, "%.2f");
+    ImGui::TextDisabled("Right stick (or Q/E) turns the camera and it stays\n"
+                        "put. Click the right stick (or C) to swing behind\n"
+                        "Link -- hold it to keep following him.");
     ImGui::SliderFloat("Fog begins", &t->fog_start, 0.0f, 200.0f, "%.0f");
     ImGui::SliderFloat("Fog strength", &t->fog_max, 0.0f, 256.0f, "%.0f");
 

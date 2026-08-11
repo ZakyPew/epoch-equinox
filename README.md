@@ -113,9 +113,11 @@ button labels for Xbox, PlayStation, Switch Pro and Joy-Con.
 | `F6` / `F7` | Previous / next savestate slot | — |
 | `F1` | Toggle FPS overlay | — |
 | `M` | Mute | — |
+| **`F2`** | **Achievements & Secrets panel** | — |
 | **`F3`** | **Cycle voxel mode** (off → 15° → 30° → 45° → chase cam) | — |
 | **`R`** *(hold)* | **Rewind** — step back through the last ~12 seconds | — |
 | **`F9`** | Jump back to the moment you entered this room | — |
+| **`C`** | Chase cam: swing behind Link (hold to keep following) | **R3** |
 
 The Esc menu opens with a **Display** section — fullscreen, scaling mode
 (Pixel Perfect / Aspect Fit / Aspect Fill / Stretch), scale filter, window
@@ -200,11 +202,19 @@ at the addresses named by
 - the status bar stays flat and composites back on top
 - **chase cam** (`F3` to the last stop): a third-person camera floating
   behind Link, raycasting the same heightfield in true perspective —
-  distance fog and depth-scaled sprite billboards. It swings around behind
-  him while he **walks**, eased over about a second, and ignores a standing
-  turn, so tapping a direction to face a sign doesn't whip the world
-  around. The right stick (or `Q`/`E`) takes the camera and holds it there
-  until he walks again
+  distance fog and depth-scaled sprite billboards. **The camera orbits Link
+  and the stick owns it**: the right stick (or `Q`/`E`) swings it and it
+  stays exactly where you left it while he runs around underneath.
+  Recentring is asked for, never assumed — click the right stick (or press
+  `C`) to swing behind him, hold it to keep following. If you preferred the
+  camera taking itself back behind him as he walks, the Esc menu has a
+  checkbox for it (off by default)
+- **a cliff is one object**: the game says only that a cell is *solid* — how
+  tall it looks came from the tile's own colours, voted per 8px tile, so one
+  cliff could come out with a ragged top and notches where a shaded tile
+  disagreed with its neighbours. A connected mass now votes once, and the
+  diagonal shapes that sit inside a wall bevel instead of dropping to the
+  floor. "One height per cliff" in the Esc menu turns it off
 - **the world persists**: every room you visit is remembered, and the chase
   camera draws remembered neighbours past the room border — terrain, cliff
   faces, tree masses — so the world runs to the horizon and fills in as
@@ -327,9 +337,10 @@ kinds over WRAM addresses) is documented in
 `EPOCH_TOAST_TEST=1` pops a sample toast at boot so you can see the card
 without earning anything.
 
-Browse them in two places: **Achievements** in the launcher menu, and an
-Achievements page in the in-game Esc menu — earned entries lit, the rest
-dimmed, with the tally up top. Each achievement can carry its own 48×48
+Browse them in two places: **Achievements** in the launcher menu, and the
+in-game panel on **F2** — earned entries lit, the rest dimmed, with the
+tally up top. (The panel is ours; the emulator's Esc menu stays for
+display and emulator settings.) Each achievement can carry its own 48×48
 icon (`achievements/icons/<cart>/<id>.pam`, with real per-pixel alpha); the
 gilded card and the lists use it, and anything without art gets the
 built-in medal. The wanted list and exact spec live in
@@ -339,6 +350,33 @@ Nothing can unlock outside actual play: evaluation is gated on both
 `wLinkMaxHealth` and `wScrollMode`, so the title screen and the file
 select — which loads a file's data into WRAM just to draw its preview
 card — stay inert.
+
+## Secrets
+
+Oracle secrets are not universal passwords: every save carries a random
+Game ID, and every code is encoded against it with a cipher and a
+checksum, so a code from a website will not validate on your file.
+**Secrets** in the launcher menu generates yours — from your own save,
+using the game's own algorithm (ported from the
+[disassembly](https://github.com/Stewmath/oracles-disasm)'s bank 3):
+
+- the **game secret** that starts your linked game in the other cart
+  (or the hero's secret, if this file is already linked),
+- the **ring secret** that carries your ring collection across,
+- and all twenty **NPC memory secrets** with their return codes —
+  labelled by who to tell, so the tedious half of linking is a
+  read-off instead of a scavenger hunt.
+
+Codes are spelled in the games' symbol alphabet (♠ ♥ ● ▲ → …), grouped
+in fives the way the entry grid expects.
+
+**Or let it type them.** Open the game's own secret screen, press F2 for
+the panel, pick a secret on the Secrets tab, and the cursor walks the
+grid and enters it — twenty symbols without touching the d-pad. It steers
+by reading the game's own cursor position each frame rather than writing
+into its memory, so if the game disagrees, the game wins. A file that has never used a
+secret has no Game ID yet; its codes are accepted by any file, which is
+the game's own behaviour, and the dialog says so when it applies.
 
 ## Mods
 

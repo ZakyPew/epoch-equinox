@@ -23,6 +23,8 @@ The player itself is done and distributable — everything below builds on it.
 | **Rewind** | Hold `R` for ~12 s of history; `F9` restarts the current room |
 | **Self-update** | The launcher notices a new release, shows its notes, and installs it over itself — ROMs, mods, covers and saves untouched |
 | **Achievements** | Data-driven packs watched over WRAM, popped as Steam-style toasts over the window; moddable, one text file per pack |
+| **Auto-entered secrets** | The in-game panel walks the password grid and types any secret for you |
+| **Secret generator** | Every code your save can produce — game, ring, and all twenty NPC secrets — generated in the launcher with the game's own cipher |
 | **Quality of life** | 40 ms audio latency, instant boot past the splashes, display options with a live scale readout |
 
 ---
@@ -31,21 +33,25 @@ The player itself is done and distributable — everything below builds on it.
 
 Highest value per unit of work, and nothing here is blocked.
 
-### Dungeon terrain — **S**
-The voxel mode has only ever been verified outdoors. Interiors use the same
-collision data, so this is mostly *checking* rather than building: do holes
-sink, do walls read, does the scroll gate hold in large scrolling rooms.
-**Blocked on:** a battery save parked in a dungeon (`tests/saves/`).
+### Dungeon terrain — **S** *(no longer blocked)*
+`tests/saves/` has two endgame files parked inside a dungeon, and
+`VOX_DUMP_ROOM=1` prints what the renderer works from. That evidence
+corrects an earlier guess made from a screenshot: **the collision data
+indoors is fine.** In Veran's tower the gate passes and the grid comes back
+as a clean room — walls `$0F` classified solid, floor `$00` flat, doorways
+where doorways are, `$FF` boundary fill down the unused column:
 
-### Secret generator — **M**
-See [Secrets](#secrets) below. Generate valid codes from the player's own save
-and show them in the launcher.
+```
+  0F 0F 0F 0F 0F 0F 00 00 00 0F 0F 0F 0F 0F 0F FF   |OOOOOO...OOOOOO.|
+  0F 00 00 00 00 00 00 00 00 00 00 00 00 00 0F FF   |O.............O.|
+```
 
-### Achievement browser + custom icons — **S**
-The engine and toasts shipped. What remains is seeing them: a page in the
-launcher and one in the Esc menu listing earned/unearned, and per-achievement
-icons (`achievements/icons/<id>.ppm`) drawn in the toast in place of the
-built-in medal.
+So this is a *rendering* job, not a classification one. Two things to chase:
+the room reads 15 columns wide against the overworld's 10, and Link's
+camera-space anchor sits at y=169 in a room the height field treats as 128
+tall — a large scrolling room, which the screen→room mapping was never
+exercised against. Link's sprite also comes out as an untextured slab in
+there (`docs/dungeon-chase.png`), which is a billboard problem, not terrain.
 
 ### Save import / export — **S**
 The runner already keeps ordinary battery saves (`<title>.sav` beside the
@@ -55,11 +61,6 @@ backup of what it replaces) and export the current one.
 ---
 
 ## Bigger swings
-
-### Auto-entered secrets — **M**, after the generator
-Drive the in-game password screen with the runtime's input-script system so the
-player never types a code. Fiddly (cursor navigation on a symbol grid) but the
-infrastructure exists — it is how the renderer gets tested headlessly.
 
 ### Voice packs — **L**
 Dialogue open/close is already detected and text ids sit beside the flag.

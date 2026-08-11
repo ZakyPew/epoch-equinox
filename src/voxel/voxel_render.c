@@ -48,6 +48,10 @@
 
 static int g_mode = VOXEL_MODE_OFF;
 static float g_chase_yaw = -1.5708f;   /* camera heading, radians */
+/* Recentring: `held` is the button's live state, `active` survives the
+ * release so a tap finishes its swing instead of stopping half way. */
+static bool  g_recentre_held = false;
+static bool  g_recentring = false;
 static int g_scale = 3;
 static uint32_t g_out[GB_FRAMEBUFFER_SIZE * VOX_MAX_SCALE * VOX_MAX_SCALE];
 static VoxTileGrid g_grid;
@@ -84,7 +88,9 @@ static const VoxCam VOX_CAMS[VOXEL_MODE_COUNT] = {
     .chase_height = 32.0f,                  \
     .chase_fov    = 0.62f,                  \
     .chase_hpx    = 3.2f,                   \
-    .chase_follow = 0.06f,                  \
+    .chase_follow = 0.0f,                   \
+    .chase_recenter = 0.16f,                \
+    .cliff_unify = 1.0f,                    \
     .fog_start    = 70.0f,                  \
     .fog_max      = 150.0f,                 \
 }
@@ -99,6 +105,12 @@ static const VoxelTuning VOX_TUNE_DEFAULTS = VOX_TUNE_INIT;
 VoxelTuning* voxel_tuning(void) { return &g_tune; }
 
 float voxel_chase_yaw(void) { return g_chase_yaw; }
+
+void voxel_chase_recenter(bool held) {
+    if (held && !g_recentre_held) g_recentring = true;   /* on the press */
+    g_recentre_held = held;
+    if (held) g_recentring = true;
+}
 
 void voxel_tuning_reset(void) { g_tune = VOX_TUNE_DEFAULTS; }
 
@@ -120,10 +132,13 @@ void voxel_tuning_save(void) {
     fprintf(f, "footprint=%.3f\ntilt_scale=%.3f\n",
             g_tune.footprint, g_tune.tilt_scale);
     fprintf(f, "chase_back=%.3f\nchase_height=%.3f\nchase_fov=%.3f\n"
-               "chase_hpx=%.3f\nchase_follow=%.3f\nfog_start=%.3f\n"
+               "chase_hpx=%.3f\nchase_follow=%.3f\nchase_recenter=%.3f\n"
+               "cliff_unify=%.0f\n"
+               "fog_start=%.3f\n"
                "fog_max=%.3f\n",
             g_tune.chase_back, g_tune.chase_height, g_tune.chase_fov,
-            g_tune.chase_hpx, g_tune.chase_follow, g_tune.fog_start,
+            g_tune.chase_hpx, g_tune.chase_follow,
+            g_tune.chase_recenter, g_tune.cliff_unify, g_tune.fog_start,
             g_tune.fog_max);
     fclose(f);
     fprintf(stderr, "[VOXEL] tuning saved to %s\n", TUNE_PATH);
@@ -150,6 +165,8 @@ void voxel_tuning_load(void) {
         else if (!strcmp(key, "chase_fov"))    g_tune.chase_fov    = val;
         else if (!strcmp(key, "chase_hpx"))    g_tune.chase_hpx    = val;
         else if (!strcmp(key, "chase_follow")) g_tune.chase_follow = val;
+        else if (!strcmp(key, "chase_recenter")) g_tune.chase_recenter = val;
+        else if (!strcmp(key, "cliff_unify")) g_tune.cliff_unify = val;
         else if (!strcmp(key, "fog_start"))    g_tune.fog_start    = val;
         else if (!strcmp(key, "fog_max"))      g_tune.fog_max      = val;
     }
@@ -353,6 +370,113 @@ static inline uint32_t chase_tex_at(const VoxTileGrid* grid, float x, float y) {
  * painter's order only sorts sprites against each other. */
 static float s_zbuf[GB_FRAMEBUFFER_SIZE * VOX_MAX_SCALE * VOX_MAX_SCALE];
 
+/* One frame of camera aim: where Link is, and where the camera looks.
+ * Split out of render_chase so the yaw rules can be driven directly by
+ * tools/chasecam_test.c -- how a camera feels is not something a
+ * screenshot can check, but where it points is. */
+void vox_chase_step(const VoxTileGrid* grid, float* out_lx, float* out_ly) {
+    /* Hold the last known anchor through the frames where the game state
+     * is unreadable (room transitions): re-targeting a default centre made
+     * the camera swim away and back on every screen change. */
+    static float lx = 80.0f, ly = 104.0f;
+    if (grid->link_known) {
+        lx = (float)grid->link_sx;
+        ly = (float)grid->link_feet_sy;
+    }
+
+    /* Yaw: the camera orbits Link, and the stick owns it.
+     *
+     * Two earlier attempts both fought the player. Following his 4-way
+     * facing frame for frame was chaos -- a tap to read a sign whipped the
+     * world a quarter turn. Following only while he WALKED was calmer but
+     * still took the camera back every time you moved, so a look-around
+     * never survived a step.
+     *
+     * So the camera no longer takes itself anywhere. The right stick (or
+     * Q/E) swings it and it stays put -- Link runs around underneath it,
+     * which is what a free orbit should feel like. Recentring is asked
+     * for, not assumed: click the right stick (or press C) and it eases
+     * round behind him; hold it and it keeps following until you let go.
+     * chase_follow in the tuning block brings the old walk-follow back for
+     * anyone who preferred it, and defaults to 0. */
+    float turn = 0.0f;
+#ifdef GB_HAS_SDL2
+    {
+        const Uint8* keys = SDL_GetKeyboardState(NULL);
+        if (keys) {
+            if (keys[SDL_SCANCODE_Q]) turn -= 1.0f;
+            if (keys[SDL_SCANCODE_E]) turn += 1.0f;
+        }
+        SDL_GameController* pad = SDL_GameControllerFromPlayerIndex(0);
+        if (pad) {
+            Sint16 ax = SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_RIGHTX);
+            if (ax > 6000 || ax < -6000) turn += (float)ax / 32767.0f;
+        }
+        /* Recentre: right stick click, or C. Either one held keeps the
+         * camera behind him; a tap starts an ease that finishes itself. */
+        bool want_recentre = keys && keys[SDL_SCANCODE_C];
+        if (pad && SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_RIGHTSTICK))
+            want_recentre = true;
+        voxel_chase_recenter(want_recentre);
+    }
+#endif
+    {
+        /* Walking, not just facing: Link's own position has to have moved,
+         * and a room transition teleports it, so only small steps count.
+         * Only the optional walk-follow uses this. */
+        static float prev_lx = 0.0f, prev_ly = 0.0f;
+        static bool  pos_live = false;
+        static int   manual_hold = 0;
+        float dx = lx - prev_lx, dy = ly - prev_ly;
+        bool walking = pos_live && (dx * dx + dy * dy) > 0.02f &&
+                       (dx * dx + dy * dy) < 64.0f;
+        prev_lx = lx; prev_ly = ly; pos_live = true;
+
+        /* 0 up, 1 right, 2 down, 3 left -- screen yaw has +y downward,
+         * so up is -pi/2 and down is +pi/2. */
+        static const float DIR_YAW[4] = {
+            -1.5707963f, 0.0f, 1.5707963f, 3.1415927f
+        };
+        const float behind = DIR_YAW[grid->link_dir & 3];
+
+        if (turn != 0.0f) {
+            g_chase_yaw += turn * 0.055f;
+            manual_hold = 1;
+            g_recentring = false;     /* the stick always wins */
+        } else if (walking) {
+            manual_hold = 0;
+        }
+
+        /* Shortest way round, so facing left from up turns a quarter turn
+         * rather than three quarters the other way. */
+        float delta = behind - g_chase_yaw;
+        while (delta >  3.1415927f) delta -= 6.2831853f;
+        while (delta < -3.1415927f) delta += 6.2831853f;
+
+        if (g_recentring) {
+            float rate = g_tune.chase_recenter;
+            if (rate <= 0.0f) rate = 0.16f;
+            if (rate > 1.0f) rate = 1.0f;
+            g_chase_yaw += delta * rate;
+            /* A tap is done once it has arrived; a hold keeps going until
+             * the button comes up (g_recentre_held clears it). */
+            if (!g_recentre_held && delta < 0.02f && delta > -0.02f) {
+                g_chase_yaw = behind;
+                g_recentring = false;
+            }
+        } else if (g_tune.chase_follow > 0.0f && walking && !manual_hold) {
+            float rate = g_tune.chase_follow;
+            if (rate > 1.0f) rate = 1.0f;
+            g_chase_yaw += delta * rate;
+        }
+        /* Keep the angle in (-pi, pi] rather than letting a session's worth
+         * of turns wind it into the thousands, where float steps coarsen. */
+        while (g_chase_yaw >  3.1415927f) g_chase_yaw -= 6.2831853f;
+        while (g_chase_yaw <= -3.1415927f) g_chase_yaw += 6.2831853f;
+    }
+
+}
+
 static void render_chase(GBContext* ctx, const VoxTileGrid* grid,
                          const VoxSpriteList* sprites, int S, uint32_t* out) {
     const int OW = GB_SCREEN_WIDTH * S;
@@ -377,80 +501,8 @@ static void render_chase(GBContext* ctx, const VoxTileGrid* grid,
         }
     }
 
-    /* Hold the last known anchor through the frames where the game state
-     * is unreadable (room transitions): re-targeting a default centre made
-     * the camera swim away and back on every screen change. */
-    static float lx = 80.0f, ly = 104.0f;
-    if (grid->link_known) {
-        lx = (float)grid->link_sx;
-        ly = (float)grid->link_feet_sy;
-    }
-
-    /* Yaw: the camera swings around behind Link, and the stick overrules it.
-     *
-     * Following his 4-way facing frame for frame was the first attempt and
-     * played as chaos -- a tap to read a sign whipped the whole world a
-     * quarter turn. The cure is not to stop following but to follow only
-     * what a chase camera should: while he is actually WALKING, eased over
-     * about a second (chase_follow), never on a standing turn. Manual yaw
-     * -- right stick, or Q/E -- takes over the moment it is touched and
-     * holds the camera there until he walks again, the way third-person
-     * cameras hand control back after a look-around. chase_follow=0 in the
-     * tuning block restores the old fixed heading. */
-    float turn = 0.0f;
-#ifdef GB_HAS_SDL2
-    {
-        const Uint8* keys = SDL_GetKeyboardState(NULL);
-        if (keys) {
-            if (keys[SDL_SCANCODE_Q]) turn -= 1.0f;
-            if (keys[SDL_SCANCODE_E]) turn += 1.0f;
-        }
-        SDL_GameController* pad = SDL_GameControllerFromPlayerIndex(0);
-        if (pad) {
-            Sint16 ax = SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_RIGHTX);
-            if (ax > 6000 || ax < -6000) turn += (float)ax / 32767.0f;
-        }
-    }
-#endif
-    {
-        /* Walking, not just facing: Link's own position has to have moved,
-         * and a room transition teleports it, so only small steps count. */
-        static float prev_lx = 0.0f, prev_ly = 0.0f;
-        static bool  pos_live = false;
-        static int   manual_hold = 0;
-        float dx = lx - prev_lx, dy = ly - prev_ly;
-        bool walking = pos_live && (dx * dx + dy * dy) > 0.02f &&
-                       (dx * dx + dy * dy) < 64.0f;
-        prev_lx = lx; prev_ly = ly; pos_live = true;
-
-        if (turn != 0.0f) {
-            g_chase_yaw += turn * 0.055f;
-            manual_hold = 1;
-        } else if (walking) {
-            manual_hold = 0;
-        }
-
-        float rate = g_tune.chase_follow;
-        if (rate > 0.0f && walking && !manual_hold) {
-            /* 0 up, 1 right, 2 down, 3 left -- screen yaw has +y downward,
-             * so up is -pi/2 and down is +pi/2. */
-            static const float DIR_YAW[4] = {
-                -1.5707963f, 0.0f, 1.5707963f, 3.1415927f
-            };
-            int d = grid->link_dir & 3;
-            /* Shortest way round, so facing left from up turns a quarter
-             * turn rather than three quarters the other way. */
-            float delta = DIR_YAW[d] - g_chase_yaw;
-            while (delta >  3.1415927f) delta -= 6.2831853f;
-            while (delta < -3.1415927f) delta += 6.2831853f;
-            if (rate > 1.0f) rate = 1.0f;
-            g_chase_yaw += delta * rate;
-        }
-        /* Keep the angle in (-pi, pi] rather than letting a session's worth
-         * of turns wind it into the thousands, where float steps coarsen. */
-        while (g_chase_yaw >  3.1415927f) g_chase_yaw -= 6.2831853f;
-        while (g_chase_yaw <= -3.1415927f) g_chase_yaw += 6.2831853f;
-    }
+    float lx, ly;
+    vox_chase_step(grid, &lx, &ly);
 
     /* Facing north (g_chase_yaw -pi/2) the forward vector is (0,-1) -- up the
      * screen -- and the viewer's right hand points east, (+1,0). That is

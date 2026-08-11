@@ -11,7 +11,25 @@ name: Release builds
 on:
   push:
     tags: ["v*"]
+    # Build main on every merge too. The release job stays gated on a
+    # tag, so this publishes nothing -- it exists because a Windows-only
+    # compile error (MSVC and M_PI) sat unnoticed on main between
+    # releases, and the first sign of it was a release build failing.
+    branches: [main]
   workflow_dispatch:
+    inputs:
+      tag:
+        description: >-
+          Publish a release at this tag (e.g. v0.4.0). Leave empty to
+          just build. The tag is created from the dispatched ref, so
+          pushing one by hand is not required.
+        required: false
+        default: ""
+      prerelease:
+        description: "Mark the release as a pre-release"
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: write
@@ -36,16 +54,23 @@ jobs:
       # download and install driven over a server on localhost.
       - name: Updater checks
         run: python3 tools/updater_test.py
+      # The Oracle secret generator: encode/decode round trips, tamper
+      # rejection, and (when a real save is present) ground-truth layout
+      # checks. Stdlib only.
+
       # The achievements engine against a synthetic WRAM buffer, plus a
       # parse of the shipped packs.
-      - name: Achievements checks
+      - name: Achievements, secrets, typist and camera checks
         run: |
           cd build
-          cc -O2 -o achievements_test ../tools/achievements_test.c -I ../src \
-             -I _deps/gb_recompiled-src/runtime/include \
-             $(sdl2-config --cflags) libepoch_support.a _gbrt_build/libgbrt.a \
-             $(sdl2-config --libs) -lGL -lcurl -lm -lstdc++
-          ./achievements_test
+          for t in achievements_test secrets_c_test typist_test chasecam_test cliff_test; do
+            cc -O2 -o $t ../tools/$t.c -I ../src \
+               -I _deps/gb_recompiled-src/runtime/include \
+               $(sdl2-config --cflags) libepoch_support.a _gbrt_build/libgbrt.a \
+               $(sdl2-config --libs) -lGL -lcurl -lm -lstdc++
+            ./$t
+          done
+          cd .. && python3 tools/secrets_test.py
       - name: Package
         run: |
           staging=epoch-equinox-linux-x64
@@ -116,7 +141,10 @@ jobs:
 
   release:
     needs: [linux, windows]
-    if: startsWith(github.ref, 'refs/tags/')
+    # Either a pushed tag, or a dispatch that named one. The second path
+    # exists because tags cannot always be pushed from a sandboxed
+    # session; the workflow's own token can create them.
+    if: startsWith(github.ref, 'refs/tags/') || inputs.tag != ''
     runs-on: ubuntu-latest
     steps:
       # Checkout first: it cleans the workspace, so running it after the
@@ -126,12 +154,16 @@ jobs:
       # to decide whether an update exists. If the two ever disagree the
       # updater goes quietly wrong -- either never offering an update or
       # offering one forever -- so refuse to publish the mismatch.
-      - name: Version stamp matches the tag
+      - name: Resolve the tag and check the version stamp
+        id: tag
         run: |
+          tag="${{ inputs.tag }}"
+          [ -n "$tag" ] || tag="$GITHUB_REF_NAME"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
           stamped=$(sed -n 's/^APP_VERSION = "\(.*\)"$/\1/p' launcher/epoch_launcher.py)
-          echo "stamp v$stamped, tag $GITHUB_REF_NAME"
-          if [ "v$stamped" != "$GITHUB_REF_NAME" ]; then
-            echo "::error::launcher APP_VERSION is $stamped but the tag is $GITHUB_REF_NAME" >&2
+          echo "stamp v$stamped, tag $tag"
+          if [ "v$stamped" != "$tag" ]; then
+            echo "::error::launcher APP_VERSION is $stamped but the tag is $tag" >&2
             exit 1
           fi
       - uses: actions/download-artifact@v4
@@ -142,7 +174,7 @@ jobs:
       # generated pull request list underneath.
       - name: Assemble release body
         run: |
-          notes="docs/release-notes-${GITHUB_REF_NAME}.md"
+          notes="docs/release-notes-${{ steps.tag.outputs.tag }}.md"
           if [ -f "$notes" ]; then
             echo "Using $notes"
             cp "$notes" release-body.md
@@ -161,3 +193,5 @@ jobs:
             *.zip
           generate_release_notes: true
           body_path: release-body.md
+          tag_name: ${{ steps.tag.outputs.tag }}
+          prerelease: ${{ inputs.prerelease == true }}

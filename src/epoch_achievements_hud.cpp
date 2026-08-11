@@ -18,6 +18,10 @@ extern "C" {
 #include <math.h>
 #include <stdio.h>
 
+/* MSVC does not define M_PI without _USE_MATH_DEFINES, and the rest of
+ * the tree avoids the macro entirely rather than depend on that. */
+static const float EPOCH_PI = 3.14159265358979323846f;
+
 /* Timeline, in seconds of toast age. Total must stay in sync with
  * TOAST_LIFETIME in epoch_achievements.c. */
 static const float SLIDE_IN  = 0.45f;
@@ -81,7 +85,7 @@ static void draw_medal(ImDrawList* dl, float cx, float cy, float r,
     const float sr = r * 0.55f, ir = r * 0.22f;
     ImVec2 pts[10];
     for (int i = 0; i < 10; i++) {
-        const float a = (float)(i * M_PI / 5.0 - M_PI / 2.0);
+        const float a = (float)i * EPOCH_PI / 5.0f - EPOCH_PI / 2.0f;
         const float rr = (i & 1) ? ir : sr;
         pts[i] = ImVec2(cx + cosf(a) * rr, cy + sinf(a) * rr);
     }
@@ -189,20 +193,21 @@ extern "C" void epoch_achievements_hud_draw(void) {
 /* the Esc-menu page                                                   */
 /* ------------------------------------------------------------------ */
 
-extern "C" void epoch_achievements_menu_draw(void) {
+extern "C" void epoch_achievements_panel_draw(void) {
     const EaSet* set = epoch_achievements_set();
-    if (!set || set->count == 0) return;
+    if (!set || set->count == 0) {
+        ImGui::TextDisabled("No achievement pack loaded for this cart.");
+        return;
+    }
 
     int unlocked = 0, total = 0;
     epoch_achievements_progress(&unlocked, &total);
-
-    char header[64];
-    snprintf(header, sizeof(header), "Achievements  %d / %d###achievements",
-             unlocked, total);
-    if (!ImGui::CollapsingHeader(header)) return;
-
+    ImGui::Text("%d / %d earned", unlocked, total);
+    ImGui::ProgressBar(total ? (float)unlocked / (float)total : 0.0f,
+                       ImVec2(-1.0f, 0.0f));
     ImGui::TextDisabled("Earned over every playthrough of this cart. The\n"
                         "toast pops over the window, never in the game.");
+    ImGui::Separator();
     ImGui::Spacing();
 
     const float row = ImGui::GetTextLineHeight() * 2.6f;
