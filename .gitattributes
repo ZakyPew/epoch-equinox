@@ -1,0 +1,12 @@
+# Pixel art and captures are binary.
+#
+# Git's content sniffing happens to classify these correctly today --
+# every icon has a NUL byte within its first 8000 bytes, so it is left
+# alone. But a bright icon with no NUL that early would be treated as
+# text and CRLF-mangled by a Windows checkout, corrupting that one icon
+# in Windows builds only and nowhere else. Say it outright instead.
+*.ppm binary
+*.png binary
+*.gbc binary
+*.gb  binary
+*.sav binary
