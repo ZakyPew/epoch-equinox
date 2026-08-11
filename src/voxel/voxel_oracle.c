@@ -31,6 +31,7 @@
  */
 #include "voxel_internal.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -198,6 +199,35 @@ bool vox_oracle_read(GBContext* ctx, VoxOracleState* st) {
 
     st->valid = true;
     g_last_live = true;
+
+    /* VOX_DUMP_ROOM=1 prints the room the renderer is actually working
+     * from, once a second: the camera numbers that map screen to room,
+     * and the collision grid with the height class each cell becomes.
+     * Indoors and outdoors differ in ways screenshots only hint at. */
+    if (getenv("VOX_DUMP_ROOM")) {
+        static int tick = 0;
+        if ((tick++ % 60) == 0) {
+            fprintf(stderr,
+                    "\n[room] group %02X room %02X  scroll %02X  "
+                    "cam (%d,%d)  off (%d,%d)  link (%d,%d)\n",
+                    st->active_group, st->active_room, st->scroll_mode,
+                    st->cam_x, st->cam_y, st->off_x, st->off_y,
+                    st->link_x, st->link_y);
+            for (int r = 0; r < COLL_H; r++) {
+                fprintf(stderr, "  ");
+                for (int c = 0; c < COLL_W; c++)
+                    fprintf(stderr, "%02X ", st->collisions[r * COLL_W + c]);
+                fprintf(stderr, "  |");
+                for (int c = 0; c < COLL_W; c++) {
+                    static const char CH[5] = { '~', '.', 'o', 'O', '#' };
+                    uint8_t h = vox_oracle_height(
+                        st->collisions[r * COLL_W + c], VOX_H_FLOOR);
+                    fprintf(stderr, "%c", h < 5 ? CH[h] : '?');
+                }
+                fprintf(stderr, "|\n");
+            }
+        }
+    }
     return true;
 }
 
