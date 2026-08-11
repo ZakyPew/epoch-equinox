@@ -55,6 +55,14 @@ just get that one, and any other Game Boy / Game Boy Color ROM in `roms/`
 shows up too. The Oracles hashes are verified at launch; a different
 revision gets a warning.
 
+**Staying current.** The launcher checks GitHub for a newer release on
+startup and notes one in the corner if it finds it; **Updates** in the menu
+checks on demand, shows the release notes, and installs the new build in
+place. It replaces what the release ships and nothing else — your `roms/`,
+`mods/`, `covers/` and save files are left exactly as they are. Being
+offline is not an error: the startup check gives up quietly. A launcher run
+from a source checkout won't overwrite itself; use `git pull`.
+
 **Building from source** takes about a minute — no game data is involved:
 
 ```sh

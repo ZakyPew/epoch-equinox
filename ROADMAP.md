@@ -21,6 +21,7 @@ The player itself is done and distributable — everything below builds on it.
 | **Persistent world** | Every visited room is remembered; the chase cam draws remembered neighbours past the room border, so the world fills in as you explore |
 | **Mod billboard art** | A mod's `voxel/tree.ppm` / `voxel/tuft.ppm` dresses every billboard in the chase cam |
 | **Rewind** | Hold `R` for ~12 s of history; `F9` restarts the current room |
+| **Self-update** | The launcher notices a new release, shows its notes, and installs it over itself — ROMs, mods, covers and saves untouched |
 | **Quality of life** | 40 ms audio latency, instant boot past the splashes, display options with a live scale readout |
 
 ---
