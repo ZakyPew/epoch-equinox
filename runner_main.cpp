@@ -38,6 +38,8 @@ extern "C" {
 #include "platform_compat.h"
 #include "epoch_rewind.h"
 #include "epoch_achievements.h"
+#include "epoch_secrets.h"
+#include "epoch_panel.h"
 #include "epoch_overlay.h"
 #if EPOCH_HAVE_VOXEL
 #include "voxel/voxel.h"
@@ -343,6 +345,11 @@ static int run_game(const EpochGame* game, unsigned long long frame_limit) {
              * rotated into the camera's frame. */
             voxel_remap_dpad();
 #endif
+            /* After poll_events, so the injected buttons survive into
+             * the frame the cart runs; the runtime rebuilds the joypad
+             * globals from the keyboard on every poll. */
+            epoch_panel_tick(ctx);
+            epoch_secrets_tick(ctx, game->id);
             if (smooth && !ctx->frame_done && slice_cycles >= slice_cycles_budget) {
                 if (ctx->lcd_off_active || !(ctx->io[0x40] & 0x80)) {
                     gb_platform_render_lcd_off_frame();

@@ -87,6 +87,9 @@ set(EPOCH_SUPPORT_SOURCES
     src/epoch_rewind.c
     src/epoch_rewind_hud.cpp
     src/epoch_achievements.c
+    src/epoch_secrets.c
+    src/epoch_secrets_menu.cpp
+    src/epoch_panel.cpp
     src/epoch_achievements_hud.cpp
     src/epoch_overlay.cpp)
 if(EPOCH_WITH_VOXEL)

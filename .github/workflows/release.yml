@@ -39,18 +39,20 @@ jobs:
       # The Oracle secret generator: encode/decode round trips, tamper
       # rejection, and (when a real save is present) ground-truth layout
       # checks. Stdlib only.
-      - name: Secret generator checks
-        run: python3 tools/secrets_test.py
+
       # The achievements engine against a synthetic WRAM buffer, plus a
       # parse of the shipped packs.
-      - name: Achievements checks
+      - name: Achievements, secrets and typist checks
         run: |
           cd build
-          cc -O2 -o achievements_test ../tools/achievements_test.c -I ../src \
-             -I _deps/gb_recompiled-src/runtime/include \
-             $(sdl2-config --cflags) libepoch_support.a _gbrt_build/libgbrt.a \
-             $(sdl2-config --libs) -lGL -lcurl -lm -lstdc++
-          ./achievements_test
+          for t in achievements_test secrets_c_test typist_test; do
+            cc -O2 -o $t ../tools/$t.c -I ../src \
+               -I _deps/gb_recompiled-src/runtime/include \
+               $(sdl2-config --cflags) libepoch_support.a _gbrt_build/libgbrt.a \
+               $(sdl2-config --libs) -lGL -lcurl -lm -lstdc++
+            ./$t
+          done
+          cd .. && python3 tools/secrets_test.py
       - name: Package
         run: |
           staging=epoch-equinox-linux-x64

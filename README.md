@@ -113,6 +113,7 @@ button labels for Xbox, PlayStation, Switch Pro and Joy-Con.
 | `F6` / `F7` | Previous / next savestate slot | — |
 | `F1` | Toggle FPS overlay | — |
 | `M` | Mute | — |
+| **`F2`** | **Achievements & Secrets panel** | — |
 | **`F3`** | **Cycle voxel mode** (off → 15° → 30° → 45° → chase cam) | — |
 | **`R`** *(hold)* | **Rewind** — step back through the last ~12 seconds | — |
 | **`F9`** | Jump back to the moment you entered this room | — |
@@ -327,9 +328,10 @@ kinds over WRAM addresses) is documented in
 `EPOCH_TOAST_TEST=1` pops a sample toast at boot so you can see the card
 without earning anything.
 
-Browse them in two places: **Achievements** in the launcher menu, and an
-Achievements page in the in-game Esc menu — earned entries lit, the rest
-dimmed, with the tally up top. Each achievement can carry its own 48×48
+Browse them in two places: **Achievements** in the launcher menu, and the
+in-game panel on **F10** — earned entries lit, the rest dimmed, with the
+tally up top. (The panel is ours; the emulator's Esc menu stays for
+display and emulator settings.) Each achievement can carry its own 48×48
 icon (`achievements/icons/<cart>/<id>.ppm`, magenta = transparent); the
 gilded card and the lists use it, and anything without art gets the
 built-in medal. The wanted list and exact spec live in
@@ -357,7 +359,13 @@ using the game's own algorithm (ported from the
   read-off instead of a scavenger hunt.
 
 Codes are spelled in the games' symbol alphabet (♠ ♥ ● ▲ → …), grouped
-in fives the way the entry grid expects. A file that has never used a
+in fives the way the entry grid expects.
+
+**Or let it type them.** Open the game's own secret screen, press F2 for
+the panel, pick a secret on the Secrets tab, and the cursor walks the
+grid and enters it — twenty symbols without touching the d-pad. It steers
+by reading the game's own cursor position each frame rather than writing
+into its memory, so if the game disagrees, the game wins. A file that has never used a
 secret has no Game ID yet; its codes are accepted by any file, which is
 the game's own behaviour, and the dialog says so when it applies.
 
