@@ -14,12 +14,12 @@ The player itself is done and distributable — everything below builds on it.
 | **Native player** | Both Oracle carts from one binary, no game data in the repo or releases |
 | **Launcher** | Cover art, mod toggles, ROM install, controller navigation |
 | **Mods** | IPS, BPS, file overlays; stock ROM kept pristine, mods applied in memory |
-| **Voxel diorama** | Terrain from the game's real collision data, 3× internal resolution, game-state skies, domed foliage, textured faces |
+| **Voxel diorama** | Terrain from the game's real quarter-cell collision masks, 3× internal resolution, game-state skies, domed foliage, textured faces |
 | **Chase camera** | Third-person perspective raycast, camera on the right stick |
 | **Room overrides** | Hand-sculpt any room's heights in a text file; `VOXEL_EDIT=1` writes the template |
-| **Object-aware terrain** | `wRoomLayout` names what each cell *is*: trees stand as trunk-and-canopy billboards wearing their own tile art, tufts hug the ground, cliff faces tile their own rock courses |
+| **Object-aware terrain** | `wRoomLayout` names what each cell *is*: original tree art becomes separate hard canopy/trunk tiles, tufts become shallow reliefs, enclosed cliff ground becomes a raised plateau, and exposed height edges get straight tile-textured faces |
 | **Persistent world** | Every visited room is remembered; the chase cam draws remembered neighbours past the room border, so the world fills in as you explore |
-| **Mod billboard art** | A mod's `voxel/tree.ppm` / `voxel/tuft.ppm` dresses every billboard in the chase cam |
+| **Mod vegetation art** | A mod's `voxel/tree.ppm` / `voxel/tuft.ppm` replaces the source art while keeping the default world-space voxel geometry |
 | **Rewind** | Hold `R` for ~12 s of history; `F9` restarts the current room |
 | **Self-update** | The launcher notices a new release, shows its notes, and installs it over itself — ROMs, mods, covers and saves untouched |
 | **Achievements** | Data-driven packs watched over WRAM, popped as Steam-style toasts over the window; moddable, one text file per pack |
@@ -52,6 +52,16 @@ camera-space anchor sits at y=169 in a room the height field treats as 128
 tall — a large scrolling room, which the screen→room mapping was never
 exercised against. Link's sprite also comes out as an untextured slab in
 there (`docs/dungeon-chase.png`), which is a billboard problem, not terrain.
+
+### Dynamic props — **S**
+The opening-scene chest demonstrates why an object cannot be identified from
+the finished overworld map alone. Normal open/closed chest metatiles are BG
+layout objects (`$F0`/`$F1`), but the chest used in that scripted scene is an
+OAM pair (`$60`/`$62`). It therefore needs an OAM-aware compound-object pass:
+group the two authored tiles, preserve their live palette and pixels, give the
+body/lid real depth, and sort the whole object against Link by one world-space
+footpoint. The workflow and captured-state debugging steps are in
+[`docs/VOXEL_CONTRIBUTING.md`](docs/VOXEL_CONTRIBUTING.md).
 
 ### Save import / export — **S**
 The runner already keeps ordinary battery saves (`<title>.sav` beside the
@@ -118,5 +128,6 @@ Every item above is open. The ones that need an eye rather than a compiler:
 **room sculpting** (a text file per room, no build step) and **dungeon saves**
 (park a save somewhere interesting, drop it in `tests/saves/`).
 
-See [Contributing](README.md#contributing--wed-love-more-hands) for where each
-subsystem lives.
+See [Contributing](README.md#contributing--wed-love-more-hands) for the whole
+project, and the [voxel contributor guide](docs/VOXEL_CONTRIBUTING.md) for the
+renderer architecture and visual-test loop.

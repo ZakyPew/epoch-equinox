@@ -10,7 +10,12 @@
  * writes <prefix>-<frame>-flat.ppm and <prefix>-<frame>-vox.ppm.
  *
  * Env knobs: VOX_SHOT_SCALE (1-4), VOX_SHOT_STATE (resume from a savestate),
- * VOX_SHOT_NOCACHE (render as if no room had ever been visited).
+ * VOX_SHOT_NOCACHE (render as if no room had ever been visited),
+ * VOX_SHOT_TURN (one chase-camera stick impulse on the first frame),
+ * VOX_SHOT_HEIGHT (override chase eye height), VOX_SHOT_NOTREES (omit the
+ * separate vegetation pass), VOX_SHOT_FULLSCALE (render off-frames at the
+ * requested scale for timing), and VOX_DUMP_TREES (write the recovered
+ * vegetation-art contact sheet).
  */
 #include "gbrt.h"
 #include "platform_sdl.h"
@@ -33,6 +38,41 @@ static void write_ppm(const char* path, const uint32_t* fb, int w, int h) {
     }
     fclose(f);
     fprintf(stderr, "wrote %s\n", path);
+}
+
+/* VOX_DUMP_TREES=1 writes the exact 16x16 source cells and the silhouette
+ * recovered for voxel construction. The checker is outside the mask; artwork
+ * pixels are untouched. This keeps tile-faithfulness inspectable without a
+ * debugger or a live GPU capture. */
+static void write_tree_sheet(const char* path, const VoxTileGrid* grid) {
+    enum { COLS = 8, CELL = 18 };
+    int rows = (grid->tree_count + COLS - 1) / COLS;
+    if (rows < 1) rows = 1;
+    int w = COLS * CELL, h = rows * CELL;
+    uint32_t* sheet = (uint32_t*)malloc((size_t)w * h * sizeof(uint32_t));
+    if (!sheet) return;
+    for (int y = 0; y < h; y++) {
+        for (int x = 0; x < w; x++)
+            sheet[y * w + x] = ((x >> 2) ^ (y >> 2)) & 1
+                ? 0xFF202028u : 0xFF505060u;
+    }
+    for (int i = 0; i < grid->tree_count; i++) {
+        const char* kind = grid->trees[i].hcls >= VOX_H_HIGH ? "mass" : "tuft";
+        fprintf(stderr, "  vegetation %02d: screen=(%3d,%3d) joins=%X kind=%s\n",
+                i, grid->trees[i].sx, grid->trees[i].sy,
+                grid->trees[i].joins, kind);
+        int ox = (i % COLS) * CELL + 1;
+        int oy = (i / COLS) * CELL + 1;
+        for (int y = 0; y < 16; y++) {
+            for (int x = 0; x < 16; x++) {
+                int at = y * 16 + x;
+                if (grid->trees[i].solid[at])
+                    sheet[(oy + y) * w + ox + x] = grid->trees[i].tex[at];
+            }
+        }
+    }
+    write_ppm(path, sheet, w, h);
+    free(sheet);
 }
 
 int main(int argc, char* argv[]) {
@@ -106,6 +146,11 @@ int main(int argc, char* argv[]) {
     }
     static uint32_t out[GB_FRAMEBUFFER_SIZE * 16];
 
+    {
+        const char* height = getenv("VOX_SHOT_HEIGHT");
+        if (height && *height) voxel_tuning()->chase_height = (float)atof(height);
+    }
+
     for (unsigned long i = 0; i <= last; i++) {
         gb_reset_frame(ctx);
         ctx->stopped = 0;
@@ -145,6 +190,21 @@ int main(int argc, char* argv[]) {
 
         bool scraped = vox_scrape(ctx, fb, &grid, &sprites);
         if (scraped) {
+            if (wanted && getenv("VOX_DUMP_SPRITES")) {
+                for (int si = 0; si < sprites.count; si++) {
+                    const VoxSprite* s = &sprites.entries[si];
+                    fprintf(stderr,
+                            "  sprite %02d: pos=(%3d,%3d) tile=%02X "
+                            "attr=%02X tall=%d\n",
+                            si, s->x, s->y, s->tile, s->attr,
+                            s->tall ? 1 : 0);
+                }
+            }
+            if (getenv("VOX_SHOT_NOTREES")) grid.tree_count = 0;
+            if (i == 0) {
+                const char* turn = getenv("VOX_SHOT_TURN");
+                if (turn && *turn) voxel_chase_turn((float)atof(turn));
+            }
             /* VOX_SHOT_NOCACHE=1: drop the world anchor between the scrape
              * and the render, so the chase cam falls back to the edge fade.
              * The frame is otherwise identical, which is what makes a
@@ -152,8 +212,11 @@ int main(int argc, char* argv[]) {
              * pixel. The rooms stay remembered -- only this frame's view of
              * them is withheld. */
             if (getenv("VOX_SHOT_NOCACHE")) vox_world_lose();
-            vox_render(ctx, &grid, &sprites, fb, mode,
-                       wanted ? shot_scale : 1, out);
+            int render_mode = vox_scene_render_mode(mode, grid.scripted_scene);
+            vox_render(ctx, &grid, &sprites, fb, render_mode,
+                       (wanted || getenv("VOX_SHOT_FULLSCALE"))
+                           ? shot_scale : 1,
+                       out);
         }
         if (!wanted) continue;
 
@@ -165,18 +228,28 @@ int main(int argc, char* argv[]) {
                 snprintf(path, sizeof(path), "%s-%lu-vox.ppm", argv[4], i);
                 write_ppm(path, out, GB_SCREEN_WIDTH * shot_scale,
                           GB_SCREEN_HEIGHT * shot_scale);
+                if (getenv("VOX_DUMP_TREES")) {
+                    snprintf(path, sizeof(path), "%s-%lu-trees.ppm", argv[4], i);
+                    write_tree_sheet(path, &grid);
+                }
             } else {
                 fprintf(stderr, "frame %lu: scrape declined (LCD off?)\n", i);
             }
             fprintf(stderr,
                     "frame %lu: scroll=%02X menu=%02X scy=%3u scx=%3u "
-                    "camY=%u%u dirty=%02X trees=%d text=%02X dir=%d "
+                    "camY=%u%u dirty=%02X tileset=%02X/%02X trees=%d "
+                    "text=%02X cut=%02X disabled=%02X scene=%d dir=%d "
                     "link=(%d,%d) yaw=%+.3f\n",
                     i, ctx->wram[0xCD00 - 0xC000], ctx->wram[0xCBCB - 0xC000],
                     ctx->io[0x42], ctx->io[0x43],
                     ctx->hram[0x2B], ctx->hram[0x2A],
-                    ctx->wram[0xCD01 - 0xC000], grid.tree_count,
-                    ctx->wram[0xCBA0 - 0xC000], grid.link_dir,
+                    ctx->wram[0xCD01 - 0xC000],
+                    ctx->wram[0xCD23 - 0xC000],
+                    ctx->wram[0xCD24 - 0xC000], grid.tree_count,
+                    ctx->wram[0xCBA0 - 0xC000],
+                    ctx->wram[0xC2EF - 0xC000],
+                    ctx->wram[0xCC8A - 0xC000],
+                    grid.scripted_scene ? 1 : 0, grid.link_dir,
                     grid.link_sx, grid.link_feet_sy, voxel_chase_yaw());
             if (getenv("VOX_DUMP_WORLD")) {
                 /* Ask the persistent world what it knows just past each
@@ -228,6 +301,13 @@ int main(int argc, char* argv[]) {
                         fputc(grid.leafy[ty][tx] ? "wfLMH"[h] : "01234"[h],
                               stderr);
                     }
+                    fprintf(stderr, "\n");
+                }
+                for (int ty = 0; ty < VOX_TILES_H; ty++) {
+                    fprintf(stderr, "  elev%2d: ", ty);
+                    for (int tx = 0; tx < VOX_TILES_W; tx++)
+                        fputc('0' + (grid.elevation[ty][tx] > 9
+                                    ? 9 : grid.elevation[ty][tx]), stderr);
                     fprintf(stderr, "\n");
                 }
             }

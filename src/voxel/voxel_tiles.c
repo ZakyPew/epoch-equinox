@@ -15,7 +15,7 @@
 #include <string.h>
 
 /* ------------------------------------------------------------------ */
-/* mod-supplied billboard art                                          */
+/* mod-supplied alternate voxel art                                    */
 /* ------------------------------------------------------------------ */
 
 /* A 16x16 P6 PPM, packed to the framebuffer's 0xAARRGGBB. PPM because it
@@ -63,11 +63,11 @@ bad:
     return false;
 }
 
-/* Billboard art from an enabled mod: voxel/tree.ppm dresses every tree,
- * voxel/tuft.ppm every bush and grass tuft. Probed once and cached --
- * mods are fixed at launch, same as the ROM bytes they patch. The canopy
- * palette (lit/dark/bark) is pulled from whatever art is worn, so a modded
- * canopy gets a matching trunk for free. */
+/* Vegetation source art from an enabled mod: voxel/tree.ppm dresses every
+ * tree, voxel/tuft.ppm every bush and grass tuft. Probed once and cached --
+ * mods are fixed at launch, same as the ROM bytes they patch. The renderer
+ * still turns the result into fixed geometry and derives the trunk tile from
+ * the supplied source pixels. */
 static const uint32_t* vox_mod_tree_art(bool is_tree) {
     static uint32_t tex[2][16 * 16];
     static int state[2] = {0, 0};   /* 0 unprobed, 1 loaded, -1 absent */
@@ -79,10 +79,252 @@ static const uint32_t* vox_mod_tree_art(bool is_tree) {
                                path, sizeof(path)) &&
             load_ppm_16(path, tex[k])) {
             state[k] = 1;
-            fprintf(stderr, "[VOXEL] billboard art from mod: %s\n", path);
+            fprintf(stderr, "[VOXEL] vegetation art from mod: %s\n", path);
         }
     }
     return state[k] == 1 ? tex[k] : NULL;
+}
+
+static int foliage_luma(uint32_t c) {
+    int r = (int)((c >> 16) & 0xFFu);
+    int g = (int)((c >> 8) & 0xFFu);
+    int b = (int)(c & 0xFFu);
+    return (r * 30 + g * 59 + b * 11) / 100;
+}
+
+/* Build the transparent-looking silhouette that lets an overhead room tile
+ * become a solid pixel-art object. BG tiles have no alpha, so transparency
+ * has to be recovered from context: find the nearest ordinary ground tile,
+ * collect its light/mid colours, then flood only matching pixels inward from
+ * the object's border. An outline that encloses the tree is therefore kept
+ * even when the same dark ink also appears in the grass or snow texture.
+ *
+ * This is deliberately a presentation mask. The room layout has already
+ * proved that the cell is vegetation; collision and gameplay never consult
+ * this result. */
+static bool tree_bg_match(uint32_t c, const uint32_t* colours, int count) {
+    for (int i = 0; i < count; i++) {
+        if (colours[i] == c) return true;
+    }
+    return false;
+}
+
+static void tree_relief_mask(const VoxTileGrid* grid, int tx0, int ty0,
+                             VoxTree* tree) {
+    uint32_t ground_colours[64];
+    int ground_count = 0;
+    int bx = -1, by = -1, best = 1000000;
+    const int first_world_tile = grid->hud_rows >> 3;
+
+    /* Adjacent high vegetation is a drawn forest/tree-line structure. Keep
+     * each complete 16x16 source cell: the renderer lays every one onto a
+     * canopy tile, and the original edge variants still join into the same
+     * authored treeline. Lone trees and low tufts take the alpha-recovery
+     * route below. */
+    tree->joins = 0;
+    if (!tree->custom_art && tree->hcls >= VOX_H_HIGH) {
+        if (tx0 > 0 && grid->treecell[ty0][tx0 - 1])
+            tree->joins |= VOX_TREE_JOIN_W;
+        if (tx0 + 2 < VOX_TILES_W && grid->treecell[ty0][tx0 + 2])
+            tree->joins |= VOX_TREE_JOIN_E;
+        if (ty0 > first_world_tile && grid->treecell[ty0 - 1][tx0])
+            tree->joins |= VOX_TREE_JOIN_N;
+        if (ty0 + 2 < VOX_TILES_H && grid->treecell[ty0 + 2][tx0])
+            tree->joins |= VOX_TREE_JOIN_S;
+        if (tree->joins) {
+            memset(tree->solid, 1, sizeof(tree->solid));
+            return;
+        }
+    }
+
+    if (!tree->custom_art) {
+        for (int sy = first_world_tile; sy < VOX_TILES_H; sy++) {
+            for (int sx = 0; sx < VOX_TILES_W; sx++) {
+                if (grid->treecell[sy][sx] || grid->leafy[sy][sx] ||
+                    grid->height[sy][sx] == VOX_H_WATER ||
+                    grid->height[sy][sx] > VOX_H_LOW)
+                    continue;
+                int dx = sx - tx0, dy = sy - ty0;
+                int score = dx * dx + dy * dy;
+                if (score < best) { best = score; bx = sx; by = sy; }
+            }
+        }
+    }
+
+    if (bx >= 0) {
+        for (int y = 0; y < 8; y++) {
+            for (int x = 0; x < 8; x++) {
+                uint32_t c = grid->tex[(by * 8 + y) * VOX_TEX_W + bx * 8 + x];
+                /* The darkest shared colour is usually outline ink. It may
+                 * occur in the ground tile, but must not punch holes through
+                 * the recovered object silhouette. */
+                if (foliage_luma(c) < 52) continue;
+                int k;
+                for (k = 0; k < ground_count && ground_colours[k] != c; k++) {}
+                if (k == ground_count && ground_count < 64)
+                    ground_colours[ground_count++] = c;
+            }
+        }
+    }
+
+    /* A custom tile has no matching live ground. Treat its most common light
+     * border colour as the transparent surround when one clearly exists. */
+    if (ground_count == 0) {
+        uint32_t border_colours[64];
+        int border_counts[64];
+        int n = 0;
+        for (int p = 0; p < 16; p++) {
+            int at[4] = {p, 15 * 16 + p, p * 16, p * 16 + 15};
+            for (int q = 0; q < 4; q++) {
+                uint32_t c = tree->tex[at[q]];
+                if (foliage_luma(c) < 52) continue;
+                int k;
+                for (k = 0; k < n && border_colours[k] != c; k++) {}
+                if (k == n && n < 64) {
+                    border_colours[n] = c;
+                    border_counts[n] = 0;
+                    n++;
+                }
+                if (k < n) border_counts[k]++;
+            }
+        }
+        int pick = -1;
+        for (int i = 0; i < n; i++) {
+            if (pick < 0 || border_counts[i] > border_counts[pick]) pick = i;
+        }
+        if (pick >= 0 && border_counts[pick] >= 6)
+            ground_colours[ground_count++] = border_colours[pick];
+    }
+
+    uint8_t outside[16 * 16] = {0};
+    int queue[16 * 16], qread = 0, qwrite = 0;
+#define SEED_BG(AT)                                                        \
+    do {                                                                   \
+        int _at = (AT);                                                    \
+        if (!outside[_at] &&                                               \
+            tree_bg_match(tree->tex[_at], ground_colours, ground_count)) { \
+            outside[_at] = 1;                                              \
+            queue[qwrite++] = _at;                                         \
+        }                                                                  \
+    } while (0)
+    for (int p = 0; p < 16; p++) {
+        SEED_BG(p);
+        SEED_BG(15 * 16 + p);
+        SEED_BG(p * 16);
+        SEED_BG(p * 16 + 15);
+    }
+#undef SEED_BG
+
+    while (qread < qwrite) {
+        int at = queue[qread++];
+        int x = at & 15, y = at >> 4;
+        const int nx[4] = {x - 1, x + 1, x, x};
+        const int ny[4] = {y, y, y - 1, y + 1};
+        for (int k = 0; k < 4; k++) {
+            if (nx[k] < 0 || nx[k] >= 16 || ny[k] < 0 || ny[k] >= 16)
+                continue;
+            int next = ny[k] * 16 + nx[k];
+            if (outside[next] ||
+                !tree_bg_match(tree->tex[next], ground_colours, ground_count))
+                continue;
+            outside[next] = 1;
+            queue[qwrite++] = next;
+        }
+    }
+
+    int solids = 0;
+    for (int i = 0; i < 16 * 16; i++) {
+        tree->solid[i] = outside[i] ? 0 : 1;
+        solids += tree->solid[i] != 0;
+    }
+    /* A recognised room object must never vanish because its palette happens
+     * to match the nearest floor. A tiny remainder means the inferred alpha
+     * was not trustworthy; retain the whole original tile as a relief box. */
+    if (solids < 20) memset(tree->solid, 1, sizeof(tree->solid));
+}
+
+/* Same contextual alpha recovery for a wide authored facade strip. The
+ * source map has no transparency: the light ground visible around Impa's
+ * roots/door is merely another palette colour. Flooding only matching
+ * colours connected to the strip edge removes that surround while keeping
+ * enclosed highlights on the canopy and door. */
+static void structure_strip_mask(const VoxTileGrid* grid, int tx0, int ty0,
+                                 const uint32_t* tex, uint8_t* solid) {
+    uint32_t ground_colours[64];
+    int ground_count = 0;
+    int bx = -1, by = -1, best = 1000000;
+    const int first_world_tile = grid->hud_rows >> 3;
+    for (int sy = first_world_tile; sy < VOX_TILES_H; sy++) {
+        for (int sx = 0; sx < VOX_TILES_W; sx++) {
+            if (grid->structurecell[sy][sx] || grid->leafy[sy][sx] ||
+                grid->height[sy][sx] == VOX_H_WATER ||
+                grid->height[sy][sx] > VOX_H_LOW)
+                continue;
+            int dx = sx - tx0, dy = sy - ty0;
+            int score = dx * dx + dy * dy;
+            if (score < best) { best = score; bx = sx; by = sy; }
+        }
+    }
+    if (bx >= 0) {
+        for (int y = 0; y < 8; y++) {
+            for (int x = 0; x < 8; x++) {
+                uint32_t c = grid->tex[(by * 8 + y) * VOX_TEX_W + bx * 8 + x];
+                if (foliage_luma(c) < 52) continue;
+                int k;
+                for (k = 0; k < ground_count && ground_colours[k] != c; k++) {}
+                if (k == ground_count && ground_count < 64)
+                    ground_colours[ground_count++] = c;
+            }
+        }
+    }
+
+    uint8_t outside[VOX_STRUCTURE_W * VOX_STRUCTURE_H] = {0};
+    int queue[VOX_STRUCTURE_W * VOX_STRUCTURE_H];
+    int qread = 0, qwrite = 0;
+#define SEED_STRUCTURE_BG(AT)                                             \
+    do {                                                                  \
+        int _at = (AT);                                                   \
+        if (!outside[_at] &&                                              \
+            tree_bg_match(tex[_at], ground_colours, ground_count)) {      \
+            outside[_at] = 1;                                             \
+            queue[qwrite++] = _at;                                        \
+        }                                                                 \
+    } while (0)
+    for (int x = 0; x < VOX_STRUCTURE_W; x++) {
+        SEED_STRUCTURE_BG(x);
+        SEED_STRUCTURE_BG((VOX_STRUCTURE_H - 1) * VOX_STRUCTURE_W + x);
+    }
+    for (int y = 0; y < VOX_STRUCTURE_H; y++) {
+        SEED_STRUCTURE_BG(y * VOX_STRUCTURE_W);
+        SEED_STRUCTURE_BG(y * VOX_STRUCTURE_W + VOX_STRUCTURE_W - 1);
+    }
+#undef SEED_STRUCTURE_BG
+
+    while (qread < qwrite) {
+        int at = queue[qread++];
+        int x = at % VOX_STRUCTURE_W, y = at / VOX_STRUCTURE_W;
+        const int nx[4] = {x - 1, x + 1, x, x};
+        const int ny[4] = {y, y, y - 1, y + 1};
+        for (int k = 0; k < 4; k++) {
+            if (nx[k] < 0 || nx[k] >= VOX_STRUCTURE_W ||
+                ny[k] < 0 || ny[k] >= VOX_STRUCTURE_H)
+                continue;
+            int next = ny[k] * VOX_STRUCTURE_W + nx[k];
+            if (outside[next] ||
+                !tree_bg_match(tex[next], ground_colours, ground_count))
+                continue;
+            outside[next] = 1;
+            queue[qwrite++] = next;
+        }
+    }
+
+    int solids = 0;
+    for (int i = 0; i < VOX_STRUCTURE_W * VOX_STRUCTURE_H; i++) {
+        solid[i] = outside[i] ? 0 : 1;
+        solids += solid[i] != 0;
+    }
+    if (solids < 80)
+        memset(solid, 1, VOX_STRUCTURE_W * VOX_STRUCTURE_H);
 }
 
 /* ------------------------------------------------------------------ */
@@ -268,12 +510,13 @@ static int score_origin(GBContext* ctx, const uint32_t* fb, unsigned map_base,
 
 /* One cliff, one height.
  *
- * The game says only that a cell is solid ($0F); how TALL it is comes from
- * the tile's own colours, and that vote happens per 8x8 tile. A cliff is
- * one object made of many tiles whose art varies along its length -- lit
- * tops, shaded faces, the odd decorated block -- so some tiles clear the
- * "tall" threshold and their neighbours do not, and the cliff comes out
- * with a ragged top and notches bitten out of it.
+ * The game says exactly which 8x8 quadrants are solid; how TALL the resulting
+ * object should look is not encoded in the top-down map. That last choice
+ * comes from the tile art, and the vote initially happens per 8x8 quadrant.
+ * A cliff is one object made of many tiles whose art varies along its length
+ * -- lit tops, shaded faces, the odd decorated block -- so some quadrants
+ * clear the "tall" threshold and their neighbours do not, and the cliff
+ * comes out with a ragged top.
  *
  * So let a connected mass vote once: flood-fill each region of MID/HIGH
  * cells, count how many wanted HIGH, and give the whole region the
@@ -328,37 +571,150 @@ void vox_unify_solid_masses(uint8_t height[VOX_TILES_H][VOX_TILES_W]) {
         }
     }
 
-    /* Now the diagonals. The partial collision shapes ($01-$0E) that make
-     * a cliff's corners and sloped edges classify as LOW, which is right
-     * for a lip out in the open and badly wrong in the middle of a wall:
-     * a real Seasons room reads
-     *
-     *     0F 0F 0F 0C 0F 0F 0C 0F 0F 0F   |OOOoOOoOOO|
-     *
-     * so the wall gets two notches bitten clean out of it. Lift a LOW cell
-     * that touches a tall mass to one step below it -- still a bevel, so
-     * the slope stays readable, but no longer a hole. A LOW beside MID is
-     * already one step down, so it stays. */
-    {
-        uint8_t lifted[VOX_TILES_H][VOX_TILES_W];
-        memcpy(lifted, height, sizeof(lifted));
-        for (int y = 0; y < VOX_TILES_H; y++) {
-            for (int x = 0; x < VOX_TILES_W; x++) {
-                if (height[y][x] != VOX_H_LOW) continue;
-                bool tall = (x > 0                 && height[y][x - 1] == VOX_H_HIGH) ||
-                            (x < VOX_TILES_W - 1   && height[y][x + 1] == VOX_H_HIGH) ||
-                            (y > 0                 && height[y - 1][x] == VOX_H_HIGH) ||
-                            (y < VOX_TILES_H - 1   && height[y + 1][x] == VOX_H_HIGH);
-                if (tall) lifted[y][x] = VOX_H_MID;
+}
+
+/* Find walkable shelves enclosed by real architecture. The Oracles collision
+ * grid tells us where the cliff lip blocks Link, but not that the ordinary
+ * floor behind the lip is raised to the lip's top. At 8px resolution those lips
+ * divide the room into floor regions. The broadest region is the outdoor
+ * datum; a smaller region with a substantial non-vegetation wall boundary is
+ * a plateau. Its base height class comes from the bordering cliff tiles, so a
+ * MID lip produces a MID shelf and a HIGH lip produces a HIGH shelf.
+ *
+ * Tree cells participate in the flood. A tree line can block Link without
+ * changing the land height, so treating it as a region boundary creates fake
+ * mesas in forest clearings. Water separates regions but never votes for a
+ * plateau. */
+void vox_infer_plateaus(VoxTileGrid* grid) {
+    enum { MAX_CELLS = VOX_TILES_W * VOX_TILES_H };
+    int16_t label[VOX_TILES_H][VOX_TILES_W];
+    int16_t queue[MAX_CELLS][2];
+    int ground[MAX_CELLS], mid_edges[MAX_CELLS], high_edges[MAX_CELLS];
+    memset(label, 0xFF, sizeof(label));
+    memset(ground, 0, sizeof(ground));
+    memset(mid_edges, 0, sizeof(mid_edges));
+    memset(high_edges, 0, sizeof(high_edges));
+    memset(grid->elevation, 0, sizeof(grid->elevation));
+
+    int first_y = (grid->hud_rows + grid->fine_y) >> 3;
+    int room_cols = (VOX_ROOM_W + grid->fine_x + 7) >> 3;
+    int room_rows = (VOX_ROOM_H + grid->fine_y + 7) >> 3;
+    int last_x = room_cols < VOX_TILES_W ? room_cols : VOX_TILES_W;
+    int last_y = first_y + room_rows;
+    if (last_y > VOX_TILES_H) last_y = VOX_TILES_H;
+
+#define PLATEAU_OPEN(Y, X)                                                \
+    (grid->treecell[(Y)][(X)] ||                                         \
+     grid->height[(Y)][(X)] == VOX_H_FLOOR ||                            \
+     grid->height[(Y)][(X)] == VOX_H_LOW)
+
+    int regions = 0;
+    static const int DX[4] = {1, -1, 0, 0};
+    static const int DY[4] = {0, 0, 1, -1};
+    for (int sy = first_y; sy < last_y; sy++) {
+        for (int sx = 0; sx < last_x; sx++) {
+            if (label[sy][sx] >= 0 || !PLATEAU_OPEN(sy, sx)) continue;
+            int read = 0, write = 0;
+            queue[write][0] = (int16_t)sx;
+            queue[write][1] = (int16_t)sy;
+            write++;
+            label[sy][sx] = (int16_t)regions;
+            while (read < write) {
+                int x = queue[read][0], y = queue[read][1];
+                read++;
+                if (!grid->treecell[y][x]) ground[regions]++;
+                for (int k = 0; k < 4; k++) {
+                    int nx = x + DX[k], ny = y + DY[k];
+                    if (nx < 0 || nx >= last_x ||
+                        ny < first_y || ny >= last_y)
+                        continue;
+                    if (PLATEAU_OPEN(ny, nx)) {
+                        if (label[ny][nx] < 0) {
+                            label[ny][nx] = (int16_t)regions;
+                            queue[write][0] = (int16_t)nx;
+                            queue[write][1] = (int16_t)ny;
+                            write++;
+                        }
+                    } else if (!grid->treecell[ny][nx] &&
+                               grid->height[ny][nx] >= VOX_H_MID) {
+                        if (grid->height[ny][nx] >= VOX_H_HIGH)
+                            high_edges[regions]++;
+                        else
+                            mid_edges[regions]++;
+                    }
+                }
+            }
+            regions++;
+        }
+    }
+
+    int datum = -1;
+    for (int r = 0; r < regions; r++) {
+        if (datum < 0 || ground[r] > ground[datum]) datum = r;
+    }
+    for (int y = first_y; y < last_y; y++) {
+        for (int x = 0; x < last_x; x++) {
+            int r = label[y][x];
+            if (r >= 0 && r != datum && ground[r] >= 4 &&
+                mid_edges[r] + high_edges[r] >= 4) {
+                grid->elevation[y][x] =
+                    high_edges[r] >= mid_edges[r] ? VOX_H_HIGH : VOX_H_MID;
             }
         }
-        memcpy(height, lifted, sizeof(lifted));
     }
+
+    /* Put compact props on the shelf they occupy. Cliff rims themselves
+     * have elevated ground on only one side and stay at base zero; their
+     * existing surface then meets the plateau exactly instead of
+     * becoming a second wall stacked on top. */
+    for (int pass = 0; pass < 2; pass++) {
+        uint8_t next[VOX_TILES_H][VOX_TILES_W];
+        memcpy(next, grid->elevation, sizeof(next));
+        for (int y = first_y; y < last_y; y++) {
+            for (int x = 0; x < last_x; x++) {
+                if (grid->elevation[y][x] || grid->treecell[y][x] ||
+                    grid->height[y][x] < VOX_H_MID)
+                    continue;
+                int raised_mid = 0, raised_high = 0, low_open = 0;
+                for (int k = 0; k < 4; k++) {
+                    int nx = x + DX[k], ny = y + DY[k];
+                    if (nx < 0 || nx >= last_x ||
+                        ny < first_y || ny >= last_y)
+                        continue;
+                    if (grid->elevation[ny][nx] >= VOX_H_HIGH)
+                        raised_high++;
+                    else if (grid->elevation[ny][nx] >= VOX_H_MID)
+                        raised_mid++;
+                    else if (PLATEAU_OPEN(ny, nx)) low_open++;
+                }
+                if (raised_mid + raised_high >= 3 && low_open == 0) {
+                    next[y][x] = raised_high >= raised_mid
+                        ? VOX_H_HIGH : VOX_H_MID;
+                }
+            }
+        }
+        memcpy(grid->elevation, next, sizeof(next));
+    }
+#undef PLATEAU_OPEN
 }
 
 bool vox_scrape(GBContext* ctx, const uint32_t* fb, VoxTileGrid* grid,
                 VoxSpriteList* sprites) {
     if (!ctx || !ctx->vram || !ctx->oam || !ctx->io || !ctx->ppu) return false;
+
+    /* Dialog frames deliberately reuse the last complete world scrape. Keep
+     * the screen-space metadata that belongs to that texture alongside it:
+     * overwriting only hud_rows/fine scroll before the freeze made the old
+     * HUD tiles become terrain, and dropping scripted_scene switched a
+     * frozen stage diorama back through the chase projection. */
+    static bool s_have_world = false;
+    const int held_hud_rows = s_have_world ? grid->hud_rows : 0;
+    const uint8_t held_scx = s_have_world ? grid->scx : 0;
+    const uint8_t held_scy = s_have_world ? grid->scy : 0;
+    const uint8_t held_fine_x = s_have_world ? grid->fine_x : 0;
+    const uint8_t held_fine_y = s_have_world ? grid->fine_y : 0;
+    const bool held_scripted_scene =
+        s_have_world ? grid->scripted_scene : false;
 
     uint8_t lcdc = io_reg(ctx, 0x40);
     if (!(lcdc & 0x80)) return false;   /* LCD off */
@@ -415,6 +771,7 @@ bool vox_scrape(GBContext* ctx, const uint32_t* fb, VoxTileGrid* grid,
      * screen to the colour classifier, whose guessed terrain flickers for
      * the half-second of every room walk. */
     bool oracle_cart = oracle.profile_matched;
+    grid->scripted_scene = oracle_cart && oracle.scripted_scene;
     /* Hand the screen back untouched whenever the cart is showing
      * something that isn't terrain: a menu, or no room at all (title,
      * file select, cutscenes). */
@@ -428,7 +785,6 @@ bool vox_scrape(GBContext* ctx, const uint32_t* fb, VoxTileGrid* grid,
      * box by diffing the composed frame against the frozen texture, and
      * let the renderer float it flat on top. (Without a frozen world to
      * show -- dialog on the very first frames -- fall back to flat.) */
-    static bool s_have_world = false;
     /* True when this scrape jumps to the sprite scan with the world grid
      * FROZEN (dialog over a live room). The tree extraction below the
      * label must not run then: it would match the frozen previous room's
@@ -441,6 +797,17 @@ bool vox_scrape(GBContext* ctx, const uint32_t* fb, VoxTileGrid* grid,
         if (!s_have_world) {
             grid->flat = true;
         } else {
+            /* `tex`, heights, trees and sky are still the previous complete
+             * world. Restore their coordinate system and camera choice too.
+             * The live framebuffer remains current and supplies the dialog
+             * rectangle and HUD below. */
+            grid->hud_rows = held_hud_rows;
+            grid->scx = held_scx;
+            grid->scy = held_scy;
+            grid->fine_x = held_fine_x;
+            grid->fine_y = held_fine_y;
+            grid->scripted_scene =
+                grid->scripted_scene || held_scripted_scene;
             grid->text_overlay = true;
             int y0 = GB_SCREEN_HEIGHT, y1 = -1, x0 = GB_SCREEN_WIDTH, x1 = -1;
             for (int y = grid->hud_rows; y < GB_SCREEN_HEIGHT; y++) {
@@ -550,11 +917,13 @@ bool vox_scrape(GBContext* ctx, const uint32_t* fb, VoxTileGrid* grid,
     /* Link's screen position, from his room position and the camera. His
      * feet row is where his shadow falls -- z does not move it. */
     grid->link_known = use_oracle;
+    grid->link_item_get = use_oracle &&
+        vox_oracle_link_holds_item((uint8_t)oracle.link_state);
     if (use_oracle) {
-        grid->link_sx = oracle.link_x - oracle.cam_x + oracle.off_x;
+        grid->link_sx = oracle.link_x - oracle.cam_x - oracle.off_x;
         /* +8 calibrated against live OAM: w1Link.y sits 8px above the
          * sprite's bottom edge (feet=80 for link_y=56 with a 16px HUD). */
-        grid->link_feet_sy = oracle.link_y - oracle.cam_y + oracle.off_y
+        grid->link_feet_sy = oracle.link_y - oracle.cam_y - oracle.off_y
                              + grid->hud_rows + 8;
         grid->link_jump = oracle.link_z < 0 ? -oracle.link_z : 0;
         grid->link_dir = oracle.link_dir;
@@ -611,7 +980,7 @@ bool vox_scrape(GBContext* ctx, const uint32_t* fb, VoxTileGrid* grid,
              * texture. The composed frame can't be the ground texture:
              * sprites are baked into it, so the column march used to warp
              * a flattened copy of every character into the terrain right
-             * under their upright billboard. CGB BG tiles flip via the
+             * under their upright object. CGB BG tiles flip via the
              * same attr bits OBJs use. */
             {
                 GBPPU* ppu = (GBPPU*)ctx->ppu;
@@ -647,7 +1016,14 @@ bool vox_scrape(GBContext* ctx, const uint32_t* fb, VoxTileGrid* grid,
 
                 if (row >= 0 && row < 12 && col >= 0 && col < 16) {
                     uint8_t coll = oracle.collisions[row * 16 + col];
-                    uint8_t hcls = vox_oracle_height(coll, by_colour);
+                    /* $01-$0F is a four-bit occupancy mask, not a height
+                     * code. Preserve its exact 8x8 footprint: bit 3 is the
+                     * top-left quadrant and bit 0 the bottom-right. */
+                    int qx = ((wx - col * 16) >= 8) ? 1 : 0;
+                    int qy = ((wy - row * 16) >= 8) ? 1 : 0;
+                    int quadrant = qy * 2 + qx;
+                    uint8_t hcls = vox_oracle_quadrant_height(
+                        coll, by_colour, quadrant);
                     /* Hand-authored room overrides get the final word --
                      * for props the player can walk past (statue rows,
                      * gates) that read as "should be 3D" to a human and
@@ -704,14 +1080,66 @@ scan_sprites:
         memcpy(grid->leafy, next, sizeof(next));
     }
 
-    /* Billboard trees, for the chase camera: a solid room cell whose four
-     * screen tiles all read leafy at full height is one 16px tree. The
-     * chase renderer pulls these cells out of its heightfield and draws
-     * each as a trunk-and-canopy billboard, so a forest becomes a row of
-     * trees with ground running beneath the canopies instead of a green
-     * rampart. Canopy shades come from the tree's own art, so autumn,
-     * winter and Subrosia keep their palettes. */
+    /* Compound architecture first. Impa's house is not six unrelated solid
+     * cells: $9B/$9C/$9D are one authored 48px canopy over a matching
+     * doorway row. Preserve those two live strips as one structure and mark
+     * their old overhead footprint for removal from the chase heightfield.
+     * The exact marker sequence and room guard avoid assigning Ages' object
+    * IDs meanings in another tileset or in Seasons. */
     if (!frozen) {
+        grid->structure_count = 0;
+        memset(grid->structurecell, 0, sizeof(grid->structurecell));
+        if (use_oracle && !oracle.is_seasons && oracle.active_group == 0 &&
+            oracle.active_room == 0x3A) {
+        for (int row = 0; row + 1 < 12; row++) {
+            for (int col = 0; col + 2 < 16; col++) {
+                int at = row * 16 + col;
+                if (oracle.layout[at] != 0x9B ||
+                    oracle.layout[at + 1] != 0x9C ||
+                    oracle.layout[at + 2] != 0x9D)
+                    continue;
+                if (grid->structure_count >= VOX_MAX_STRUCTURES) break;
+
+                int sx = col * 16 - oracle.cam_x - oracle.off_x;
+                int roof_sy = row * 16 - oracle.cam_y - oracle.off_y
+                              + grid->hud_rows;
+                int tx0 = (sx + grid->fine_x) >> 3;
+                int ty0 = (roof_sy + grid->fine_y) >> 3;
+                if (tx0 < 0 || ty0 < 0 ||
+                    tx0 + 5 >= VOX_TILES_W || ty0 + 3 >= VOX_TILES_H)
+                    continue;
+
+                VoxStructure* b =
+                    &grid->structures[grid->structure_count++];
+                b->sx = sx;
+                b->sy = roof_sy + 16; /* the doorway row is its footprint */
+                int px0 = tx0 * 8, py0 = ty0 * 8;
+                for (int py = 0; py < VOX_STRUCTURE_H; py++) {
+                    memcpy(&b->roof[py * VOX_STRUCTURE_W],
+                           &grid->tex[(py0 + py) * VOX_TEX_W + px0],
+                           VOX_STRUCTURE_W * sizeof(uint32_t));
+                    memcpy(&b->front[py * VOX_STRUCTURE_W],
+                           &grid->tex[(py0 + 16 + py) * VOX_TEX_W + px0],
+                           VOX_STRUCTURE_W * sizeof(uint32_t));
+                }
+                for (int dy = 0; dy < 4; dy++) {
+                    for (int dx = 0; dx < 6; dx++)
+                        grid->structurecell[ty0 + dy][tx0 + dx] = 1;
+                }
+                structure_strip_mask(grid, tx0, ty0,
+                                     b->roof, b->roof_solid);
+                structure_strip_mask(grid, tx0, ty0 + 2,
+                                     b->front, b->front_solid);
+            }
+        }
+    }
+
+    /* Object-aware vegetation for the chase camera: a solid room cell whose
+     * four screen tiles all read leafy at full height is one 16px source
+     * drawing. The renderer pulls these cells out of the heightfield, turns
+     * each drawing into separate trunk and canopy tiles, and leaves real
+     * ground beneath it. Every visible colour comes from the tree's own art,
+     * so autumn, winter and Subrosia keep their palettes. */
     grid->tree_count = 0;
     memset(grid->treecell, 0, sizeof(grid->treecell));
     /* Outdoors only: wRoomLayout's object IDs are read against the
@@ -733,16 +1161,10 @@ scan_sprites:
                 bool is_tree = (id >= 0x20 && id <= 0x3F);
                 bool is_tuft = (id >= 0xC0 && id <= 0xCF);
                 if (!is_tree && !is_tuft) continue;
-                /* Billboards are opt-in art now. Standing the cell's own
-                 * 16x16 tile upright reads as a cardboard cutout of a tree
-                 * rather than a tree -- the art was drawn to be looked at
-                 * from above, and no amount of trunk shading fixes that.
-                 * Extruded terrain is the honest default until someone
-                 * draws art meant to stand up, so a cell only becomes a
-                 * billboard when a mod supplies voxel/tree.ppm (or
-                 * voxel/tuft.ppm) to dress it with. */
+                /* A mod can provide alternate art. Either way the pixels are
+                 * extruded later; leaving known tree IDs as terrain is what
+                 * turned forests into continuous green ramparts. */
                 const uint32_t* mod_art = vox_mod_tree_art(is_tree);
-                if (!mod_art) continue;
                 int sx = col * 16 - oracle.cam_x - oracle.off_x;
                 int sy = row * 16 - oracle.cam_y - oracle.off_y
                          + grid->hud_rows;
@@ -751,59 +1173,108 @@ scan_sprites:
                 if (tx0 < 0 || ty0 < 0 ||
                     tx0 + 1 >= VOX_TILES_W || ty0 + 1 >= VOX_TILES_H)
                     continue;
-                /* The cell must still LOOK like vegetation on screen --
-                 * the layout ID names the object, the leafy check guards
-                 * against a season or mod restyling the same ID into
-                 * something that shouldn't billboard. */
-                bool all = true;
-                for (int dy = 0; dy < 2 && all; dy++) {
+                bool in_structure = false;
+                for (int dy = 0; dy < 2; dy++) {
                     for (int dx = 0; dx < 2; dx++) {
-                        if (!grid->leafy[ty0 + dy][tx0 + dx] ||
-                            grid->height[ty0 + dy][tx0 + dx] < VOX_H_MID) {
-                            all = false;
-                            break;
+                        if (grid->structurecell[ty0 + dy][tx0 + dx])
+                            in_structure = true;
+                    }
+                }
+                if (in_structure) continue;
+                /* Tree-mass IDs are the tileset's connected drawing. Some
+                 * edge/corner fragments contain mostly trunk, snow or empty
+                 * surround and therefore do not pass a green-pixel vote;
+                 * dropping those fragments tears holes through the original
+                 * crown row. The authoritative layout wins for trees. Low
+                 * destructible IDs still require the visual guard because
+                 * seasons/mods may restyle those reusable object slots. */
+                bool all = true;
+                if (!is_tree) {
+                    for (int dy = 0; dy < 2 && all; dy++) {
+                        for (int dx = 0; dx < 2; dx++) {
+                            if (!grid->leafy[ty0 + dy][tx0 + dx] ||
+                                grid->height[ty0 + dy][tx0 + dx] < VOX_H_MID) {
+                                all = false;
+                                break;
+                            }
                         }
                     }
                 }
                 if (!all) continue;
                 int hmin = is_tree ? VOX_H_HIGH : VOX_H_MID;
 
-                /* The billboard wears the mod's art. */
                 VoxTree* t = &grid->trees[grid->tree_count];
-                memcpy(t->tex, mod_art, sizeof(t->tex));
-
-                /* Pull a palette from the art the canopy will wear:
-                 * brightest, darkest, mean. */
-                uint32_t lit = 0, dark = 0;
-                int lb = -1, db = 0x7FFFFFFF, n = 0;
-                long ar = 0, ag = 0, ab = 0;
-                for (int i = 0; i < 16 * 16; i++) {
-                    uint32_t c = t->tex[i];
-                    int r8 = (c >> 16) & 0xFF;
-                    int g8 = (c >> 8) & 0xFF;
-                    int b8 = c & 0xFF;
-                    int br = r8 + g8 * 2 + b8;
-                    if (br > lb) { lb = br; lit = c; }
-                    if (br < db) { db = br; dark = c; }
-                    ar += r8; ag += g8; ab += b8; n++;
+                uint32_t source[16 * 16];
+                if (mod_art) {
+                    memcpy(source, mod_art, sizeof(source));
+                } else {
+                    int px0 = tx0 * 8, py0 = ty0 * 8;
+                    for (int py = 0; py < 16; py++) {
+                        memcpy(&source[py * 16],
+                               &grid->tex[(py0 + py) * VOX_TEX_W + px0],
+                               16 * sizeof(uint32_t));
+                    }
                 }
+                memcpy(t->tex, source, sizeof(t->tex));
 
                 grid->tree_count++;
                 t->sx = sx;
                 t->sy = sy;
                 t->hcls = hmin;
-                t->lit = lit;
-                t->dark = dark;
-                t->mid = 0xFF000000u | ((uint32_t)(ar / n) << 16) |
-                         ((uint32_t)(ag / n) << 8) | (uint32_t)(ab / n);
-                /* Bark: the art's shadow tone pulled toward brown. */
-                t->bark = 0xFF000000u |
-                    (((((dark >> 16) & 0xFF) * 2 + 0x5A) / 3) << 16) |
-                    (((((dark >> 8) & 0xFF) * 2 + 0x3A) / 3) << 8) |
-                    ((((dark & 0xFF) * 2 + 0x28) / 3));
+                t->custom_art = mod_art != NULL;
                 for (int dy = 0; dy < 2; dy++) {
                     for (int dx = 0; dx < 2; dx++) {
                         grid->treecell[ty0 + dy][tx0 + dx] = 1;
+                    }
+                }
+            }
+        }
+    }
+
+    for (int i = 0; i < grid->tree_count; i++) {
+        VoxTree* t = &grid->trees[i];
+        int tx0 = (t->sx + grid->fine_x) >> 3;
+        int ty0 = (t->sy + grid->fine_y) >> 3;
+        tree_relief_mask(grid, tx0, ty0, t);
+    }
+    if (use_oracle && oracle.active_group <= 1)
+        vox_infer_plateaus(grid);
+    else
+        memset(grid->elevation, 0, sizeof(grid->elevation));
+
+    /* Collision correctly describes where Link may walk, but some visible
+     * objects are interactive props rather than collision walls. Apply those
+     * semantic heights after mass/plateau inference so a chest cannot merge
+     * into a cliff or convince the terrain around it to become a plateau.
+     * The heightfield already carries the exact live BG pixels, so raising
+     * these four 8px quadrants produces a textured 16x16 block rather than a
+     * guessed replacement model. */
+    if (use_oracle) {
+        for (int row = 0; row < 12; row++) {
+            for (int col = 0; col < 16; col++) {
+                uint8_t hcls = vox_oracle_object_height(
+                    oracle.layout[row * 16 + col]);
+                if (hcls == 0xFF) continue;
+                int sx = col * 16 - oracle.cam_x - oracle.off_x;
+                int sy = row * 16 - oracle.cam_y - oracle.off_y
+                         + grid->hud_rows;
+                int tx0 = (sx + grid->fine_x) >> 3;
+                int ty0 = (sy + grid->fine_y) >> 3;
+                if (tx0 < 0 || ty0 < 0 ||
+                    tx0 + 1 >= VOX_TILES_W || ty0 + 1 >= VOX_TILES_H)
+                    continue;
+                bool in_structure = false;
+                for (int dy = 0; dy < 2; dy++) {
+                    for (int dx = 0; dx < 2; dx++) {
+                        if (grid->structurecell[ty0 + dy][tx0 + dx])
+                            in_structure = true;
+                    }
+                }
+                if (in_structure) continue;
+                for (int dy = 0; dy < 2; dy++) {
+                    for (int dx = 0; dx < 2; dx++) {
+                        grid->height[ty0 + dy][tx0 + dx] = hcls;
+                        grid->leafy[ty0 + dy][tx0 + dx] = 0;
                     }
                 }
             }

@@ -173,48 +173,69 @@ PPU state, plus the game's own collision and camera data read live from WRAM
 at the addresses named by
 [oracles-disasm](https://github.com/Stewmath/oracles-disasm).
 
-- **on the Oracles carts, terrain height comes from the game's own collision
+- **on the Oracles carts, terrain shape comes from the game's own collision
   data** — `wRoomCollisions` and the camera, read live from WRAM at the
   addresses named by [oracles-disasm](https://github.com/Stewmath/oracles-disasm).
-  Water sinks because the game says it's water; walls rise because collision
-  says solid; menus render flat because `wOpenedMenuType` says a menu is open.
-  Colours only break ties (tree vs fence, grass vs path)
+  Values `$01`-`$0F` are decoded as the game's real four-bit 8×8-quadrant
+  mask, so a half wall occupies only its solid half instead of becoming a
+  mysteriously shorter 16×16 block. Water sinks because the game says it's
+  water; walls rise because collision says solid; menus render flat because
+  `wOpenedMenuType` says a menu is open
 - on anything else, tiles are classified per 8×8 by colour — water sinks,
   paths lie flat, bushes and rocks rise, trees and walls rise highest
 - the world is marched far-to-near, projecting cell tops and filling the
-  exposed front wall where height steps down. Walls are textured by tiling
-  the cell's own art down the face; raised foliage gets a domed top so
-  trees read as canopies while cliffs and fences stay architectural
+  exposed front wall where height steps down. In chase view, authoritative
+  height edges also receive true planar faces. Their full 8px bands come from
+  the original raised tiles with nearest-neighbour sampling -- no invented
+  masonry and no stretched scanlines -- so cliffs keep both their cart artwork
+  and their straight room-layout corners
+- walkable ground enclosed by those cliff lips becomes a raised plateau. Its
+  base inherits the bordering lip's actual mid/high class, so Link and props
+  stand on a shelf exactly level with the edge instead of above it or behind a
+  fence on flat ground
 - motion is eased: terrain grows in after a room change instead of
   popping, and Link's ground height ramps across cell boundaries
 - terrain is textured from the game's *own* BG tilemap — palettes, season
   tints and tile animation carry through untouched, and because sprites are
   not part of the tilemap, nobody leaves a flattened ghost of themselves in
   the ground
-- sprites are re-decoded from VRAM and stood upright as billboards, drawn in
-  the same painter's order as the terrain — walk behind a tree and the tree
-  actually hides you
+- sprites are re-decoded from VRAM and stood upright as billboards. Trees and
+  cuttable shrubs are different: `wRoomLayout` identifies each object while
+  the original 16x16 BG pixels become fixed geometry. A full tree keeps that
+  complete drawing on a hard canopy tile above a separate trunk tile sampled
+  from its lower centre. Exposed canopy sides unfold the corresponding half
+  of the same source art; connected forest variants still meet exactly as the
+  cart drew them, with no rounded shell or camera-facing tree billboard.
+  Tufts recover their silhouette and become shallow pixel reliefs. The
+  overhead copy is removed from the ground, and the depth buffer lets these
+  world objects hide Link correctly
 - water ripples; room-to-room walks keep the sky up and slide the rooms
   through flat rather than flickering guessed terrain
 - **the sky follows the game**: season-tinted in Seasons (spring through
   winter, ember-red in Subrosia), day blue in Ages' present, golden dusk in
   the past — with slow procedural clouds. Interiors keep a neutral backdrop
 - the status bar stays flat and composites back on top
-- **chase cam** (`F3` to the last stop): a third-person camera floating
-  behind Link, raycasting the same heightfield in true perspective —
-  distance fog and depth-scaled sprite billboards. **The camera orbits Link
-  and the stick owns it**: the right stick (or `Q`/`E`) swings it and it
-  stays exactly where you left it while he runs around underneath.
-  Recentring is asked for, never assumed — click the right stick (or press
-  `C`) to swing behind him, hold it to keep following. If you preferred the
-  camera taking itself back behind him as he walks, the Esc menu has a
-  checkbox for it (off by default)
-- **a cliff is one object**: the game says only that a cell is *solid* — how
-  tall it looks came from the tile's own colours, voted per 8px tile, so one
-  cliff could come out with a ragged top and notches where a shaded tile
-  disagreed with its neighbours. A connected mass now votes once, and the
-  diagonal shapes that sit inside a wall bevel instead of dropping to the
-  floor. "One height per cliff" in the Esc menu turns it off
+- **chase cam** (`F3` to the last stop): a third-person camera that starts
+  directly behind Link, raycasting the same heightfield in true perspective —
+  distance fog and depth-scaled sprite billboards. It trails behind him while
+  he walks, but **the right stick owns it**: the stick (or `Q`/`E`) orbits and
+  briefly holds the chosen heading without fighting you. Click the right stick
+  (or press `C`) to recenter immediately behind him; the Esc menu can disable
+  automatic trailing entirely
+- **a cliff has exact footprint and one shared height**: the collision nibble
+  gives the occupied top-left, top-right, bottom-left and bottom-right
+  quadrants exactly. The cartridge does not store a world-space Z coordinate;
+  its art only implies whether a solid is a low ledge or a tall wall. Each
+  connected solid mass therefore makes that visual choice once, rather than
+  letting every shaded 8px tile create a different level. Chase view projects
+  one planar face per exposed quarter-cell edge and textures it from the
+  original tile bands, preserving ledges, inside corners and right-angle room
+  geometry. Enclosed walkable regions inherit their cliff lip's height class,
+  while tree lines are ignored as elevation boundaries. Known objects from `wRoomLayout`
+  (such as trees) take their own semantic height, and unusual rooms can still
+  set an explicit class in a height override. "One height per cliff" in the
+  Esc menu turns the mass vote
+  off
 - **the world persists**: every room you visit is remembered, and the chase
   camera draws remembered neighbours past the room border — terrain, cliff
   faces, tree masses — so the world runs to the horizon and fills in as
@@ -242,7 +263,7 @@ the sliders reshape the world under the menu as you drag them:
 | **Chase camera** | distance, height, field of view, vertical scale, fog start and strength |
 
 `chase_follow` in `voxel/tuning.ini` is how fast the camera swings behind
-Link, per frame: `0.06` ships, higher snaps harder, and `0` pins the camera
+Link, per frame: `0.05` ships, higher snaps harder, and `0` pins the camera
 to a fixed heading the way earlier builds did.
 
 *Foliage footprint* is how far a tree pulls back from its cell edge — `0`
@@ -392,19 +413,17 @@ mods/my-randomizer/
   manifest.json      required
   seed.bps           patch named by the manifest
   overlay/           optional raw byte splices
-  voxel/tree.ppm     optional 16x16 billboard art for trees (chase cam)
+  voxel/tree.ppm     optional 16x16 source-art override for trees (chase cam)
   voxel/tuft.ppm     ... and for bushes and grass tufts
 ```
 
-The `voxel/` images are plain 16×16 P6 PPMs (`magick art.png art.ppm`).
-They are what *turns on* billboards: without them a tree is extruded
-terrain like everything else, because the cart's tree tiles were drawn to
-be seen from above and standing one upright reads as a cardboard cutout.
-Supply `voxel/tree.ppm` — art drawn to be looked at from the side — and
-every tree cell in the chase camera stands up wearing it, with trunk and
-canopy shading derived from the art so they match automatically. When
-several enabled mods supply the same file, the highest-priority mod wins —
-the same order the ROM patches apply in.
+The `voxel/` images are plain 16×16 P6 PPMs (`magick art.png art.ppm`). By
+default, recognized tree and tuft cells become voxel volumes whose colours and
+pixel detail come from the cart's live tile art, including season and tileset
+changes. Supplying `voxel/tree.ppm` or `voxel/tuft.ppm` replaces that source
+art but keeps the same world-space geometry—never a camera-facing billboard.
+When several enabled mods supply the same file, the highest-priority mod wins
+— the same order the ROM patches apply in.
 
 ```json
 {
@@ -533,12 +552,17 @@ from a cold clone (`setup.sh` / `setup.ps1`), CI covers Linux + Windows +
 the patch chain, and every runtime modification is a reviewable patch file
 in `patches/`. `src/` and `launcher/` are the project's own code.
 
+If you are joining specifically to improve the 3D mode, start with the
+**[voxel contributor guide](docs/VOXEL_CONTRIBUTING.md)**. It maps the render
+pipeline, gives the fast screenshot/test loop, and explains how to distinguish
+terrain, background objects and OAM sprites before writing geometry.
+
 If any of this sounds fun, open an issue or just send a PR:
 
-- **Renderer** (`src/voxel/`): sprite occlusion in chase cam, wall
-  texturing in perspective, a room cache so the 3D world persists across
-  screens, first-person mode. Plain C, one pass, no GPU code — the GLES
-  side is already handled.
+- **Renderer** (`src/voxel/`): dynamic prop reconstruction (the opening-scene
+  chest is the first target), dungeon/large-room mapping, more compound
+  structures, and eventually first-person mode. Plain C, one pass, no GPU
+  code — the GLES side is already handled.
 - **Room sculpting** (no code!): run with `VOXEL_EDIT=1` and every room
   you enter writes a ready-to-edit text template; heights are single
   characters. A curated override pack for the whole overworld would ship

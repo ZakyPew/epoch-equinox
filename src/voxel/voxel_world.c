@@ -11,7 +11,7 @@
  *
  * What is remembered per room is exactly what the renderer needs and
  * nothing it can compute: the 8px height/foliage/tree-cell grids, the
- * sprite-free ground texture, and the billboard tree list. All of it in
+ * sprite-free ground texture, and the volumetric vegetation list. All of it in
  * room space (160x128, HUD stripped), captured only when the room is at
  * rest with the camera and screen offsets parked at zero -- which outdoors
  * is every trustworthy frame, since overworld rooms are one screen.
@@ -40,6 +40,7 @@
 typedef struct {
     uint8_t season;            /* wRoomStateModifier at capture (Seasons) */
     uint8_t height[ROOM_TH][ROOM_TW];
+    uint8_t elevation[ROOM_TH][ROOM_TW];
     uint8_t leafy[ROOM_TH][ROOM_TW];
     uint8_t treecell[ROOM_TH][ROOM_TW];
     uint32_t tex[ROOM_H * ROOM_W];
@@ -91,6 +92,7 @@ void vox_world_remember(const VoxOracleState* st, const VoxTileGrid* grid) {
             int gx = (tx * 8 + 4 + grid->fine_x) >> 3;
             if (gx >= VOX_TILES_W) gx = VOX_TILES_W - 1;
             r->height[ty][tx]   = grid->height[gy][gx];
+            r->elevation[ty][tx] = grid->elevation[gy][gx];
             r->leafy[ty][tx]    = grid->leafy[gy][gx];
             r->treecell[ty][tx] = grid->treecell[gy][gx];
         }
@@ -99,6 +101,34 @@ void vox_world_remember(const VoxOracleState* st, const VoxTileGrid* grid) {
         memcpy(&r->tex[y * ROOM_W],
                &grid->tex[(y + hud + grid->fine_y) * VOX_TEX_W + grid->fine_x],
                ROOM_W * sizeof(uint32_t));
+    }
+    /* Tree cells become volumetric objects in chase view. Replace their
+     * top-down room art in the remembered ground texture with the nearest
+     * real floor/grass tile; otherwise a neighbouring remembered room grows
+     * the same long projected branch streaks as the live room used to. */
+    for (int ty = 0; ty < ROOM_TH; ty++) {
+        for (int tx = 0; tx < ROOM_TW; tx++) {
+            if (!r->treecell[ty][tx]) continue;
+            int bx = tx, by = ty, best = 100000;
+            for (int sy = 0; sy < ROOM_TH; sy++) {
+                for (int sx = 0; sx < ROOM_TW; sx++) {
+                    if (r->treecell[sy][sx] || r->leafy[sy][sx] ||
+                        r->height[sy][sx] < VOX_H_FLOOR ||
+                        r->height[sy][sx] > VOX_H_LOW ||
+                        r->elevation[sy][sx] != r->elevation[ty][tx])
+                        continue;
+                    int dx = sx - tx, dy = sy - ty;
+                    int score = dx * dx + dy * dy;
+                    if (score < best) { best = score; bx = sx; by = sy; }
+                }
+            }
+            if (best == 100000) continue;
+            for (int py = 0; py < 8; py++) {
+                memcpy(&r->tex[(ty * 8 + py) * ROOM_W + tx * 8],
+                       &r->tex[(by * 8 + py) * ROOM_W + bx * 8],
+                       8 * sizeof(uint32_t));
+            }
+        }
     }
     r->tree_count = grid->tree_count;
     for (int i = 0; i < grid->tree_count; i++) {
@@ -136,12 +166,18 @@ static VoxRoom* resolve(float sx, float sy, float* lx, float* ly) {
 }
 
 /* One 8px cell by world tile coords (current room's tile 0,0 as origin,
- * negatives fine). Chase-camera semantics: billboard tree cells read as
+ * negatives fine). Chase-camera semantics: volumetric vegetation cells read as
  * open ground, the way g_flatten_trees empties them from the live grid. */
-typedef struct { float h; bool leafy; bool ok; } WCell;
+typedef struct {
+    float h;                   /* complete surface height */
+    float base;                /* walkable plateau underneath the object */
+    float object;              /* water/decor/solid extrusion only */
+    bool leafy;
+    bool ok;
+} WCell;
 
 static WCell wcell(int tx, int ty) {
-    WCell c = {0.0f, false, false};
+    WCell c = {0.0f, 0.0f, 0.0f, false, false};
     int dx = tx >= 0 ? tx / ROOM_TW : -((-tx + ROOM_TW - 1) / ROOM_TW);
     int dy = ty >= 0 ? ty / ROOM_TH : -((-ty + ROOM_TH - 1) / ROOM_TH);
     VoxRoom* r = resolve((float)(dx * ROOM_W) + 1.0f,
@@ -151,11 +187,15 @@ static WCell wcell(int tx, int ty) {
     int lty = ty - dy * ROOM_TH;
     const float* units = voxel_tuning()->units;
     c.ok = true;
+    uint8_t base_class = r->elevation[lty][ltx];
+    c.base = base_class >= VOX_H_FLOOR && base_class <= VOX_H_HIGH
+        ? units[base_class] : 0.0f;
     if (r->treecell[lty][ltx]) {
-        c.h = units[VOX_H_FLOOR];
+        c.h = c.base;
         return c;
     }
-    c.h = units[r->height[lty][ltx]];
+    c.object = units[r->height[lty][ltx]];
+    c.h = c.base + c.object;
     c.leafy = r->leafy[lty][ltx] != 0;
     return c;
 }
@@ -172,7 +212,7 @@ static bool world_height_raw(float sx, float sy, float* out) {
     WCell c = wcell(tx, ty);
     if (!c.ok) return false;
     float h = c.h;
-    if (h <= 0.0f || !c.leafy) { *out = h; return true; }
+    if (c.object <= 0.0f || !c.leafy) { *out = h; return true; }
 
     const float EDGE = voxel_tuning()->footprint;
     if (EDGE <= 0.01f) { *out = h; return true; }
@@ -190,7 +230,7 @@ static bool world_height_raw(float sx, float sy, float* out) {
     if (n.ok && n.h < h && v > 8.0f - EDGE) k = fminf(k, (8.0f - v) / EDGE);
     if (k < 0.0f) k = 0.0f;
     k = k * k * (3.0f - 2.0f * k);
-    *out = h * k;
+    *out = c.base + c.object * k;
     return true;
 }
 

@@ -48,6 +48,11 @@
 
 static int g_mode = VOXEL_MODE_OFF;
 static float g_chase_yaw = -1.5708f;   /* camera heading, radians */
+static bool g_chase_heading_live = false;
+static bool g_chase_pose_reset = true;
+static const float CHASE_DIR_YAW[4] = {
+    -1.5707963f, 0.0f, 1.5707963f, 3.1415927f
+};
 /* Recentring: `held` is the button's live state, `active` survives the
  * release so a tap finishes its swing instead of stopping half way. */
 static bool  g_recentre_held = false;
@@ -85,7 +90,7 @@ static const VoxCam VOX_CAMS[VOXEL_MODE_COUNT] = {
     .footprint    = 3.0f,                   \
     .tilt_scale   = 1.0f,                   \
     .chase_back   = 62.0f,                  \
-    .chase_height = 32.0f,                  \
+    .chase_height = 36.0f,                  \
     .chase_fov    = 0.62f,                  \
     .chase_hpx    = 3.2f,                   \
     .chase_follow = 0.05f,                  \
@@ -183,9 +188,22 @@ void voxel_tuning_load(void) {
 
 int voxel_get_mode(void) { return g_mode; }
 
+int vox_scene_render_mode(int requested_mode, bool scripted_scene) {
+    /* A chase camera is attached to Link's gameplay object. Scripts can
+     * freeze, hide, replace or move that object independently of the scene,
+     * so preserve the room's authored framing with a fixed voxel camera. */
+    if (requested_mode == VOXEL_MODE_CHASE && scripted_scene)
+        return VOXEL_MODE_30;
+    return requested_mode;
+}
+
 void voxel_set_mode(int mode) {
     if (mode < 0 || mode >= VOXEL_MODE_COUNT) mode = VOXEL_MODE_OFF;
     if (mode != g_mode) {
+        if (mode == VOXEL_MODE_CHASE) {
+            g_chase_heading_live = false;
+            g_chase_pose_reset = true;
+        }
         g_mode = mode;
         static const char* names[VOXEL_MODE_COUNT] = {"OFF", "15", "30", "45",
                                                       "CHASE"};
@@ -211,20 +229,31 @@ static inline uint32_t shade(uint32_t c, int mul /* 0..~272 */) {
 }
 
 /* While the chase camera renders, tree cells drop out of the heightfield:
- * their trunks and canopies are drawn as billboards instead, so the ground
- * plane runs beneath them. The diorama never sets this and keeps its
- * extruded domes. */
+ * their original tile art is drawn as a separate relief volume, so the
+ * ground plane runs beneath it. The diorama never sets this and keeps its
+ * terrain extrusion. */
 static bool g_flatten_trees = false;
 
-/* Height class of one tile, clamped to the grid. */
+static inline float cell_base(const VoxTileGrid* grid, int tx, int ty) {
+    uint8_t base_class = grid->elevation[ty][tx];
+    return base_class >= VOX_H_FLOOR && base_class <= VOX_H_HIGH
+        ? VOX_UNITS[base_class] : 0.0f;
+}
+
+/* Complete surface height of one tile, clamped to the grid. Plateau height
+ * is independent from object extrusion: a tree can be flattened to the
+ * shelf beneath it, while a cliff rim and the walkable shelf behind it meet
+ * at the same top elevation. */
 static inline float cell_h(const VoxTileGrid* grid, int tx, int ty) {
     if (tx < 0) tx = 0;
     if (tx >= VOX_TILES_W) tx = VOX_TILES_W - 1;
     if (ty < 0) ty = 0;
     if (ty >= VOX_TILES_H) ty = VOX_TILES_H - 1;
-    if (g_flatten_trees && grid->treecell[ty][tx])
-        return VOX_UNITS[VOX_H_FLOOR];
-    return VOX_UNITS[grid->height[ty][tx]];
+    float base = cell_base(grid, tx, ty);
+    if (g_flatten_trees &&
+        (grid->treecell[ty][tx] || grid->structurecell[ty][tx]))
+        return base;
+    return base + VOX_UNITS[grid->height[ty][tx]];
 }
 
 /* Height at a world (screen-space) position, with a footprint for growing
@@ -253,10 +282,12 @@ static inline float height_at(const VoxTileGrid* grid, float x, float y) {
     if (tx >= VOX_TILES_W) tx = VOX_TILES_W - 1;
     if (ty < 0) ty = 0;
     if (ty >= VOX_TILES_H) ty = VOX_TILES_H - 1;
-    if (g_flatten_trees && grid->treecell[ty][tx])
-        return VOX_UNITS[VOX_H_FLOOR];
-    float h = VOX_UNITS[grid->height[ty][tx]];
-    if (h <= 0.0f || !grid->leafy[ty][tx]) return h;
+    float base = cell_base(grid, tx, ty);
+    float object = (g_flatten_trees &&
+                    (grid->treecell[ty][tx] || grid->structurecell[ty][tx]))
+        ? 0.0f : VOX_UNITS[grid->height[ty][tx]];
+    float h = base + object;
+    if (object <= 0.0f || !grid->leafy[ty][tx]) return h;
 
     const float EDGE = g_tune.footprint;
     if (EDGE <= 0.01f) return h;   /* 0 = hard-edged cells */
@@ -269,7 +300,7 @@ static inline float height_at(const VoxTileGrid* grid, float x, float y) {
     if (cell_h(grid, tx, ty + 1) < h && v > 8.0f - EDGE) k = fminf(k, (8.0f - v) / EDGE);
     if (k < 0.0f) k = 0.0f;
     k = k * k * (3.0f - 2.0f * k);     /* smoothstep, so the edge rolls */
-    return h * k;
+    return base + object * k;
 }
 
 /* ------------------------------------------------------------------ */
@@ -356,6 +387,40 @@ static inline float chase_height_at(const VoxTileGrid* grid, float x, float y) {
     return (c * 4.0f + e) * (1.0f / 8.0f);
 }
 
+static uint8_t s_ground_tx[VOX_TILES_H][VOX_TILES_W];
+static uint8_t s_ground_ty[VOX_TILES_H][VOX_TILES_W];
+
+/* A 3D tree replaces its overhead room-cell drawing. Leaving that drawing on
+ * the floor projects branches and black outlines into long perspective
+ * streaks beneath the new crown. For each tree tile, find the closest real
+ * floor/grass tile and reuse the same intra-tile pixel coordinates. */
+static void prepare_chase_ground(const VoxTileGrid* grid) {
+    int first_world_tile = grid->hud_rows >> 3;
+    for (int ty = 0; ty < VOX_TILES_H; ty++) {
+        for (int tx = 0; tx < VOX_TILES_W; tx++) {
+            int bx = tx, by = ty, best = 100000;
+            if (grid->treecell[ty][tx] || grid->structurecell[ty][tx]) {
+                for (int sy = first_world_tile; sy < VOX_TILES_H; sy++) {
+                    for (int sx = 0; sx < VOX_TILES_W; sx++) {
+                        if (grid->treecell[sy][sx] ||
+                            grid->structurecell[sy][sx] ||
+                            grid->leafy[sy][sx] ||
+                            grid->height[sy][sx] < VOX_H_FLOOR ||
+                            grid->height[sy][sx] > VOX_H_LOW ||
+                            grid->elevation[sy][sx] != grid->elevation[ty][tx])
+                            continue;
+                        int dx = sx - tx, dy = sy - ty;
+                        int score = dx * dx + dy * dy;
+                        if (score < best) { best = score; bx = sx; by = sy; }
+                    }
+                }
+            }
+            s_ground_tx[ty][tx] = (uint8_t)bx;
+            s_ground_ty[ty][tx] = (uint8_t)by;
+        }
+    }
+}
+
 static inline uint32_t chase_tex_at(const VoxTileGrid* grid, float x, float y) {
     int px = (int)(x + (float)grid->fine_x);
     int py = (int)(y + (float)grid->fine_y);
@@ -363,7 +428,84 @@ static inline uint32_t chase_tex_at(const VoxTileGrid* grid, float x, float y) {
     if (px >= VOX_TEX_W) px = VOX_TEX_W - 1;
     if (py < 0) py = 0;
     if (py >= VOX_TEX_H) py = VOX_TEX_H - 1;
-    return grid->tex[py * VOX_TEX_W + px];
+    int tx = px >> 3, ty = py >> 3;
+    bool under_tree = grid->treecell[ty][tx] != 0;
+    bool under_structure = grid->structurecell[ty][tx] != 0;
+    if (under_tree || under_structure) {
+        px = (int)s_ground_tx[ty][tx] * 8 + (px & 7);
+        py = (int)s_ground_ty[ty][tx] * 8 + (py & 7);
+    }
+    uint32_t c = grid->tex[py * VOX_TEX_W + px];
+    /* The source cell is hidden by a crown in 2D. Replacing it with bright
+     * meadow art made the distant ground shine through every trunk gap as a
+     * single horizontal bar. It is still real floor geometry, but wears the
+     * same simple canopy shadow a dense treeline would cast. */
+    return under_tree ? shade(c, 150)
+                      : (under_structure ? shade(c, 178) : c);
+}
+
+/* One texel from the original raised tile, folded onto a vertical face.
+ * Tall drops repeat complete 8px bands instead of stretching a row; this is
+ * the same pixel vocabulary the flat map uses, now attached to real planar
+ * geometry. Directional light is applied by the caller only after sampling. */
+static uint32_t chase_cliff_texel(const VoxTileGrid* grid,
+                                  int tile_x, int tile_y,
+                                  float along, float vertical) {
+    if (tile_x < 0) tile_x = 0;
+    if (tile_x >= VOX_TILES_W) tile_x = VOX_TILES_W - 1;
+    if (tile_y < 0) tile_y = 0;
+    if (tile_y >= VOX_TILES_H) tile_y = VOX_TILES_H - 1;
+    int u = ((int)floorf(along)) & 7;
+    int v = ((int)floorf(vertical)) & 7;
+    return grid->tex[(tile_y * 8 + v) * VOX_TEX_W + tile_x * 8 + u];
+}
+
+/* True where a camera-sized probe is over architectural solid terrain in the
+ * live room. Positions beyond the live grid are left to the persistent-world renderer;
+ * treating the nearest screen-edge tile as an infinite wall would prevent
+ * the camera from following Link cleanly across room boundaries. */
+static bool chase_camera_solid(const VoxTileGrid* grid, float x, float y) {
+    float px = x + (float)grid->fine_x;
+    float py = y + (float)grid->fine_y;
+    if (px < 0.0f || py < 0.0f ||
+        px >= (float)VOX_TEX_W || py >= (float)VOX_TEX_H)
+        return false;
+    int tx = (int)px >> 3;
+    int ty = (int)py >> 3;
+    /* Volumetric vegetation can cross the near plane harmlessly. Treating
+     * its old solid cell as a wall shoved the camera into Link's back in
+     * every forest clearing; architecture and cliffs still clamp it. */
+    if (grid->structurecell[ty][tx]) return true;
+    return !grid->treecell[ty][tx] && grid->height[ty][tx] >= VOX_H_MID;
+}
+
+float vox_chase_camera_back(const VoxTileGrid* grid, float lx, float ly,
+                            float fx, float fy, float requested) {
+    const float MIN_BACK = 12.0f;
+    const float CLEARANCE = 6.0f;
+    const float RADIUS = 3.5f;
+    if (!grid || requested <= MIN_BACK) return requested;
+
+    float len = sqrtf(fx * fx + fy * fy);
+    if (len < 0.001f) return requested;
+    fx /= len;
+    fy /= len;
+    const float rx = -fy, ry = fx;
+
+    /* Walk from Link toward the requested camera position. The first wall
+     * wins, keeping the camera on Link's side of it. Two shoulder probes
+     * stop it clipping a corner while the centre line remains clear. */
+    for (float d = MIN_BACK; d <= requested; d += 2.0f) {
+        float x = lx - fx * d;
+        float y = ly - fy * d;
+        if (chase_camera_solid(grid, x, y) ||
+            chase_camera_solid(grid, x + rx * RADIUS, y + ry * RADIUS) ||
+            chase_camera_solid(grid, x - rx * RADIUS, y - ry * RADIUS)) {
+            float safe = d - CLEARANCE;
+            return safe > MIN_BACK ? safe : MIN_BACK;
+        }
+    }
+    return requested;
 }
 
 /* Third person: a camera floating behind the player, looking the way they
@@ -377,6 +519,636 @@ static inline uint32_t chase_tex_at(const VoxTileGrid* grid, float x, float y) {
  * painter's order only sorts sprites against each other. */
 static float s_zbuf[GB_FRAMEBUFFER_SIZE * VOX_MAX_SCALE * VOX_MAX_SCALE];
 
+typedef struct {
+    float x, y, dep;
+    float vertical, along;
+} ChaseFaceVert;
+
+static bool chase_project_face_vertex(float wx, float wy, float z,
+                                      float vertical, float along,
+                                      float cx, float cy,
+                                      float fxv, float fyv,
+                                      float rxv, float ryv,
+                                      float focal, float cz, int horizon,
+                                      int OW, ChaseFaceVert* out) {
+    float dx = wx - cx, dy = wy - cy;
+    float dep = dx * fxv + dy * fyv;
+    if (dep < 8.0f) return false;
+    float lat = dx * rxv + dy * ryv;
+    out->x = (float)OW * 0.5f + lat / dep * focal;
+    out->y = (float)horizon + (cz - z) / dep * focal;
+    out->dep = dep;
+    out->vertical = vertical;
+    out->along = along;
+    return true;
+}
+
+static float chase_edge(float ax, float ay, float bx, float by,
+                        float px, float py) {
+    return (px - ax) * (by - ay) - (py - ay) * (bx - ax);
+}
+
+/* Rasterise one flat-colour world-space face with perspective-correct depth.
+ * The colour is a source-art texel for front/back faces and a shaded copy of
+ * that texel only where extrusion has exposed a new side. */
+static void draw_chase_color_triangle(const ChaseFaceVert* a,
+                                      const ChaseFaceVert* b,
+                                      const ChaseFaceVert* c,
+                                      uint32_t color, int face_mul,
+                                      uint32_t fog, int OW, int OH,
+                                      uint32_t* out) {
+    float area = chase_edge(a->x, a->y, b->x, b->y, c->x, c->y);
+    if (fabsf(area) < 0.001f) return;
+    int minx = (int)floorf(fminf(a->x, fminf(b->x, c->x)));
+    int maxx = (int)ceilf (fmaxf(a->x, fmaxf(b->x, c->x)));
+    int miny = (int)floorf(fminf(a->y, fminf(b->y, c->y)));
+    int maxy = (int)ceilf (fmaxf(a->y, fmaxf(b->y, c->y)));
+    if (minx < 0) minx = 0;
+    if (maxx >= OW) maxx = OW - 1;
+    if (miny < 0) miny = 0;
+    if (maxy >= OH) maxy = OH - 1;
+    float ia = 1.0f / a->dep, ib = 1.0f / b->dep, ic = 1.0f / c->dep;
+    uint32_t lit = shade(color, face_mul);
+    for (int y = miny; y <= maxy; y++) {
+        for (int x = minx; x <= maxx; x++) {
+            float px = (float)x + 0.5f, py = (float)y + 0.5f;
+            float wa = chase_edge(b->x, b->y, c->x, c->y, px, py) / area;
+            float wb = chase_edge(c->x, c->y, a->x, a->y, px, py) / area;
+            float wc = 1.0f - wa - wb;
+            if (wa < -0.0001f || wb < -0.0001f || wc < -0.0001f) continue;
+            float invd = wa * ia + wb * ib + wc * ic;
+            if (invd <= 0.0f) continue;
+            float dep = 1.0f / invd;
+            int at = y * OW + x;
+            if (s_zbuf[at] < dep - 0.35f) continue;
+            int fog_mix = (int)((dep - g_tune.fog_start) * 256.0f /
+                                (230.0f - g_tune.fog_start));
+            if (fog_mix < 0) fog_mix = 0;
+            if (fog_mix > (int)g_tune.fog_max)
+                fog_mix = (int)g_tune.fog_max;
+            out[at] = lerp_color(lit, fog, fog_mix);
+            s_zbuf[at] = dep;
+        }
+    }
+}
+
+static void draw_chase_color_quad(float ax, float ay, float az,
+                                  float bx, float by, float bz,
+                                  float cx0, float cy0, float cz0,
+                                  float dx, float dy, float dz,
+                                  uint32_t color, int face_mul,
+                                  float camx, float camy,
+                                  float fxv, float fyv,
+                                  float rxv, float ryv,
+                                  float focal, float eye_z, int horizon,
+                                  uint32_t fog, int OW, int OH,
+                                  uint32_t* out) {
+    ChaseFaceVert v[4];
+    if (!chase_project_face_vertex(ax, ay, az, 0.0f, 0.0f,
+                                   camx, camy, fxv, fyv, rxv, ryv,
+                                   focal, eye_z, horizon, OW, &v[0]) ||
+        !chase_project_face_vertex(bx, by, bz, 0.0f, 0.0f,
+                                   camx, camy, fxv, fyv, rxv, ryv,
+                                   focal, eye_z, horizon, OW, &v[1]) ||
+        !chase_project_face_vertex(cx0, cy0, cz0, 0.0f, 0.0f,
+                                   camx, camy, fxv, fyv, rxv, ryv,
+                                   focal, eye_z, horizon, OW, &v[2]) ||
+        !chase_project_face_vertex(dx, dy, dz, 0.0f, 0.0f,
+                                   camx, camy, fxv, fyv, rxv, ryv,
+                                   focal, eye_z, horizon, OW, &v[3]))
+        return;
+    draw_chase_color_triangle(&v[0], &v[1], &v[2], color, face_mul,
+                              fog, OW, OH, out);
+    draw_chase_color_triangle(&v[0], &v[2], &v[3], color, face_mul,
+                              fog, OW, OH, out);
+}
+
+/* Impa's tree house is a two-row overhead drawing, but it describes one
+ * object: a 48px canopy over a 48px doorway/trunk facade. Fold those exact
+ * live pixels onto one shallow building. No replacement texture or palette
+ * is invented; even the open-door tile continues to come from the cart. */
+static void draw_voxel_structure(const VoxStructure* b, float ground,
+                                 float camx, float camy,
+                                 float fxv, float fyv,
+                                 float rxv, float ryv,
+                                 float focal, float eye_z, float hpx,
+                                 int horizon, uint32_t fog,
+                                 int OW, int OH, uint32_t* out) {
+    const float west = (float)b->sx;
+    const float east = west + (float)VOX_STRUCTURE_W;
+    const float north = (float)b->sy;
+    const float south = north + 16.0f;
+    const float base_z = ground * hpx;
+    const float wall_top = base_z + 16.0f;
+    enum { ROOF_THICK = 4 };
+    const float roof_top = wall_top + (float)ROOF_THICK;
+    const float centre_x = (west + east) * 0.5f;
+    const float centre_y = (north + south) * 0.5f;
+    const bool see_south = camy >= centre_y;
+    const bool see_north = camy <= centre_y;
+    const bool see_west = camx <= centre_x;
+    const bool see_east = camx >= centre_x;
+
+    /* Doorway/trunk facade. Source y is top-down on the flat map; on the
+     * wall it becomes top-to-bottom height, preserving every 1px course. */
+    if (see_south || see_north) {
+        float face_y = see_south ? south : north;
+        for (int py = 0; py < VOX_STRUCTURE_H; py++) {
+            float z1 = wall_top - (float)py;
+            float z0 = z1 - 1.0f;
+            for (int px = 0; px < VOX_STRUCTURE_W; px++) {
+                float x0 = west + (float)px, x1 = x0 + 1.0f;
+                int src_x = see_south ? px : VOX_STRUCTURE_W - 1 - px;
+                int src_at = py * VOX_STRUCTURE_W + src_x;
+                if (!b->front_solid[src_at]) continue;
+                uint32_t c = b->front[src_at];
+                if (see_south) {
+                    draw_chase_color_quad(x0, face_y, z0, x1, face_y, z0,
+                                          x1, face_y, z1, x0, face_y, z1,
+                                          c, 256, camx, camy, fxv, fyv,
+                                          rxv, ryv, focal, eye_z, horizon,
+                                          fog, OW, OH, out);
+                } else {
+                    draw_chase_color_quad(x1, face_y, z0, x0, face_y, z0,
+                                          x0, face_y, z1, x1, face_y, z1,
+                                          c, 256, camx, camy, fxv, fyv,
+                                          rxv, ryv, focal, eye_z, horizon,
+                                          fog, OW, OH, out);
+                }
+            }
+        }
+    }
+
+    /* The 16px-deep body gets edge texels from the same facade, making the
+     * house genuinely volumetric when approached from either side. */
+    if (see_west || see_east) {
+        float face_x = see_west ? west : east;
+        for (int py = 0; py < VOX_STRUCTURE_H; py++) {
+            float z1 = wall_top - (float)py;
+            float z0 = z1 - 1.0f;
+            for (int d = 0; d < 16; d++) {
+                float y0 = north + (float)d, y1 = y0 + 1.0f;
+                int src_x = see_west ? 15 - d
+                                     : VOX_STRUCTURE_W - 16 + d;
+                int src_at = py * VOX_STRUCTURE_W + src_x;
+                if (!b->front_solid[src_at]) continue;
+                uint32_t c = b->front[src_at];
+                if (see_west) {
+                    draw_chase_color_quad(face_x, y1, z0, face_x, y0, z0,
+                                          face_x, y0, z1, face_x, y1, z1,
+                                          c, 256, camx, camy, fxv, fyv,
+                                          rxv, ryv, focal, eye_z, horizon,
+                                          fog, OW, OH, out);
+                } else {
+                    draw_chase_color_quad(face_x, y0, z0, face_x, y1, z0,
+                                          face_x, y1, z1, face_x, y0, z1,
+                                          c, 256, camx, camy, fxv, fyv,
+                                          rxv, ryv, focal, eye_z, horizon,
+                                          fog, OW, OH, out);
+                }
+            }
+        }
+    }
+
+    /* Complete authored canopy strip as the roof. */
+    for (int py = 0; py < VOX_STRUCTURE_H; py++) {
+        float y0 = north + (float)py, y1 = y0 + 1.0f;
+        for (int px = 0; px < VOX_STRUCTURE_W; px++) {
+            float x0 = west + (float)px, x1 = x0 + 1.0f;
+            int src_at = py * VOX_STRUCTURE_W + px;
+            if (!b->roof_solid[src_at]) continue;
+            uint32_t c = b->roof[src_at];
+            draw_chase_color_quad(x0, y0, roof_top, x1, y0, roof_top,
+                                  x1, y1, roof_top, x0, y1, roof_top,
+                                  c, 256, camx, camy, fxv, fyv, rxv, ryv,
+                                  focal, eye_z, horizon, fog, OW, OH, out);
+        }
+    }
+
+    /* A shallow canopy skirt joins the roof to the facade. It samples the
+     * matching roof edge instead of stretching one invented colour. */
+    for (int v = 0; v < ROOF_THICK; v++) {
+        float z0 = wall_top + (float)v, z1 = z0 + 1.0f;
+        int src_y = VOX_STRUCTURE_H - 1 -
+                    (v * VOX_STRUCTURE_H / ROOF_THICK);
+        if (see_south || see_north) {
+            float face_y = see_south ? south : north;
+            for (int px = 0; px < VOX_STRUCTURE_W; px++) {
+                float x0 = west + (float)px, x1 = x0 + 1.0f;
+                int src_x = see_south ? px : VOX_STRUCTURE_W - 1 - px;
+                int roof_y = see_south ? src_y
+                                       : VOX_STRUCTURE_H - 1 - src_y;
+                int src_at = roof_y * VOX_STRUCTURE_W + src_x;
+                if (!b->roof_solid[src_at]) continue;
+                uint32_t c = b->roof[src_at];
+                if (see_south) {
+                    draw_chase_color_quad(x0, face_y, z0, x1, face_y, z0,
+                                          x1, face_y, z1, x0, face_y, z1,
+                                          c, 256, camx, camy, fxv, fyv,
+                                          rxv, ryv, focal, eye_z, horizon,
+                                          fog, OW, OH, out);
+                } else {
+                    draw_chase_color_quad(x1, face_y, z0, x0, face_y, z0,
+                                          x0, face_y, z1, x1, face_y, z1,
+                                          c, 256, camx, camy, fxv, fyv,
+                                          rxv, ryv, focal, eye_z, horizon,
+                                          fog, OW, OH, out);
+                }
+            }
+        }
+        if (see_west || see_east) {
+            float face_x = see_west ? west : east;
+            for (int d = 0; d < 16; d++) {
+                float y0 = north + (float)d, y1 = y0 + 1.0f;
+                int src_x = see_west ? 15 - d
+                                     : VOX_STRUCTURE_W - 16 + d;
+                int src_at = src_y * VOX_STRUCTURE_W + src_x;
+                if (!b->roof_solid[src_at]) continue;
+                uint32_t c = b->roof[src_at];
+                if (see_west) {
+                    draw_chase_color_quad(face_x, y1, z0, face_x, y0, z0,
+                                          face_x, y0, z1, face_x, y1, z1,
+                                          c, 256, camx, camy, fxv, fyv,
+                                          rxv, ryv, focal, eye_z, horizon,
+                                          fog, OW, OH, out);
+                } else {
+                    draw_chase_color_quad(face_x, y0, z0, face_x, y1, z0,
+                                          face_x, y1, z1, face_x, y0, z1,
+                                          c, 256, camx, camy, fxv, fyv,
+                                          rxv, ryv, focal, eye_z, horizon,
+                                          fog, OW, OH, out);
+                }
+            }
+        }
+    }
+}
+
+
+/* Turn the original 16x16 room-cell drawing into fixed world geometry.
+ * Full trees now have two literal pieces, like the Gen 1 voxel treatment:
+ * a trunk tile below and a canopy tile above. The canopy top is the original
+ * source cell unchanged. Its four vertical edges are direct projections of
+ * the corresponding source half, and the trunk samples the source cell's
+ * lower centre. There is no rounded shell, generated palette, or billboard.
+ * Tufts keep a shallow relief. */
+static void draw_voxel_tree(const VoxTree* t, int object_sx, int object_sy,
+                            float ground,
+                            float camx, float camy,
+                            float fxv, float fyv, float rxv, float ryv,
+                            float focal, float eye_z, float hpx,
+                            int horizon, uint32_t fog,
+                            int OW, int OH, uint32_t* out) {
+    const bool big = t->hcls >= VOX_H_HIGH;
+    const float centre_y = (float)object_sy + 8.0f;
+    const float base_z = ground * hpx;
+
+    if (big) {
+        const float centre_x = (float)object_sx + 8.0f;
+        const bool see_south = camy >= centre_y;
+        const bool see_north = camy <= centre_y;
+        const bool see_west = camx <= centre_x;
+        const bool see_east = camx >= centre_x;
+        enum { TRUNK_W = 6, TRUNK_H = 16, CANOPY_H = 12 };
+        const int trunk_left = object_sx + (16 - TRUNK_W) / 2;
+        const float trunk_north = centre_y - (float)TRUNK_W * 0.5f;
+        const float trunk_south = centre_y + (float)TRUNK_W * 0.5f;
+        const float canopy_bottom = base_z + (float)TRUNK_H;
+        const float canopy_top = canopy_bottom + (float)CANOPY_H;
+
+        /* Bottom tile: a square trunk cut straight from the lower centre of
+         * the authored room cell. Repeating source rows is nearest-neighbour
+         * scaling, so no new colours or painted bark enter the result. */
+        for (int tz = 0; tz < TRUNK_H; tz++) {
+            int src_y = 15 - tz * 7 / (TRUNK_H - 1);
+            float z0 = base_z + (float)tz, z1 = z0 + 1.0f;
+            for (int u = 0; u < TRUNK_W; u++) {
+                int src_x = 5 + u;
+                uint32_t c = t->tex[src_y * 16 + src_x];
+                float x0 = (float)(trunk_left + u), x1 = x0 + 1.0f;
+                if (see_south)
+                    draw_chase_color_quad(x0, trunk_south, z0,
+                                          x1, trunk_south, z0,
+                                          x1, trunk_south, z1,
+                                          x0, trunk_south, z1,
+                                          c, 256, camx, camy, fxv, fyv,
+                                          rxv, ryv, focal, eye_z, horizon,
+                                          fog, OW, OH, out);
+                if (see_north)
+                    draw_chase_color_quad(x1, trunk_north, z0,
+                                          x0, trunk_north, z0,
+                                          x0, trunk_north, z1,
+                                          x1, trunk_north, z1,
+                                          c, 256, camx, camy, fxv, fyv,
+                                          rxv, ryv, focal, eye_z, horizon,
+                                          fog, OW, OH, out);
+                float y0 = trunk_north + (float)u, y1 = y0 + 1.0f;
+                if (see_west)
+                    draw_chase_color_quad((float)trunk_left, y0, z0,
+                                          (float)trunk_left, y1, z0,
+                                          (float)trunk_left, y1, z1,
+                                          (float)trunk_left, y0, z1,
+                                          c, 256, camx, camy, fxv, fyv,
+                                          rxv, ryv, focal, eye_z, horizon,
+                                          fog, OW, OH, out);
+                if (see_east)
+                    draw_chase_color_quad((float)(trunk_left + TRUNK_W), y1, z0,
+                                          (float)(trunk_left + TRUNK_W), y0, z0,
+                                          (float)(trunk_left + TRUNK_W), y0, z1,
+                                          (float)(trunk_left + TRUNK_W), y1, z1,
+                                          c, 256, camx, camy, fxv, fyv,
+                                          rxv, ryv, focal, eye_z, horizon,
+                                          fog, OW, OH, out);
+            }
+        }
+
+        /* Top tile: the complete 16x16 room-cell art, horizontal and flat.
+         * Neighbouring cells therefore rebuild the cart's connected canopy
+         * exactly instead of approximating it with one rounded primitive. */
+        for (int py = 0; py < 16; py++) {
+            for (int px = 0; px < 16; px++) {
+                int at = py * 16 + px;
+                if (!t->solid[at]) continue;
+                float x0 = (float)object_sx + (float)px;
+                float x1 = x0 + 1.0f;
+                float y0 = (float)object_sy + (float)py;
+                float y1 = y0 + 1.0f;
+                draw_chase_color_quad(x0, y0, canopy_top,
+                                      x1, y0, canopy_top,
+                                      x1, y1, canopy_top,
+                                      x0, y1, canopy_top,
+                                      t->tex[at], 256, camx, camy, fxv, fyv,
+                                      rxv, ryv, focal, eye_z, horizon,
+                                      fog, OW, OH, out);
+            }
+        }
+
+        /* Canopy sides: unfold the matching half of the same source tile.
+         * The south face uses rows 8..15 (the lighter lower canopy the user
+         * can see in the original), north uses 0..7, and east/west use their
+         * corresponding columns. Shared forest edges emit no internal wall. */
+        if (see_south && !(t->joins & VOX_TREE_JOIN_S)) {
+            for (int tz = 0; tz < CANOPY_H; tz++) {
+                int src_y = 15 - tz * 7 / (CANOPY_H - 1);
+                float z0 = canopy_bottom + (float)tz, z1 = z0 + 1.0f;
+                for (int u = 0; u < 16; u++) {
+                    int at = src_y * 16 + u;
+                    if (!t->solid[at]) continue;
+                    float x0 = (float)object_sx + (float)u;
+                    draw_chase_color_quad(x0, (float)object_sy + 16.0f, z0,
+                                          x0 + 1.0f, (float)object_sy + 16.0f, z0,
+                                          x0 + 1.0f, (float)object_sy + 16.0f, z1,
+                                          x0, (float)object_sy + 16.0f, z1,
+                                          t->tex[at], 256, camx, camy,
+                                          fxv, fyv, rxv, ryv, focal, eye_z,
+                                          horizon, fog, OW, OH, out);
+                }
+            }
+        }
+        if (see_north && !(t->joins & VOX_TREE_JOIN_N)) {
+            for (int tz = 0; tz < CANOPY_H; tz++) {
+                int src_y = 7 - tz * 7 / (CANOPY_H - 1);
+                float z0 = canopy_bottom + (float)tz, z1 = z0 + 1.0f;
+                for (int u = 0; u < 16; u++) {
+                    int at = src_y * 16 + u;
+                    if (!t->solid[at]) continue;
+                    float x0 = (float)object_sx + (float)u;
+                    draw_chase_color_quad(x0 + 1.0f, (float)object_sy, z0,
+                                          x0, (float)object_sy, z0,
+                                          x0, (float)object_sy, z1,
+                                          x0 + 1.0f, (float)object_sy, z1,
+                                          t->tex[at], 256, camx, camy,
+                                          fxv, fyv, rxv, ryv, focal, eye_z,
+                                          horizon, fog, OW, OH, out);
+                }
+            }
+        }
+        if (see_west && !(t->joins & VOX_TREE_JOIN_W)) {
+            for (int tz = 0; tz < CANOPY_H; tz++) {
+                int src_x = 7 - tz * 7 / (CANOPY_H - 1);
+                float z0 = canopy_bottom + (float)tz, z1 = z0 + 1.0f;
+                for (int u = 0; u < 16; u++) {
+                    int at = u * 16 + src_x;
+                    if (!t->solid[at]) continue;
+                    float y0 = (float)object_sy + (float)u;
+                    draw_chase_color_quad((float)object_sx, y0, z0,
+                                          (float)object_sx, y0 + 1.0f, z0,
+                                          (float)object_sx, y0 + 1.0f, z1,
+                                          (float)object_sx, y0, z1,
+                                          t->tex[at], 256, camx, camy,
+                                          fxv, fyv, rxv, ryv, focal, eye_z,
+                                          horizon, fog, OW, OH, out);
+                }
+            }
+        }
+        if (see_east && !(t->joins & VOX_TREE_JOIN_E)) {
+            for (int tz = 0; tz < CANOPY_H; tz++) {
+                int src_x = 8 + tz * 7 / (CANOPY_H - 1);
+                float z0 = canopy_bottom + (float)tz, z1 = z0 + 1.0f;
+                for (int u = 0; u < 16; u++) {
+                    int at = u * 16 + src_x;
+                    if (!t->solid[at]) continue;
+                    float y0 = (float)object_sy + (float)u;
+                    draw_chase_color_quad((float)object_sx + 16.0f, y0 + 1.0f, z0,
+                                          (float)object_sx + 16.0f, y0, z0,
+                                          (float)object_sx + 16.0f, y0, z1,
+                                          (float)object_sx + 16.0f, y0 + 1.0f, z1,
+                                          t->tex[at], 256, camx, camy,
+                                          fxv, fyv, rxv, ryv, focal, eye_z,
+                                          horizon, fog, OW, OH, out);
+                }
+            }
+        }
+        return;
+    }
+
+    const float zscale = 0.68f;
+    const float half_depth = 3.0f;
+    const float south = centre_y + half_depth;
+    const float north = centre_y - half_depth;
+
+    for (int py = 0; py < 16; py++) {
+        for (int px = 0; px < 16; px++) {
+            int at = py * 16 + px;
+            if (!t->solid[at]) continue;
+            float x0 = (float)object_sx + (float)px;
+            float x1 = x0 + 1.0f;
+            float z0 = base_z + (float)(15 - py) * zscale;
+            float z1 = z0 + zscale;
+            uint32_t c = t->tex[at];
+
+            /* Original artwork, untouched except for distance fog. */
+            draw_chase_color_quad(x0, south, z0, x1, south, z0,
+                                  x1, south, z1, x0, south, z1,
+                                  c, 256, camx, camy, fxv, fyv, rxv, ryv,
+                                  focal, eye_z, horizon, fog, OW, OH, out);
+            draw_chase_color_quad(x1, north, z0, x0, north, z0,
+                                  x0, north, z1, x1, north, z1,
+                                  c, 224, camx, camy, fxv, fyv, rxv, ryv,
+                                  focal, eye_z, horizon, fog, OW, OH, out);
+
+            bool left  = px == 0  || !t->solid[at - 1];
+            bool right = px == 15 || !t->solid[at + 1];
+            bool above = py == 0  || !t->solid[at - 16];
+            bool below = py == 15 || !t->solid[at + 16];
+            if (left)
+                draw_chase_color_quad(x0, north, z0, x0, south, z0,
+                                      x0, south, z1, x0, north, z1,
+                                      c, 218, camx, camy, fxv, fyv, rxv, ryv,
+                                      focal, eye_z, horizon, fog, OW, OH, out);
+            if (right)
+                draw_chase_color_quad(x1, south, z0, x1, north, z0,
+                                      x1, north, z1, x1, south, z1,
+                                      c, 202, camx, camy, fxv, fyv, rxv, ryv,
+                                      focal, eye_z, horizon, fog, OW, OH, out);
+            if (above)
+                draw_chase_color_quad(x0, north, z1, x1, north, z1,
+                                      x1, south, z1, x0, south, z1,
+                                      c, 278, camx, camy, fxv, fyv, rxv, ryv,
+                                      focal, eye_z, horizon, fog, OW, OH, out);
+            if (below && py != 15)
+                draw_chase_color_quad(x0, south, z0, x1, south, z0,
+                                      x1, north, z0, x0, north, z0,
+                                      c, 176, camx, camy, fxv, fyv, rxv, ryv,
+                                      focal, eye_z, horizon, fog, OW, OH, out);
+        }
+    }
+}
+
+static void draw_chase_face_triangle(const ChaseFaceVert* a,
+                                     const ChaseFaceVert* b,
+                                     const ChaseFaceVert* c,
+                                     const VoxTileGrid* grid,
+                                     int tx, int ty, int face_mul,
+                                     uint32_t fog, int S,
+                                     int world_top, int OW, int OH,
+                                     uint32_t* out) {
+    float area = chase_edge(a->x, a->y, b->x, b->y, c->x, c->y);
+    if (fabsf(area) < 0.001f) return;
+    float minxf = fminf(a->x, fminf(b->x, c->x));
+    float maxxf = fmaxf(a->x, fmaxf(b->x, c->x));
+    float minyf = fminf(a->y, fminf(b->y, c->y));
+    float maxyf = fmaxf(a->y, fmaxf(b->y, c->y));
+    int minx = (int)floorf(minxf), maxx = (int)ceilf(maxxf);
+    int miny = (int)floorf(minyf), maxy = (int)ceilf(maxyf);
+    if (minx < 0) minx = 0;
+    if (maxx >= OW) maxx = OW - 1;
+    if (miny < world_top * S) miny = world_top * S;
+    if (maxy >= OH) maxy = OH - 1;
+
+    float ia = 1.0f / a->dep, ib = 1.0f / b->dep, ic = 1.0f / c->dep;
+    for (int y = miny; y <= maxy; y++) {
+        for (int x = minx; x <= maxx; x++) {
+            float px = (float)x + 0.5f, py = (float)y + 0.5f;
+            float wa = chase_edge(b->x, b->y, c->x, c->y, px, py) / area;
+            float wb = chase_edge(c->x, c->y, a->x, a->y, px, py) / area;
+            float wc = 1.0f - wa - wb;
+            if (wa < -0.0001f || wb < -0.0001f || wc < -0.0001f) continue;
+            float invd = wa * ia + wb * ib + wc * ic;
+            if (invd <= 0.0f) continue;
+            float dep = 1.0f / invd;
+            int at = y * OW + x;
+            if (s_zbuf[at] < dep - 2.5f) continue;
+            float vertical = (wa * a->vertical * ia +
+                              wb * b->vertical * ib +
+                              wc * c->vertical * ic) / invd;
+            float along = (wa * a->along * ia + wb * b->along * ib +
+                           wc * c->along * ic) / invd;
+            uint32_t color = shade(chase_cliff_texel(grid, tx, ty,
+                                                     along, vertical),
+                                   face_mul);
+            int fog_mix = (int)((dep - g_tune.fog_start) * 256.0f /
+                                (230.0f - g_tune.fog_start));
+            if (fog_mix < 0) fog_mix = 0;
+            if (fog_mix > (int)g_tune.fog_max)
+                fog_mix = (int)g_tune.fog_max;
+            out[at] = lerp_color(color, fog, fog_mix);
+            s_zbuf[at] = dep;
+        }
+    }
+}
+
+/* Put one true projected quad on every visible authoritative height edge.
+ * The raycast remains responsible for top surfaces and distant continuity;
+ * these quads make cliff/wall silhouettes planar and preserve the room map's
+ * right-angle corners instead of bending a face independently per column. */
+static void draw_chase_cliff_faces(const VoxTileGrid* grid,
+                                   float cx, float cy,
+                                   float fxv, float fyv,
+                                   float rxv, float ryv,
+                                   float focal, float cz, float hpx,
+                                   int horizon, uint32_t fog, int S,
+                                   int OW, int OH, uint32_t* out) {
+    const float* units = VOX_UNITS;
+    int first_ty = grid->hud_rows >> 3;
+    for (int ty = first_ty; ty < VOX_TILES_H; ty++) {
+        for (int tx = 0; tx < VOX_TILES_W; tx++) {
+            if (grid->treecell[ty][tx] ||
+                (grid->height[ty][tx] < VOX_H_MID &&
+                 grid->elevation[ty][tx] == 0))
+                continue;
+            float high = cell_base(grid, tx, ty)
+                       + units[grid->height[ty][tx]];
+            float x0 = (float)(tx * 8) - (float)grid->fine_x;
+            float y0 = (float)(ty * 8) - (float)grid->fine_y;
+            for (int side = 0; side < 4; side++) {
+                int nx = tx + (side == 1) - (side == 0);
+                int ny = ty + (side == 3) - (side == 2);
+                if (nx < 0 || nx >= VOX_TILES_W ||
+                    ny < first_ty || ny >= VOX_TILES_H)
+                    continue;
+                float low = cell_base(grid, nx, ny);
+                if (!grid->treecell[ny][nx])
+                    low += units[grid->height[ny][nx]];
+                if (high <= low + 0.75f) continue;
+
+                float ax, ay, bx, by, mx, my;
+                int face_mul;
+                if (side == 0) {       /* west */
+                    ax = bx = x0; ay = y0; by = y0 + 8.0f;
+                    mx = -1.0f; my = 0.0f; face_mul = 238;
+                } else if (side == 1) {/* east */
+                    ax = bx = x0 + 8.0f; ay = y0 + 8.0f; by = y0;
+                    mx = 1.0f; my = 0.0f; face_mul = 222;
+                } else if (side == 2) {/* north */
+                    ay = by = y0; ax = x0 + 8.0f; bx = x0;
+                    mx = 0.0f; my = -1.0f; face_mul = 248;
+                } else {              /* south */
+                    ay = by = y0 + 8.0f; ax = x0; bx = x0 + 8.0f;
+                    mx = 0.0f; my = 1.0f; face_mul = 232;
+                }
+                float ex = (ax + bx) * 0.5f, ey = (ay + by) * 0.5f;
+                if ((cx - ex) * mx + (cy - ey) * my <= 0.0f) continue;
+
+                ChaseFaceVert v[4];
+                float drop = (high - low) * hpx;
+                if (!chase_project_face_vertex(ax, ay, high * hpx, 0.0f,
+                                               ax + ay, cx, cy, fxv, fyv,
+                                               rxv, ryv, focal, cz, horizon,
+                                               OW, &v[0]) ||
+                    !chase_project_face_vertex(bx, by, high * hpx, 0.0f,
+                                               bx + by, cx, cy, fxv, fyv,
+                                               rxv, ryv, focal, cz, horizon,
+                                               OW, &v[1]) ||
+                    !chase_project_face_vertex(bx, by, low * hpx, drop,
+                                               bx + by, cx, cy, fxv, fyv,
+                                               rxv, ryv, focal, cz, horizon,
+                                               OW, &v[2]) ||
+                    !chase_project_face_vertex(ax, ay, low * hpx, drop,
+                                               ax + ay, cx, cy, fxv, fyv,
+                                               rxv, ryv, focal, cz, horizon,
+                                               OW, &v[3]))
+                    continue;
+                draw_chase_face_triangle(&v[0], &v[1], &v[2], grid,
+                                         tx, ty, face_mul, fog, S,
+                                         grid->hud_rows, OW, OH, out);
+                draw_chase_face_triangle(&v[0], &v[2], &v[3], grid,
+                                         tx, ty, face_mul, fog, S,
+                                         grid->hud_rows, OW, OH, out);
+            }
+        }
+    }
+}
+
 /* One frame of camera aim: where Link is, and where the camera looks.
  * Split out of render_chase so the yaw rules can be driven directly by
  * tools/chasecam_test.c -- how a camera feels is not something a
@@ -389,6 +1161,15 @@ void vox_chase_step(const VoxTileGrid* grid, float* out_lx, float* out_ly) {
     if (grid->link_known) {
         lx = (float)grid->link_sx;
         ly = (float)grid->link_feet_sy;
+        /* A fresh chase camera starts where its name promises: directly
+         * behind Link. Free orbit still owns the heading after this first
+         * trustworthy gameplay frame. */
+        if (!g_chase_heading_live) {
+            g_chase_yaw = CHASE_DIR_YAW[grid->link_dir & 3];
+            g_chase_heading_live = true;
+            g_manual_hold = 0;
+            g_recentring = false;
+        }
     }
 
     /* Yaw: the camera orbits Link, and the stick owns it.
@@ -449,10 +1230,7 @@ void vox_chase_step(const VoxTileGrid* grid, float* out_lx, float* out_ly) {
 
         /* 0 up, 1 right, 2 down, 3 left -- screen yaw has +y downward,
          * so up is -pi/2 and down is +pi/2. */
-        static const float DIR_YAW[4] = {
-            -1.5707963f, 0.0f, 1.5707963f, 3.1415927f
-        };
-        const float behind = DIR_YAW[grid->link_dir & 3];
+        const float behind = CHASE_DIR_YAW[grid->link_dir & 3];
 
         if (turn != 0.0f) {
             g_chase_yaw += turn * 0.055f;
@@ -503,7 +1281,8 @@ void vox_chase_step(const VoxTileGrid* grid, float* out_lx, float* out_ly) {
         while (g_chase_yaw >  3.1415927f) g_chase_yaw -= 6.2831853f;
         while (g_chase_yaw <= -3.1415927f) g_chase_yaw += 6.2831853f;
     }
-
+    if (out_lx) *out_lx = lx;
+    if (out_ly) *out_ly = ly;
 }
 
 static void render_chase(GBContext* ctx, const VoxTileGrid* grid,
@@ -516,6 +1295,7 @@ static void render_chase(GBContext* ctx, const VoxTileGrid* grid,
 
     for (int i = 0; i < OW * OH; i++) s_zbuf[i] = 1e9f;
     g_flatten_trees = true;
+    prepare_chase_ground(grid);
 
     /* Sky first; the ground overwrites what it owns. */
     if (grid->sky != VOX_SKY_NONE) {
@@ -541,18 +1321,33 @@ static void render_chase(GBContext* ctx, const VoxTileGrid* grid,
     const float fxv = cosf(g_chase_yaw), fyv = sinf(g_chase_yaw);
     const float rxv = -fyv, ryv = fxv;      /* screen-space right vector */
 
-    const float BACK = g_tune.chase_back;   /* camera behind the player */
     const float CAMH = g_tune.chase_height; /* and above their ground */
-    /* Ease the camera's position so Link's whole-pixel steps (and room
-     * transitions) glide instead of ticking. */
-    static float scx_f = 0.0f, scy_f = 0.0f;
+    /* Ease Link's whole-pixel anchor, then place the camera at a separately
+     * smoothed distance. Obstacle clamps apply immediately; moving back out
+     * to the requested distance is gentle. Smoothing the old target x/y
+     * directly allowed it to spend several frames travelling through the
+     * very wall the new target had avoided. */
+    static float slx_f = 0.0f, sly_f = 0.0f, back_f = 0.0f;
     static bool cam_live = false;
-    float tx = lx - fxv * BACK;
-    float ty = ly - fyv * BACK;
-    if (!cam_live) { scx_f = tx; scy_f = ty; cam_live = true; }
-    scx_f += (tx - scx_f) * 0.35f;
-    scy_f += (ty - scy_f) * 0.35f;
-    float cx = scx_f, cy = scy_f;
+    if (g_chase_pose_reset) {
+        cam_live = false;
+        g_chase_pose_reset = false;
+    }
+    if (!cam_live) {
+        slx_f = lx;
+        sly_f = ly;
+        back_f = vox_chase_camera_back(grid, lx, ly, fxv, fyv,
+                                       g_tune.chase_back);
+        cam_live = true;
+    }
+    slx_f += (lx - slx_f) * 0.35f;
+    sly_f += (ly - sly_f) * 0.35f;
+    float allowed = vox_chase_camera_back(grid, slx_f, sly_f, fxv, fyv,
+                                          g_tune.chase_back);
+    if (allowed < back_f) back_f = allowed;
+    else back_f += (allowed - back_f) * 0.12f;
+    float cx = slx_f - fxv * back_f;
+    float cy = sly_f - fyv * back_f;
     float cg = chase_height_at(grid, cx, cy);
     if (cg < 0.0f) cg = 0.0f;
     const float cz = cg * HPX + CAMH;
@@ -621,7 +1416,6 @@ static void render_chase(GBContext* ctx, const VoxTileGrid* grid,
                 uint32_t c;
                 if (!(remembered && vox_world_tex(wx2, wy2, &c)))
                     c = chase_tex_at(grid, sx2, sy2);
-                const uint32_t ground_raw = c;
                 if (h < 0.0f) {
                     c = shade(c, 190);
                     c = (c & 0xFFFFFF00u) | 0x00000050u;
@@ -639,49 +1433,30 @@ static void render_chase(GBContext* ctx, const VoxTileGrid* grid,
                 int rim = top_rim(S);
                 int top = sy < 0 ? 0 : sy;
                 if (face && ybuf - top > rim + 1) {
-                    /* A riser's front face. Tile the cell's own 8px artwork
-                     * down it at native chunkiness -- the diorama already
-                     * does this and its cliffs read as rock courses, where
-                     * stretching the art once down the face (the old way)
-                     * smeared it into vertical taffy. */
+                    /* A riser's front face folds the original 8px tile rows
+                     * downward in complete bands. Planar edge quads overwrite
+                     * this column fallback nearby; this keeps distant faces
+                     * faithful too. */
                     int tile_top = ((int)(sy2 + (float)grid->fine_y)) & ~7;
                     if (tile_top < 0) tile_top = 0;
                     if (tile_top > VOX_TEX_H - 8) tile_top = VOX_TEX_H - 8;
-                    int span = ybuf - top;
                     int t2 = (int)((d - g_tune.fog_start) * 256.0f /
                                    (FAR - g_tune.fog_start));
                     if (t2 < 0) t2 = 0;
                     if (t2 > (int)g_tune.fog_max) t2 = (int)g_tune.fog_max;
-                    /* A tree's face is not cliff all the way down: below
-                     * the canopy it falls into bark shadow, which is what
-                     * separates "tree" from "green wall" at eye level. The
-                     * bark keeps the cell's own colour cast so autumn and
-                     * winter palettes still land. */
-                    bool leafy_face =
-                        grid->leafy[tile_top >> 3][tex_col >> 3] != 0;
-                    if (remembered) {
-                        uint32_t dummy;
-                        vox_world_face(wx2, wy2, 0, &dummy, &leafy_face);
-                    }
-                    int trunk_y = (leafy_face && span >= 8 * S)
-                        ? top + (span * 3) / 5 : ybuf;
-                    uint32_t bark = lerp_color(shade(ground_raw, 70),
-                                               0xFF3A2A20u, 120);
-                    bark = lerp_color(bark, fog, t2);
                     for (int yy = top; yy < ybuf; yy++) {
                         uint32_t wc;
-                        if (yy < top + rim) {
-                            wc = c;
-                        } else if (yy >= trunk_y) {
-                            wc = bark;
-                        } else {
-                            int art = ((yy - top) / S) & 7;
-                            if (!(remembered &&
-                                  vox_world_face(wx2, wy2, art, &wc, NULL)))
-                                wc = grid->tex[(tile_top + art) * VOX_TEX_W
-                                               + tex_col];
-                            wc = lerp_color(shade(wc, 168), fog, t2);
-                        }
+                        int art = ((yy - top) / S) & 7;
+                        if (!(remembered &&
+                              vox_world_face(wx2, wy2, art, &wc, NULL)))
+                            wc = grid->tex[(tile_top + art) * VOX_TEX_W
+                                           + tex_col];
+                        /* The source texel owns the drawing. This modest
+                         * orientation shade is the only invented colour on
+                         * a riser; no masonry, trunk or seam pattern replaces
+                         * what the cart actually drew. */
+                        wc = lerp_color(shade(wc, yy < top + rim ? 246 : 226),
+                                        fog, t2);
                         out[yy * OW + X] = wc;
                         s_zbuf[yy * OW + X] = d;
                     }
@@ -698,6 +1473,22 @@ static void render_chase(GBContext* ctx, const VoxTileGrid* grid,
         }
     }
 
+    draw_chase_cliff_faces(grid, cx, cy, fxv, fyv, rxv, ryv,
+                           focal, cz, HPX, horizon, fog, S, OW, OH, out);
+
+    /* Compound facades own the same depth buffer as terrain, so Link/NPCs
+     * naturally pass in front of the doorway and disappear behind the
+     * house without a room-specific sprite-order rule. */
+    for (int i = 0; i < grid->structure_count; i++) {
+        const VoxStructure* b = &grid->structures[i];
+        float ground = height_raw(grid,
+                                  (float)b->sx + VOX_STRUCTURE_W * 0.5f,
+                                  (float)b->sy + 8.0f);
+        if (ground < 0.0f) ground = 0.0f;
+        draw_voxel_structure(b, ground, cx, cy, fxv, fyv, rxv, ryv,
+                             focal, cz, HPX, horizon, fog, OW, OH, out);
+    }
+
     /* Sprites: adjacent 8px OAM entries at the same y are one character,
      * and drawing the halves as independent billboards let them drift into
      * twins with depth. Group each horizontal run, then draw runs farthest
@@ -708,6 +1499,8 @@ static void render_chase(GBContext* ctx, const VoxTileGrid* grid,
         int x, y, sh;
         float dep, lat, g;
         int elev;            /* world px above its ground (held items) */
+        int parent;          /* lower OAM run that owns this metasprite */
+        bool link_run;       /* Link's own row cannot parent a nearby NPC */
     } ChaseRun;
     ChaseRun runs[VOX_MAX_SPRITES];
     bool used[VOX_MAX_SPRITES] = {false};
@@ -732,6 +1525,8 @@ static void render_chase(GBContext* ctx, const VoxTileGrid* grid,
         r->x = lx0;
         r->y = s->y;
         r->sh = s->tall ? 16 : 8;
+        r->parent = -1;
+        r->link_run = false;
         for (int step = 0; step < 6; step++) {
             int want = lx0 + step * 8;
             int found = -1;
@@ -753,6 +1548,13 @@ static void render_chase(GBContext* ctx, const VoxTileGrid* grid,
         r->g = chase_height_at(grid, pxc, pyc);
         if (r->g < 0.0f) r->g = 0.0f;
         r->elev = 0;
+        if (grid->link_known) {
+            float dxl = pxc - (float)grid->link_sx;
+            if (dxl < 0.0f) dxl = -dxl;
+            int dyf = (int)pyc - grid->link_feet_sy;
+            if (dyf < 0) dyf = -dyf;
+            r->link_run = dxl <= 5.0f && dyf <= 2;
+        }
         /* A run hanging directly over Link's head is the item he is
          * holding up. Its 2D position is ABOVE him on screen, which the
          * ground-anchoring below would read as "16px further north" --
@@ -760,7 +1562,7 @@ static void render_chase(GBContext* ctx, const VoxTileGrid* grid,
          * own ground instead, elevated by exactly the pixels the game
          * drew it above his feet, and pull it a hair nearer so it sorts
          * in front of him. */
-        if (grid->link_known) {
+        if (grid->link_known && grid->link_item_get) {
             int bot = r->y + r->sh;
             int dxl = (int)pxc - grid->link_sx;
             if (dxl < 0) dxl = -dxl;
@@ -777,6 +1579,69 @@ static void render_chase(GBContext* ctx, const VoxTileGrid* grid,
         }
         nr++;
     }
+
+    /* Oracles composes tall characters as multiple horizontal OAM runs:
+     * Link usually has one 16px row, while larger NPCs (Impa, Gorons, etc.)
+     * stack a head row above a torso row. Projecting each row from its own
+     * bottom made the head appear metres behind/beside the body whenever the
+     * camera faced north or south. Attach a narrower/equal row whose bottom
+     * is within 16px above a lower row to that lower row's world anchor.
+     * A real held item is deliberately excluded; its item-get state uses the
+     * elevation path above. */
+    for (int i = 0; i < nr; i++) {
+        if (runs[i].elev || runs[i].n <= 0) continue;
+        float ic = (float)runs[i].x + (float)(runs[i].n * 8) * 0.5f;
+        int ibot = runs[i].y + runs[i].sh;
+        int best = -1, best_gap = 999;
+        for (int j = 0; j < nr; j++) {
+            if (i == j || runs[j].elev || runs[j].link_run ||
+                runs[j].n < runs[i].n)
+                continue;
+            float jc = (float)runs[j].x + (float)(runs[j].n * 8) * 0.5f;
+            float dc = ic - jc;
+            if (dc < 0.0f) dc = -dc;
+            if (dc > 4.0f) continue;
+            int gap = ibot - runs[j].y;
+            if (gap < 0 || gap > 5) continue;
+            if (gap < best_gap) { best = j; best_gap = gap; }
+        }
+        if (best >= 0) runs[i].parent = best;
+    }
+    for (int pass = 0; pass < nr; pass++) {
+        bool changed = false;
+        for (int i = 0; i < nr; i++) {
+            int p = runs[i].parent;
+            if (p < 0) continue;
+            while (runs[p].parent >= 0) p = runs[p].parent;
+            if (runs[i].parent != p) { runs[i].parent = p; changed = true; }
+            const ChaseRun* root = &runs[p];
+            float root_c = (float)root->x + (float)(root->n * 8) * 0.5f;
+            float root_y = (float)(root->y + root->sh);
+            runs[i].dep = (root_c - cx) * fxv + (root_y - cy) * fyv;
+            runs[i].lat = (root_c - cx) * rxv + (root_y - cy) * ryv;
+            runs[i].g = root->g;
+            runs[i].elev = (root->y + root->sh) -
+                           (runs[i].y + runs[i].sh);
+        }
+        if (!changed) break;
+    }
+    if (getenv("VOX_DUMP_RUNS")) {
+        fprintf(stderr,
+                "[VOXEL] chase sprites cam=(%.1f,%.1f) f=(%.2f,%.2f) "
+                "link=(%d,%d)\n",
+                cx, cy, fxv, fyv, grid->link_sx, grid->link_feet_sy);
+        for (int i = 0; i < nr; i++) {
+            const ChaseRun* r = &runs[i];
+            fprintf(stderr,
+                    "  run %02d n=%d pos=(%3d,%3d) dep=%6.1f lat=%6.1f "
+                    "scale=%5.2f elev=%d parent=%d members=",
+                    i, r->n, r->x, r->y, r->dep, r->lat,
+                    focal / r->dep, r->elev, r->parent);
+            for (int j = 0; j < r->n; j++)
+                fprintf(stderr, "%s%d", j ? "," : "", r->members[j]);
+            fputc('\n', stderr);
+        }
+    }
     for (int a = 1; a < nr; a++) {
         ChaseRun tmp = runs[a];
         int b = a - 1;
@@ -787,9 +1652,8 @@ static void render_chase(GBContext* ctx, const VoxTileGrid* grid,
         runs[b + 1] = tmp;
     }
 
-    /* Billboard trees, depth-sorted into the same painter's pass as the
-     * sprites, so a character walks behind one trunk and in front of the
-     * next tree down the row. */
+    /* Vegetation, depth-sorted into the same painter's pass as sprites, so a
+     * character walks behind one trunk and in front of the next tree. */
     /* Candidates: the live room's trees, then the remembered neighbours' --
      * a forest keeps its far ranks across the room border. */
     enum { VOX_MAX_BILLBOARDS = VOX_MAX_TREES + 192 };
@@ -805,8 +1669,8 @@ static void render_chase(GBContext* ctx, const VoxTileGrid* grid,
     nc += vox_world_neighbor_trees(cand + nc, VOX_MAX_BILLBOARDS - nc);
 
     int nt = 0;
-    static float tdep[VOX_MAX_BILLBOARDS], tlat[VOX_MAX_BILLBOARDS],
-                 tg[VOX_MAX_BILLBOARDS];
+    static float tdep[VOX_MAX_BILLBOARDS], tg[VOX_MAX_BILLBOARDS];
+    static int tsx[VOX_MAX_BILLBOARDS], tsy[VOX_MAX_BILLBOARDS];
     static const VoxTree* tptr[VOX_MAX_BILLBOARDS];
     for (int i = 0; i < nc; i++) {
         const VoxTree* t = cand[i].t;
@@ -815,7 +1679,6 @@ static void render_chase(GBContext* ctx, const VoxTileGrid* grid,
         float dep = (pxc - cx) * fxv + (pyc - cy) * fyv;
         if (dep < 16.0f || dep > FAR) continue;
         tdep[nt] = dep;
-        tlat[nt] = (pxc - cx) * rxv + (pyc - cy) * ryv;
         float gh;
         if (i < live_trees) {
             gh = chase_height_at(grid, pxc, pyc);
@@ -823,86 +1686,37 @@ static void render_chase(GBContext* ctx, const VoxTileGrid* grid,
             gh = 0.0f;
         }
         tg[nt] = gh < 0.0f ? 0.0f : gh;
+        tsx[nt] = cand[i].sx;
+        tsy[nt] = cand[i].sy;
         tptr[nt] = t;
         nt++;
     }
     for (int a = 1; a < nt; a++) {
-        float d0 = tdep[a], l0 = tlat[a], g0 = tg[a];
+        float d0 = tdep[a], g0 = tg[a];
+        int x0 = tsx[a], y0 = tsy[a];
         const VoxTree* p0 = tptr[a];
         int b = a - 1;
         while (b >= 0 && tdep[b] < d0) {
-            tdep[b + 1] = tdep[b]; tlat[b + 1] = tlat[b];
-            tg[b + 1] = tg[b];     tptr[b + 1] = tptr[b];
+            tdep[b + 1] = tdep[b]; tg[b + 1] = tg[b];
+            tsx[b + 1] = tsx[b]; tsy[b + 1] = tsy[b];
+            tptr[b + 1] = tptr[b];
             b--;
         }
-        tdep[b + 1] = d0; tlat[b + 1] = l0; tg[b + 1] = g0; tptr[b + 1] = p0;
+        tdep[b + 1] = d0; tg[b + 1] = g0;
+        tsx[b + 1] = x0; tsy[b + 1] = y0;
+        tptr[b + 1] = p0;
     }
 
     int ri = 0, ti = 0;
     while (ri < nr || ti < nt) {
         if (ti < nt && (ri >= nr || tdep[ti] >= runs[ri].dep)) {
-            /* One tree: a bark trunk and an elliptical canopy shaded in
-             * the three tones sampled from its own art -- lit crown, mid
-             * body, shadowed underside -- with a checker dither at the
-             * band seams so it stays pixel-art and not vector clip-art. */
             const VoxTree* t = tptr[ti];
-            float dep = tdep[ti];
-            float sc = focal / dep;
-            int cxp = (int)((float)OW * 0.5f + tlat[ti] / dep * focal);
-            int byp = horizon + (int)((cz - tg[ti] * HPX) * focal / dep);
-            int t2 = (int)((dep - g_tune.fog_start) * 256.0f /
-                           (FAR - g_tune.fog_start));
-            if (t2 < 0) t2 = 0;
-            if (t2 > (int)g_tune.fog_max) t2 = (int)g_tune.fog_max;
-            /* Proportions by kind: trees get a trunk and a tall canopy;
-             * destructibles (bushes, cuttable grass) are trunkless tufts
-             * hugging the ground -- a tuft with a trunk read as a small
-             * tree, and nobody swings a sword at a tree. */
-            bool big = t->hcls >= VOX_H_HIGH;
-            int th2 = big ? (int)(9.0f * sc) : 0;
-            int tw2 = (int)((big ? 6.0f : 5.0f) * sc);
-            int chh = (int)((big ? 22.0f : 10.0f) * sc);
-            int cww = (int)((big ? 24.0f : 16.0f) * sc);
+            float ground = tg[ti];
+            int object_sx = tsx[ti], object_sy = tsy[ti];
             ti++;
-            if (chh < 3 || cww < 3) continue;
-            if (tw2 < 2) tw2 = 2;
-            uint32_t bark = lerp_color(t->bark, fog, t2);
-            uint32_t lit  = lerp_color(t->lit, fog, t2);
-            uint32_t mid  = lerp_color(t->mid, fog, t2);
-            uint32_t dk   = lerp_color(shade(t->dark, 200), fog, t2);
-            for (int yy = byp - th2; yy < byp; yy++) {
-                if (yy < 0 || yy >= OH) continue;
-                for (int k2 = 0; k2 < tw2; k2++) {
-                    int xx = cxp - tw2 / 2 + k2;
-                    if (xx < 0 || xx >= OW) continue;
-                    if (s_zbuf[yy * OW + xx] < dep - 3.0f) continue;
-                    out[yy * OW + xx] = (k2 == 0 || k2 == tw2 - 1)
-                        ? shade(bark, 150) : bark;
-                }
-            }
-            /* The canopy is the tree's own 16x16 tile art stood upright,
-             * masked to a rounded-square silhouette (superellipse) so the
-             * block's corners -- neighbouring ground or the next tree's
-             * leaves -- don't float. The art carries the shading; a dark
-             * rim at the silhouette edge gives it body. */
-            (void)lit; (void)mid; (void)dk;
-            int cyc = byp - th2 - chh / 2;
-            for (int yy = cyc - chh / 2; yy <= cyc + chh / 2; yy++) {
-                if (yy < 0 || yy >= OH) continue;
-                float v = (float)(yy - cyc) / ((float)chh * 0.5f);
-                int ay = (int)((v * 0.5f + 0.5f) * 15.99f);
-                for (int xx = cxp - cww / 2; xx <= cxp + cww / 2; xx++) {
-                    if (xx < 0 || xx >= OW) continue;
-                    float u = (float)(xx - cxp) / ((float)cww * 0.5f);
-                    float r2 = u * u * u * u + v * v * v * v;
-                    if (r2 > 1.0f) continue;
-                    if (s_zbuf[yy * OW + xx] < dep - 3.0f) continue;
-                    int ax = (int)((u * 0.5f + 0.5f) * 15.99f);
-                    uint32_t c2 = t->tex[ay * 16 + ax];
-                    if (r2 > 0.62f) c2 = shade(c2, 148);   /* dark rim */
-                    out[yy * OW + xx] = lerp_color(c2, fog, t2);
-                }
-            }
+            draw_voxel_tree(t, object_sx, object_sy, ground,
+                            cx, cy, fxv, fyv, rxv, ryv,
+                            focal, cz, HPX, horizon, fog, OW, OH, out);
             continue;
         }
         const ChaseRun* r = &runs[ri++];
@@ -991,8 +1805,17 @@ void vox_render(GBContext* ctx, const VoxTileGrid* grid,
     }
 
     /* Squashing the world frees vertical room; spend it lifting the diorama
-     * so tall geometry has somewhere to go without clipping off the top. */
-    const float headroom = VOX_UNITS[VOX_H_HIGH] * cam.lift * g_tune.tilt_scale;
+     * so tall geometry has somewhere to go without clipping off the top.
+     * A prop on a plateau can add another course above the shelf. */
+    float max_height = VOX_UNITS[VOX_H_HIGH];
+    for (int ty = 0; ty < VOX_TILES_H; ty++) {
+        for (int tx = 0; tx < VOX_TILES_W; tx++) {
+            float h = cell_base(grid, tx, ty)
+                    + VOX_UNITS[grid->height[ty][tx]];
+            if (h > max_height) max_height = h;
+        }
+    }
+    const float headroom = max_height * cam.lift * g_tune.tilt_scale;
     float y_off = (float)world_top + ((float)world_h * (1.0f - cam.squash)) * 0.5f;
     y_off += headroom * 0.55f;
 
@@ -1020,7 +1843,11 @@ void vox_render(GBContext* ctx, const VoxTileGrid* grid,
     bool extruded = false;
     for (int ty = 0; ty < VOX_TILES_H && !extruded; ty++) {
         for (int tx = 0; tx < VOX_TILES_W; tx++) {
-            if (VOX_UNITS[grid->height[ty][tx]] != 0.0f) { extruded = true; break; }
+            if (grid->elevation[ty][tx] ||
+                VOX_UNITS[grid->height[ty][tx]] != 0.0f) {
+                extruded = true;
+                break;
+            }
         }
     }
     static float grow = 1.0f;
@@ -1267,11 +2094,20 @@ static void poll_toggle_key(void) {
  * the diorama. */
 static const uint32_t* voxel_frame_hook(GBContext* ctx, const uint32_t* fb,
                                         int* out_w, int* out_h) {
+    static bool was_scripted = false;
     poll_toggle_key();
     if (g_mode == VOXEL_MODE_OFF || !ctx || !fb) return NULL;
     if (!vox_scrape(ctx, fb, &g_grid, &g_sprites)) return NULL;
     if (g_grid.flat) return NULL;
-    vox_render(ctx, &g_grid, &g_sprites, fb, g_mode, g_scale, g_out);
+    int render_mode = vox_scene_render_mode(g_mode, g_grid.scripted_scene);
+    if (was_scripted && !g_grid.scripted_scene && g_mode == VOXEL_MODE_CHASE) {
+        /* Re-enter chase cleanly behind Link instead of resuming a stale pose
+         * from before the script moved him or the room camera. */
+        g_chase_heading_live = false;
+        g_chase_pose_reset = true;
+    }
+    was_scripted = g_grid.scripted_scene;
+    vox_render(ctx, &g_grid, &g_sprites, fb, render_mode, g_scale, g_out);
     *out_w = GB_SCREEN_WIDTH * g_scale;
     *out_h = GB_SCREEN_HEIGHT * g_scale;
     return g_out;
@@ -1287,26 +2123,23 @@ static const uint32_t* voxel_frame_hook(GBContext* ctx, const uint32_t* fb,
  *
  * Bits are active-low: Down, Up, Left, Right in bits 3..0.
  */
-void voxel_remap_dpad(void) {
-    if (g_mode != VOXEL_MODE_CHASE) return;
-
-    const uint8_t pressed = (uint8_t)(~g_joypad_dpad & 0x0F);
-    if (!pressed) return;
-
+uint8_t vox_chase_remap_pressed(uint8_t pressed, float yaw) {
+    pressed &= 0x0F;
     /* Screen-space direction the player asked for (y grows downward). */
     float dx = 0.0f, dy = 0.0f;
     if (pressed & 0x01) dx += 1.0f;   /* right */
     if (pressed & 0x02) dx -= 1.0f;   /* left  */
     if (pressed & 0x04) dy -= 1.0f;   /* up    */
     if (pressed & 0x08) dy += 1.0f;   /* down  */
-    if (dx == 0.0f && dy == 0.0f) return;
+    if (dx == 0.0f && dy == 0.0f) return 0;
 
     /* Rotate out of the camera's frame into the world. The camera's
-     * forward is world "screen up", its right is world "screen right". */
-    const float fx = cosf(g_chase_yaw), fy = sinf(g_chase_yaw);
+     * forward is world "screen up", its right is world "screen right".
+     * Since screen y grows downward, requested up is -dy along forward. */
+    const float fx = cosf(yaw), fy = sinf(yaw);
     const float rx = -fy, ry = fx;
-    const float wx = rx * dx + fx * dy;
-    const float wy = ry * dx + fy * dy;
+    const float wx = rx * dx - fx * dy;
+    const float wy = ry * dx - fy * dy;
 
     /* Snap to the four directions the game actually accepts. Diagonals
      * survive because both axes can clear their threshold. */
@@ -1316,6 +2149,15 @@ void voxel_remap_dpad(void) {
     if (wx < -T) out |= 0x02;
     if (wy < -T) out |= 0x04;
     if (wy >  T) out |= 0x08;
+    return out;
+}
+
+void voxel_remap_dpad(void) {
+    if (g_mode != VOXEL_MODE_CHASE || g_grid.scripted_scene) return;
+
+    const uint8_t pressed = (uint8_t)(~g_joypad_dpad & 0x0F);
+    if (!pressed) return;
+    const uint8_t out = vox_chase_remap_pressed(pressed, g_chase_yaw);
     if (!out) return;
 
     g_joypad_dpad = (uint8_t)((g_joypad_dpad | 0x0F) & ~out);

@@ -52,7 +52,101 @@ static void frame(int dir, float x, float y) {
     vox_chase_step(&grid, NULL, NULL);
 }
 
+static void floor_grid(VoxTileGrid* grid) {
+    memset(grid, 0, sizeof(*grid));
+    for (int y = 0; y < VOX_TILES_H; y++)
+        for (int x = 0; x < VOX_TILES_W; x++)
+            grid->height[y][x] = VOX_H_FLOOR;
+}
+
 int main(void) {
+    /* -- live-state coordinate and scripted-camera rules -------------- */
+    CHECK(vox_oracle_page_offset(0, 96) == 0 &&
+          vox_oracle_page_offset(96, 96) == 0 &&
+          vox_oracle_page_offset(160, 96) == 0,
+          "horizontal BG-map pages normalize to the same room origin");
+    CHECK(vox_oracle_page_offset(95, 96) == -1 &&
+          vox_oracle_page_offset(97, 96) == 1 &&
+          vox_oracle_page_offset(127, 128) == -1 &&
+          vox_oracle_page_offset(129, 128) == 1,
+          "small page-relative screen offsets survive as signed motion");
+    CHECK(vox_oracle_object_height(0xF0) == VOX_H_MID &&
+          vox_oracle_object_height(0xF1) == VOX_H_MID &&
+          vox_oracle_object_height(0xF2) == 0xFF,
+          "open and closed chest metatiles are semantic 3D props");
+    CHECK(vox_oracle_scripted_scene(2, 0) &&
+          vox_oracle_scripted_scene(1, 1) &&
+          !vox_oracle_scripted_scene(1, 0),
+          "formal and interaction scripts select staged camera framing");
+    CHECK(vox_oracle_link_holds_item(0x04) &&
+          !vox_oracle_link_holds_item(0x03) &&
+          !vox_oracle_link_holds_item(0x05),
+          "only Link's real item-get state anchors an overhead sprite");
+    CHECK(vox_scene_render_mode(VOXEL_MODE_CHASE, true) == VOXEL_MODE_30 &&
+          vox_scene_render_mode(VOXEL_MODE_CHASE, false) == VOXEL_MODE_CHASE &&
+          vox_scene_render_mode(VOXEL_MODE_45, true) == VOXEL_MODE_45,
+          "only chase mode yields to the fixed voxel cutscene camera");
+
+    /* Screen-relative movement follows the same forward/right basis as the
+     * projection. At north, controls are unchanged; after a quarter/half
+     * orbit each key maps to the world direction now visible on screen. */
+    CHECK(vox_chase_remap_pressed(0x04, DIR_YAW[0]) == 0x04 &&
+          vox_chase_remap_pressed(0x08, DIR_YAW[0]) == 0x08 &&
+          vox_chase_remap_pressed(0x02, DIR_YAW[0]) == 0x02 &&
+          vox_chase_remap_pressed(0x01, DIR_YAW[0]) == 0x01,
+          "north-facing chase controls preserve W S A D");
+    CHECK(vox_chase_remap_pressed(0x04, DIR_YAW[3]) == 0x02 &&
+          vox_chase_remap_pressed(0x08, DIR_YAW[3]) == 0x01 &&
+          vox_chase_remap_pressed(0x02, DIR_YAW[3]) == 0x08 &&
+          vox_chase_remap_pressed(0x01, DIR_YAW[3]) == 0x04,
+          "west-facing chase controls stay aligned with the screen");
+    CHECK(vox_chase_remap_pressed(0x04, DIR_YAW[1]) == 0x01 &&
+          vox_chase_remap_pressed(0x08, DIR_YAW[1]) == 0x02 &&
+          vox_chase_remap_pressed(0x02, DIR_YAW[1]) == 0x04 &&
+          vox_chase_remap_pressed(0x01, DIR_YAW[1]) == 0x08,
+          "east-facing chase controls stay aligned with the screen");
+
+    /* -- first live frame anchors both aim and position ---------------- */
+    voxel_set_mode(VOXEL_MODE_OFF);
+    voxel_set_mode(VOXEL_MODE_CHASE);
+    VoxTileGrid anchor_grid;
+    floor_grid(&anchor_grid);
+    anchor_grid.link_known = true;
+    anchor_grid.link_dir = 2;
+    anchor_grid.link_sx = 73;
+    anchor_grid.link_feet_sy = 81;
+    float anchor_x = -1.0f, anchor_y = -1.0f;
+    vox_chase_step(&anchor_grid, &anchor_x, &anchor_y);
+    CHECK(anchor_x == 73.0f && anchor_y == 81.0f,
+          "the chase step returns Link's live anchor");
+    CHECK(ang_diff(voxel_chase_yaw(), DIR_YAW[2]) < 0.001f,
+          "a fresh chase camera starts directly behind Link");
+
+    /* -- camera body does not cross solid terrain -------------------- */
+    VoxTileGrid collision_grid;
+    floor_grid(&collision_grid);
+    CHECK(fabsf(vox_chase_camera_back(&collision_grid, 72.0f, 80.0f,
+                                      0.0f, -1.0f, 62.0f) - 62.0f) < 0.01f,
+          "open ground keeps the requested camera distance");
+    for (int x = 0; x < VOX_TILES_W; x++)
+        collision_grid.height[16][x] = VOX_H_HIGH;
+    float wall_back = vox_chase_camera_back(&collision_grid, 72.0f, 80.0f,
+                                             0.0f, -1.0f, 62.0f);
+    CHECK(wall_back >= 30.0f && wall_back < 48.0f,
+          "a solid row behind Link clamps the camera before the wall");
+    floor_grid(&collision_grid);
+    collision_grid.height[15][13] = VOX_H_HIGH;
+    float corner_back = vox_chase_camera_back(&collision_grid, 102.0f, 80.0f,
+                                               0.0f, -1.0f, 62.0f);
+    CHECK(corner_back < 62.0f,
+          "the camera footprint catches a wall corner off its centre line");
+    floor_grid(&collision_grid);
+    collision_grid.height[16][9] = VOX_H_HIGH;
+    collision_grid.treecell[16][9] = 1;
+    CHECK(fabsf(vox_chase_camera_back(&collision_grid, 72.0f, 80.0f,
+                                      0.0f, -1.0f, 62.0f) - 62.0f) < 0.01f,
+          "volumetric tree cells do not shove the camera into Link");
+
     /* -- it trails him while he walks -------------------------------- */
     voxel_tuning_reset();
     CHECK(voxel_tuning()->chase_follow > 0.0f,
