@@ -376,6 +376,19 @@ const EaIcon* ea_icon_get(const char* id) {
     return NULL;
 }
 
+/* The last thing earned, kept past the toast's lifetime so a stream
+ * overlay can hold the card up for as long as it likes. */
+static char     g_last_id[48], g_last_title[64], g_last_desc[96];
+static uint32_t g_last_serial = 0;
+
+void epoch_achievements_last_unlock(const char** id, const char** title,
+                                    const char** desc, uint32_t* serial) {
+    if (id)     *id = g_last_id;
+    if (title)  *title = g_last_title;
+    if (desc)   *desc = g_last_desc;
+    if (serial) *serial = g_last_serial;
+}
+
 const EaSet* epoch_achievements_set(void)  { return &g_set; }
 const char*  epoch_achievements_cart(void) { return g_cart; }
 
@@ -511,6 +524,11 @@ void epoch_achievements_tick(GBContext* ctx, const char* game_id) {
         const EaAchievement* a = &g_set.list[newly[i]];
         ea_save_unlock(g_state_path, a->id);
         ea_toast_push(a->id, a->title[0] ? a->title : a->id, a->desc);
+        snprintf(g_last_id, sizeof(g_last_id), "%s", a->id);
+        snprintf(g_last_title, sizeof(g_last_title), "%s",
+                 a->title[0] ? a->title : a->id);
+        snprintf(g_last_desc, sizeof(g_last_desc), "%s", a->desc);
+        g_last_serial++;
         LOG("unlocked: %s", a->id);
     }
 }

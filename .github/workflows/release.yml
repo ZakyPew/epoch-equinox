@@ -63,7 +63,7 @@ jobs:
       - name: Achievements, secrets, typist and camera checks
         run: |
           cd build
-          for t in achievements_test secrets_c_test typist_test chasecam_test cliff_test; do
+          for t in achievements_test secrets_c_test typist_test chasecam_test cliff_test stream_test; do
             cc -O2 -o $t ../tools/$t.c -I ../src \
                -I _deps/gb_recompiled-src/runtime/include \
                $(sdl2-config --cflags) libepoch_support.a _gbrt_build/libgbrt.a \
@@ -81,6 +81,9 @@ jobs:
           cp -r art/covers/. "$staging/covers/"
           cp -r launcher "$staging/"
           cp -r achievements "$staging/"
+          # The stream overlays live beside the binary because the player
+          # writes stream/live.js relative to its own working directory.
+          cp -r stream "$staging/"
           cp README.md LICENSE CREDITS.md "$staging/"
           cp examples/mods/README.md "$staging/mods/"
           printf 'Drop your ROMs here:\n  tlozooa.gbc  Oracle of Ages (USA, Australia)\n  tlozoos.gbc  Oracle of Seasons (USA, Australia)\nAny other .gb/.gbc works too.\n' > "$staging/roms/README.txt"
@@ -126,6 +129,9 @@ jobs:
           Copy-Item "dist\Epoch & Equinox Launcher.exe" $staging
           Copy-Item -Recurse launcher "$staging/launcher"
           Copy-Item -Recurse achievements "$staging/achievements"
+          # The player writes stream/live.js relative to its own working
+          # directory, so the overlays ship beside it.
+          Copy-Item -Recurse stream "$staging/stream"
           Copy-Item README.md,LICENSE,CREDITS.md $staging
           Copy-Item examples/mods/README.md "$staging/mods/"
           Set-Content "$staging/roms/README.txt" "Drop your ROMs here:`n  tlozooa.gbc  Oracle of Ages (USA, Australia)`n  tlozoos.gbc  Oracle of Seasons (USA, Australia)`nAny other .gb/.gbc works too."

@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <title>Epoch &amp; Equinox — vertical stream overlay</title>
+<link rel="stylesheet" href="epoch-live.css">
 <style>
   /* 1080x1920 for TikTok / Reels / Shorts / vertical Twitch.
      Transparent: OBS composites this over the scene.
@@ -125,6 +126,27 @@
   }
   .now-text { font-size:24px; color:var(--ink); }
   @media (prefers-reduced-motion:reduce) { .dot { animation:none; } }
+
+
+  /* The middle of a vertical canvas belongs to gameplay and a facecam,
+     so the panel tucks under the header and the card sits above the
+     caption strip -- both inside the platform-safe insets. */
+  .hud {
+    left:var(--side-safe, 40px); right:var(--side-safe, 40px);
+    top:210px; display:flex; flex-direction:column; gap:13px;
+  }
+  .hud-top { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+  .hud-row { flex-wrap:wrap; gap:14px 20px; }
+  .card {
+    left:var(--side-safe, 40px); right:var(--side-safe, 40px);
+    bottom:calc(var(--bottom-safe, 320px) + 40px);
+  }
+  @keyframes cardIn {
+    0%   { opacity:0; transform:translateY(38px) scale(.97); }
+    6%   { opacity:1; transform:translateY(0) scale(1); }
+    88%  { opacity:1; transform:translateY(0) scale(1); }
+    100% { opacity:0; transform:translateY(-18px) scale(.99); }
+  }
 </style>
 </head>
 <body>
@@ -152,29 +174,88 @@
     </div>
   </div>
 
-<script>
-  /* Live status without fetch().
-   *
-   * OBS loads a local overlay over file://, and Chromium blocks fetch()
-   * and XHR against file:// URLs -- so the obvious implementation fails
-   * silently and the line never updates. Loading a <script> from the same
-   * folder IS allowed, so the status lives in now.js as a one-line call:
-   *
-   *     NOW("making the trees stop looking like spikes");
-   *
-   * Re-injected every few seconds with a cache-buster. If now.js is
-   * missing the default text just stays put. */
-  window.NOW = function (t) {
-    if (t) document.getElementById('now').textContent = t;
-  };
-  function poll() {
-    var s = document.createElement('script');
-    s.src = 'now.js?t=' + Date.now();
-    s.onload = s.onerror = function () { s.remove(); };
-    document.head.appendChild(s);
-  }
-  poll();
-  setInterval(poll, 4000);
-</script>
+
+  <!-- Live state, hidden until the player writes stream/live.js. -->
+  <div class="hud" id="hud" hidden>
+    <i class="dia tl"></i><i class="dia tr"></i>
+    <i class="dia bl"></i><i class="dia br"></i>
+
+    <div class="hud-top">
+      <span class="hud-game" id="hud-game">—</span>
+      <span class="hud-room" id="hud-room">—</span>
+      <span class="hud-linked" id="hud-linked" hidden>linked</span>
+    </div>
+
+    <div class="hud-row">
+      <div class="stat">
+        <span class="lbl">Essences</span>
+        <span class="pips" id="pips"></span>
+      </div>
+      <div class="stat">
+        <span class="lbl">Hearts</span>
+        <span class="hearts" id="hearts"></span>
+      </div>
+    </div>
+
+    <div class="hud-row">
+      <div class="stat" title="Rings collected">
+        <svg class="ico" viewBox="0 0 16 16" aria-hidden="true">
+          <circle cx="8" cy="9.5" r="5" fill="none" stroke="#DEB24C" stroke-width="1.6"/>
+          <path d="M8 1.6 5.6 4.4h4.8z" fill="#9CC8E0"/>
+        </svg>
+        <span id="rings">0</span><span class="of">/64</span>
+      </div>
+      <div class="stat" title="Rupees">
+        <svg class="ico" viewBox="0 0 16 16" aria-hidden="true">
+          <path d="M8 1.4 13 6l-5 8.6L3 6z" fill="#57C46A" stroke="#2E7A3B" stroke-width="1"/>
+          <path d="M8 1.4 13 6H3z" fill="#8FE49C" opacity=".75"/>
+        </svg>
+        <span id="rupees">0</span>
+      </div>
+      <div class="stat" title="Deaths">
+        <svg class="ico" viewBox="0 0 16 16" aria-hidden="true">
+          <path d="M8 1.8c3 0 5 2 5 4.6 0 1.8-1 2.6-1 4.1v1.2H4v-1.2C4 9 3 8.2 3 6.4 3 3.8 5 1.8 8 1.8z"
+                fill="none" stroke="#9FB4C6" stroke-width="1.4"/>
+          <circle cx="6.2" cy="6.6" r="1.2" fill="#9FB4C6"/>
+          <circle cx="9.8" cy="6.6" r="1.2" fill="#9FB4C6"/>
+        </svg>
+        <span id="deaths">0</span>
+      </div>
+      <div class="stat" title="Play time">
+        <svg class="ico" viewBox="0 0 16 16" aria-hidden="true">
+          <circle cx="8" cy="8" r="6" fill="none" stroke="#9FB4C6" stroke-width="1.4"/>
+          <path d="M8 4.4V8l2.6 1.6" fill="none" stroke="#9FB4C6"
+                stroke-width="1.4" stroke-linecap="round"/>
+        </svg>
+        <span id="time">0:00</span>
+      </div>
+    </div>
+
+    <div class="hud-ach">
+      <div class="ach-bar"><i id="ach-fill"></i></div>
+      <span class="ach-text" id="ach-text">— / —</span>
+    </div>
+  </div>
+
+  <!-- The unlock card, shown for a few seconds when one is earned. -->
+  <div class="card" id="card">
+    <i class="dia tl"></i><i class="dia tr"></i>
+    <i class="dia bl"></i><i class="dia br"></i>
+    <div class="card-sheen"></div>
+    <svg class="medal" viewBox="0 0 64 64" aria-hidden="true">
+      <path d="M22 30 14 56l12-6 6 8" fill="#B22C30"/>
+      <path d="M42 30 50 56l-12-6-6 8" fill="#B22C30"/>
+      <circle cx="32" cy="26" r="17" fill="#D4AF37" stroke="#FFEBA0" stroke-width="2"/>
+      <path d="M32 15 35.4 22.3 43 23.2 37.4 28.4 38.9 36 32 32.3 25.1 36 26.6 28.4 21 23.2 28.6 22.3z"
+            fill="#8C6414"/>
+    </svg>
+    <div>
+      <div class="card-kicker">Achievement unlocked</div>
+      <div class="card-title" id="card-title">—</div>
+      <div class="card-desc" id="card-desc"></div>
+    </div>
+  </div>
+
+<script src="epoch-live.js"></script>
 </body>
 </html>

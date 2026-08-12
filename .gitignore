@@ -31,3 +31,7 @@ __pycache__/
 !achievements/icons/**/*.pam
 /*.png
 shot_pylauncher.sh
+
+# Written by the player at runtime for the stream overlays.
+stream/live.js
+stream/live.js.tmp

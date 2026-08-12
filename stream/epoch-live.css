@@ -1,0 +1,191 @@
+/* The live game panel, shared by every overlay layout in this folder.
+ *
+ * The player writes stream/live.js once a second; epoch-live.js reads it
+ * and fills in the markup below. Only the *look* lives here -- where the
+ * panel and the unlock card sit on the canvas is the layout's business,
+ * so each overlay sets .hud/.card position and the cardIn keyframes.
+ *
+ * The look is the in-game achievement card's: deep navy under a gilded
+ * double frame with corner diamonds. Every glyph is drawn from plain
+ * geometry -- a heart, a gem, a ring -- for the same reason the project
+ * mark is a split disc and not an hourglass: the game's own art is not
+ * ours to ship, and an overlay ends up in thumbnails and clips.
+ */
+:root {
+  --gold:#DEB24C;
+  --gold-dim:#8A6C25;
+  --gold-lit:#FFEFC0;
+  --navy:rgba(17,20,38,0.88);
+}
+
+.hud[hidden] { display:none; }
+.hud {
+  position:absolute;
+  background:var(--navy);
+  border:2px solid var(--gold-dim);
+  border-radius:7px;
+  box-shadow:0 16px 44px rgba(0,0,0,.5), inset 0 1px 0 rgba(255,239,192,.08);
+  backdrop-filter:blur(6px);
+  padding:16px 20px;
+}
+/* The inner gold hairline and the four corner diamonds. */
+.hud::before {
+  content:""; position:absolute; inset:3px;
+  border:1px solid var(--gold); border-radius:4px;
+  pointer-events:none; opacity:.85;
+}
+.hud i.dia {
+  position:absolute; width:9px; height:9px; background:var(--gold);
+  transform:rotate(45deg);
+  box-shadow:inset 1px 1px 0 var(--gold-lit);
+}
+.hud i.dia.tl { left:-5px; top:-5px; }
+.hud i.dia.tr { right:-5px; top:-5px; }
+.hud i.dia.bl { left:-5px; bottom:-5px; }
+.hud i.dia.br { right:-5px; bottom:-5px; }
+
+.hud-game {
+  font-size:19px; letter-spacing:.06em; color:var(--gold-lit);
+  font-weight:600; line-height:1; white-space:nowrap;
+}
+.hud-room {
+  font-size:13px; color:var(--dim,#9FB4C6); letter-spacing:.08em;
+  border-left:1px solid rgba(222,178,76,.35); padding-left:11px;
+}
+.hud-linked {
+  font-size:11px; letter-spacing:.14em; color:#8FD6A8;
+  border:1px solid rgba(143,214,168,.45); border-radius:3px;
+  padding:2px 6px; text-transform:uppercase;
+}
+.hud-top { display:flex; align-items:center; gap:12px; }
+.hud-row { display:flex; align-items:center; gap:18px; }
+.stat { display:flex; align-items:center; gap:7px; font-size:16px; color:var(--ink,#F2F7FB); }
+.stat .lbl {
+  font-size:11px; letter-spacing:.14em; color:var(--dim,#9FB4C6);
+  text-transform:uppercase;
+}
+.of { color:var(--dim,#9FB4C6); font-size:13px; }
+
+/* Essence pips: eight lozenges, filled as they are earned. */
+.pips { display:flex; gap:5px; }
+.pip {
+  width:9px; height:14px; border-radius:50% / 40%;
+  border:1px solid rgba(222,178,76,.55); background:transparent;
+}
+.pip.on {
+  background:linear-gradient(180deg, var(--gold-lit), var(--gold));
+  box-shadow:0 0 7px rgba(222,178,76,.75);
+  border-color:var(--gold-lit);
+}
+
+/* Hearts, drawn with two circles and a rotated square. */
+.hearts { display:flex; gap:4px; }
+.heart { position:relative; width:14px; height:13px; }
+.heart::before, .heart::after {
+  content:""; position:absolute; width:8px; height:8px; border-radius:50%;
+  top:1px; background:#C2384A;
+}
+.heart::before { left:0; }
+.heart::after  { right:0; }
+.heart span {
+  position:absolute; left:2px; top:4px; width:10px; height:10px;
+  background:#C2384A; transform:rotate(45deg); border-radius:2px;
+}
+.heart.empty::before, .heart.empty::after, .heart.empty span {
+  background:rgba(194,56,74,.22);
+  box-shadow:inset 0 0 0 1px rgba(194,56,74,.45);
+}
+
+.ico { width:15px; height:15px; display:block; }
+
+/* Achievement tally with a filling bar. */
+.hud-ach { display:flex; align-items:center; gap:10px; }
+.ach-bar {
+  flex:1; height:6px; border-radius:3px; overflow:hidden;
+  background:rgba(222,178,76,.16);
+  border:1px solid rgba(222,178,76,.32);
+}
+.ach-bar i {
+  display:block; height:100%; width:0%;
+  background:linear-gradient(90deg, var(--gold), var(--gold-lit));
+  transition:width .6s cubic-bezier(.22,.61,.36,1);
+}
+.ach-text { font-size:13px; color:var(--dim,#9FB4C6); letter-spacing:.05em; white-space:nowrap; }
+
+/* ---- the standing plaque ------------------------------------------
+   The unlock card flies past in seven seconds. Layouts with room to
+   spare also keep the most recent one on the wall, which is what a
+   viewer who arrived late is squinting at. Same frame, calmer. */
+.last[hidden] { display:none; }
+.last {
+  position:absolute;
+  display:flex; align-items:center; gap:16px;
+  padding:15px 20px;
+  background:rgba(17,20,38,0.72);
+  border:1px solid var(--gold-dim);
+  border-radius:7px;
+  box-shadow:0 14px 38px rgba(0,0,0,.42);
+  backdrop-filter:blur(6px);
+}
+.last i.dia {
+  position:absolute; width:7px; height:7px; background:var(--gold);
+  transform:rotate(45deg); opacity:.85;
+}
+.last i.dia.tl { left:-4px; top:-4px; }
+.last i.dia.tr { right:-4px; top:-4px; }
+.last i.dia.bl { left:-4px; bottom:-4px; }
+.last i.dia.br { right:-4px; bottom:-4px; }
+.last .medal { width:44px; height:44px; opacity:.92; }
+.last-kicker {
+  font-size:11px; letter-spacing:.2em; color:var(--gold);
+  text-transform:uppercase; margin-bottom:4px;
+}
+.last-title { font-size:18px; color:var(--gold-lit); font-weight:600; line-height:1.15; }
+.last-desc { font-size:13px; color:var(--dim,#9FB4C6); margin-top:3px; }
+
+/* ---- the unlock card ---------------------------------------------- */
+.card {
+  position:absolute;
+  display:flex; align-items:center; gap:18px;
+  padding:18px 26px 18px 20px;
+  background:var(--navy);
+  border:2px solid var(--gold-dim);
+  border-radius:8px;
+  box-shadow:0 22px 60px rgba(0,0,0,.6);
+  backdrop-filter:blur(6px);
+  opacity:0;
+  pointer-events:none;
+}
+.card::before {
+  content:""; position:absolute; inset:4px;
+  border:1px solid var(--gold); border-radius:5px; opacity:.9;
+}
+.card i.dia {
+  position:absolute; width:11px; height:11px; background:var(--gold);
+  transform:rotate(45deg); box-shadow:inset 1px 1px 0 var(--gold-lit);
+}
+.card i.dia.tl { left:-6px; top:-6px; }
+.card i.dia.tr { right:-6px; top:-6px; }
+.card i.dia.bl { left:-6px; bottom:-6px; }
+.card i.dia.br { right:-6px; bottom:-6px; }
+.card.show { animation:cardIn 7.5s cubic-bezier(.16,.84,.3,1) forwards; }
+.medal { width:62px; height:62px; flex:none; }
+.card-kicker {
+  font-size:13px; letter-spacing:.22em; color:var(--gold);
+  text-transform:uppercase; margin-bottom:5px;
+}
+.card-title { font-size:25px; color:var(--gold-lit); font-weight:600; line-height:1.1; }
+.card-desc { font-size:15px; color:var(--dim,#9FB4C6); margin-top:5px; }
+/* A sheen that crosses the card once as it lands. */
+.card-sheen {
+  position:absolute; inset:0; border-radius:8px; overflow:hidden;
+  pointer-events:none;
+}
+.card-sheen::after {
+  content:""; position:absolute; top:-40%; bottom:-40%; width:70px;
+  left:-120px; transform:skewX(-18deg);
+  background:linear-gradient(90deg, transparent,
+              rgba(255,239,192,.30), transparent);
+}
+.card.show .card-sheen::after { animation:sheen 1.5s ease-out .45s 1; }
+@keyframes sheen { to { left:130%; } }
