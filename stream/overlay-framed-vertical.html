@@ -1,0 +1,494 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Epoch &amp; Equinox — framed vertical overlay</title>
+<link rel="stylesheet" href="epoch-live.css">
+<style>
+  /* 1080x1920 for TikTok / Reels / Shorts / vertical Twitch, full-screen:
+     the whole canvas is dressed and the game sits in a gilded opening
+     near the top, where a phone holds it above the caption strip.
+
+     Same construction as overlay-framed.html -- the mat is four panels
+     around a real hole, not one panel with a dark rectangle painted in
+     it, so the game capture underneath shows through. The default box is
+     exactly 5x the Game Boy's 160x144.
+
+     The opening also stays clear of the right-hand column where these
+     platforms draw their like and comment buttons, so a thumb never
+     lands on Link. */
+  :root {
+    --box-x:85px;      /* left edge of the opening */
+    --box-y:236px;     /* top edge                 */
+    --box-w:800px;     /* 160 x 5                  */
+    --box-h:720px;     /* 144 x 5                  */
+    --cam-x:40px;      /* optional camera opening, 16:9 */
+    --cam-y:1190px;
+    --cam-w:640px;
+    --cam-h:360px;
+
+    --side-safe:150px;   /* clear of the right-hand button column */
+    --bottom-safe:190px; /* clear of the caption strip            */
+
+    --ink:#F4F8FC;
+    --dim:#A6BACB;
+    --cool:#9CC8E0;
+    --warm:#F0B888;
+    --panel:rgba(8,13,20,0.72);
+    --line:rgba(156,200,224,0.28);
+    --mat-edge:#141A33;
+  }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  html, body {
+    width:1080px; height:1920px; overflow:hidden;
+    background:transparent;
+    font-family:ui-monospace,SFMono-Regular,"SF Mono","Cascadia Mono",Menlo,Consolas,monospace;
+    -webkit-font-smoothing:antialiased;
+  }
+
+  /* ---- the mat ----------------------------------------------------- */
+  .mat {
+    position:absolute;
+    background-image:
+      repeating-linear-gradient(135deg,
+        rgba(255,239,192,.030) 0 2px, transparent 2px 11px),
+      radial-gradient(110% 70% at 12% -6%,
+        #222B52 0%, #182046 34%, #101733 62%, #080C1B 100%);
+    background-size:1080px 1920px;
+    background-repeat:no-repeat;
+  }
+  .mat.t { left:0; top:0; width:1080px; height:var(--box-y);
+           background-position:0 0; }
+  .mat.b { left:0; top:calc(var(--box-y) + var(--box-h));
+           width:1080px; height:calc(1920px - var(--box-y) - var(--box-h));
+           background-position:0 calc(-1 * (var(--box-y) + var(--box-h))); }
+  .mat.l { left:0; top:var(--box-y); width:var(--box-x); height:var(--box-h);
+           background-position:0 calc(-1 * var(--box-y)); }
+  .mat.r { left:calc(var(--box-x) + var(--box-w)); top:var(--box-y);
+           width:calc(1080px - var(--box-x) - var(--box-w)); height:var(--box-h);
+           background-position:calc(-1 * (var(--box-x) + var(--box-w))) calc(-1 * var(--box-y)); }
+
+  /* A second opening for a camera, off unless you ask for it: add ?cam
+     to the URL. With it on, the mat below the game is replaced by four
+     panels around the camera box -- same trick, one more hole -- and the
+     two panels that would sit under it step aside. */
+  .mat.cam { display:none; }
+  body.cam-on .mat.b { display:none; }
+  body.cam-on .mat.cam { display:block; }
+  body.cam-on .last, body.cam-on .now { display:none; }
+  .mat.c1 { left:0; top:calc(var(--box-y) + var(--box-h)); width:1080px;
+            height:calc(var(--cam-y) - var(--box-y) - var(--box-h));
+            background-position:0 calc(-1 * (var(--box-y) + var(--box-h))); }
+  .mat.c2 { left:0; top:calc(var(--cam-y) + var(--cam-h)); width:1080px;
+            height:calc(1920px - var(--cam-y) - var(--cam-h));
+            background-position:0 calc(-1 * (var(--cam-y) + var(--cam-h))); }
+  .mat.c3 { left:0; top:var(--cam-y); width:var(--cam-x); height:var(--cam-h);
+            background-position:0 calc(-1 * var(--cam-y)); }
+  .mat.c4 { left:calc(var(--cam-x) + var(--cam-w)); top:var(--cam-y);
+            width:calc(1080px - var(--cam-x) - var(--cam-w)); height:var(--cam-h);
+            background-position:calc(-1 * (var(--cam-x) + var(--cam-w))) calc(-1 * var(--cam-y)); }
+
+  .corner { position:absolute; width:210px; height:210px; opacity:.16; }
+  .corner.tl { left:0; top:0; }
+  .corner.tr { right:0; top:0; transform:scaleX(-1); }
+  .corner.bl { left:0; bottom:0; transform:scaleY(-1); }
+  .corner.br { right:0; bottom:0; transform:scale(-1,-1); }
+
+  /* ---- the frame ---------------------------------------------------
+     Box-shadow spread rings only: they draw outside the element, so the
+     frame is built in the mat and never eats a pixel of the game. */
+  .frame {
+    position:absolute;
+    left:var(--box-x); top:var(--box-y);
+    width:var(--box-w); height:var(--box-h);
+    background:transparent;
+    box-shadow:
+      inset 0 0 0 1px rgba(255,239,192,.22),
+      0 0 0 2px #6B5218,
+      0 0 0 7px var(--gold),
+      0 0 0 9px #7A5E1E,
+      0 0 0 22px var(--mat-edge),
+      0 0 0 24px var(--gold-dim),
+      0 30px 80px rgba(0,0,0,.55);
+  }
+  .frame .studs {
+    position:absolute; opacity:.5;
+    background-image:radial-gradient(circle,
+      var(--gold) 0 1.7px, transparent 2.2px);
+    background-size:44px 44px;
+    background-position:center;
+  }
+  .frame .studs.t { left:-9px; right:-9px; top:-22px; height:13px; }
+  .frame .studs.b { left:-9px; right:-9px; bottom:-22px; height:13px; }
+  .frame .orn { position:absolute; width:74px; height:74px; }
+  .frame .orn.tl { left:-37px; top:-37px; }
+  .frame .orn.tr { right:-37px; top:-37px; transform:scaleX(-1); }
+  .frame .orn.bl { left:-37px; bottom:-37px; transform:scaleY(-1); }
+  .frame .orn.br { right:-37px; bottom:-37px; transform:scale(-1,-1); }
+
+  /* The camera's frame: the same rings, thinner, no studs. */
+  .camframe {
+    display:none; position:absolute;
+    left:var(--cam-x); top:var(--cam-y);
+    width:var(--cam-w); height:var(--cam-h);
+    background:transparent;
+    box-shadow:
+      inset 0 0 0 1px rgba(255,239,192,.20),
+      0 0 0 2px #6B5218,
+      0 0 0 5px var(--gold),
+      0 0 0 7px #7A5E1E,
+      0 0 0 15px var(--mat-edge),
+      0 0 0 17px var(--gold-dim),
+      0 22px 60px rgba(0,0,0,.5);
+  }
+  body.cam-on .camframe { display:block; }
+  .camframe .orn { position:absolute; width:52px; height:52px; }
+  .camframe .orn.tl { left:-26px; top:-26px; }
+  .camframe .orn.tr { right:-26px; top:-26px; transform:scaleX(-1); }
+  .camframe .orn.bl { left:-26px; bottom:-26px; transform:scaleY(-1); }
+  .camframe .orn.br { right:-26px; bottom:-26px; transform:scale(-1,-1); }
+
+  /* ---- header ------------------------------------------------------ */
+  .top {
+    position:absolute; top:34px; left:40px; right:var(--side-safe);
+    display:flex; align-items:center; gap:22px;
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:14px;
+    padding:20px 26px;
+    box-shadow:0 16px 44px rgba(0,0,0,.45);
+  }
+  /* The emblem is the two covers as one split disc. Drop cover-ages.png
+     and cover-seasons.png next to this file; without them the project's
+     own mark underneath shows through, so nothing looks broken. */
+  .emblem {
+    position:relative; width:96px; height:96px; flex:0 0 auto;
+    border-radius:50%; overflow:hidden;
+    background:#0C1120;
+    box-shadow:0 0 0 2px var(--gold-dim), 0 0 0 4px rgba(222,178,76,.22),
+               0 8px 22px rgba(0,0,0,.5);
+  }
+  .emblem svg { position:absolute; inset:0; width:100%; height:100%; }
+  .emblem i {
+    position:absolute; inset:0; display:block;
+    background-size:cover; background-position:center;
+  }
+  .emblem .a { clip-path:inset(0 50% 0 0); background-image:url("cover-ages.png"); }
+  .emblem .b { clip-path:inset(0 0 0 50%); background-image:url("cover-seasons.png"); }
+  .emblem .seam {
+    position:absolute; left:50%; top:0; bottom:0; width:2px;
+    transform:translateX(-1px);
+    background:linear-gradient(180deg, var(--gold-lit), var(--gold-dim));
+    opacity:.9;
+  }
+  .top-text { display:flex; flex-direction:column; gap:9px; min-width:0; }
+  .name {
+    font-size:34px; letter-spacing:.05em; color:var(--gold-lit);
+    font-weight:600; line-height:1; white-space:nowrap;
+  }
+  .tag { font-size:19px; color:var(--dim); line-height:1.25; }
+
+  /* ---- bottom call to action --------------------------------------- */
+  .cta {
+    position:absolute;
+    left:40px; right:var(--side-safe); bottom:var(--bottom-safe);
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:16px;
+    padding:24px 28px;
+    display:flex; flex-direction:column; gap:13px;
+    box-shadow:0 18px 52px rgba(0,0,0,.5);
+  }
+  .cta-label {
+    font-size:18px; letter-spacing:.22em; text-transform:uppercase;
+    color:var(--warm);
+  }
+  .link {
+    display:flex; align-items:center; gap:15px;
+    font-size:33px; color:var(--ink); line-height:1.1; word-break:break-all;
+  }
+  .link svg { width:35px; height:35px; flex:0 0 auto; fill:var(--cool); }
+  .link b { color:var(--cool); font-weight:600; }
+
+  /* ---- now building pill ------------------------------------------- */
+  .now {
+    position:absolute; left:40px; bottom:calc(var(--bottom-safe) + 190px);
+    max-width:calc(100% - 40px - var(--side-safe));
+    display:flex; align-items:center; gap:14px;
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:999px;
+    padding:14px 26px 14px 22px;
+  }
+  .dot {
+    width:12px; height:12px; border-radius:50%; background:var(--warm);
+    flex:0 0 auto;
+    animation:pulse 2.4s ease-out infinite;
+  }
+  @keyframes pulse {
+    0%   { box-shadow:0 0 0 0 rgba(240,184,136,.6); }
+    70%  { box-shadow:0 0 0 18px rgba(240,184,136,0); }
+    100% { box-shadow:0 0 0 0 rgba(240,184,136,0); }
+  }
+  .now-text { font-size:24px; color:var(--ink); }
+  @media (prefers-reduced-motion:reduce) { .dot { animation:none; } }
+
+  /* Live panel and unlock card: look comes from epoch-live.css, only
+     their place on the canvas is decided here. The panel sits directly
+     under the opening, where a viewer's eye already is. */
+  .hud {
+    left:40px; right:var(--side-safe);
+    top:calc(var(--box-y) + var(--box-h) + 62px);
+    display:flex; flex-direction:column; gap:14px;
+  }
+  .hud-top { flex-wrap:wrap; }
+  .hud-row { flex-wrap:wrap; gap:14px 22px; }
+  .last {
+    left:40px; right:var(--side-safe);
+    top:calc(var(--box-y) + var(--box-h) + 247px);
+  }
+  .card {
+    left:40px; right:var(--side-safe);
+    bottom:calc(var(--bottom-safe) + 300px);
+  }
+  @keyframes cardIn {
+    0%   { opacity:0; transform:translateY(38px) scale(.97); }
+    6%   { opacity:1; transform:translateY(0) scale(1); }
+    88%  { opacity:1; transform:translateY(0) scale(1); }
+    100% { opacity:0; transform:translateY(-18px) scale(.99); }
+  }
+
+  /* ---- alignment guide --------------------------------------------- */
+  .guide { position:absolute; inset:0; display:none; pointer-events:none; }
+  body.guide-on .guide { display:block; }
+  .guide .rect {
+    position:absolute;
+    left:var(--box-x); top:var(--box-y);
+    width:var(--box-w); height:var(--box-h);
+    border:2px dashed rgba(222,178,76,.85);
+  }
+  .guide .rect::after {
+    content:"Game capture — position 85, 236 · size 800 × 720 (5× of 160×144)";
+    position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
+    background:rgba(10,14,28,.92); color:var(--gold-lit);
+    border:1px solid var(--gold-dim); border-radius:6px;
+    padding:12px 18px; font-size:17px; letter-spacing:.02em; white-space:nowrap;
+  }
+  .guide .camrect { display:none; }
+  body.cam-on .guide .camrect {
+    display:block; position:absolute;
+    left:var(--cam-x); top:var(--cam-y);
+    width:var(--cam-w); height:var(--cam-h);
+    border:2px dashed rgba(222,178,76,.85);
+  }
+  .guide .camrect::after {
+    content:"Camera — position 40, 1190 · size 640 × 360";
+    position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
+    background:rgba(10,14,28,.92); color:var(--gold-lit);
+    border:1px solid var(--gold-dim); border-radius:6px;
+    padding:10px 16px; font-size:16px; white-space:nowrap;
+  }
+</style>
+</head>
+<body>
+
+  <div class="mat t"></div>
+  <div class="mat b"></div>
+  <div class="mat l"></div>
+  <div class="mat r"></div>
+  <div class="mat cam c1"></div>
+  <div class="mat cam c2"></div>
+  <div class="mat cam c3"></div>
+  <div class="mat cam c4"></div>
+
+  <!-- Ornament stencils, placed four times and mirrored by CSS. -->
+  <svg width="0" height="0" aria-hidden="true" style="position:absolute">
+    <symbol id="scroll" viewBox="0 0 120 120">
+      <g fill="none" stroke="#DEB24C" stroke-width="2" stroke-linecap="round">
+        <path d="M4 40 C4 18 18 4 40 4"/>
+        <path d="M4 66 C4 32 32 4 66 4"/>
+        <path d="M22 58 C22 38 38 22 58 22 C46 30 40 38 38 50 C34 62 26 66 22 58Z"
+              fill="#DEB24C" fill-opacity=".22"/>
+        <path d="M10 92 C34 84 84 34 92 10"/>
+        <path d="M78 18 C88 22 96 30 100 40"/>
+        <path d="M18 78 C22 88 30 96 40 100"/>
+      </g>
+      <circle cx="52" cy="52" r="3.4" fill="#DEB24C"/>
+    </symbol>
+    <symbol id="cartouche" viewBox="0 0 40 40">
+      <path d="M20 2 34 20 20 38 6 20z" fill="#0E1428" stroke="#8A6C25" stroke-width="1.6"/>
+      <path d="M20 7 29 20 20 33 11 20z" fill="#DEB24C"/>
+      <path d="M20 11 26 20 20 29 14 20z" fill="#FFEFC0" opacity=".75"/>
+    </symbol>
+    <symbol id="medal" viewBox="0 0 64 64">
+      <path d="M22 30 14 56l12-6 6 8" fill="#B22C30"/>
+      <path d="M42 30 50 56l-12-6-6 8" fill="#B22C30"/>
+      <circle cx="32" cy="26" r="17" fill="#D4AF37" stroke="#FFEBA0" stroke-width="2"/>
+      <path d="M32 15 35.4 22.3 43 23.2 37.4 28.4 38.9 36 32 32.3 25.1 36 26.6 28.4 21 23.2 28.6 22.3z"
+            fill="#8C6414"/>
+    </symbol>
+  </svg>
+
+  <svg class="corner tl" aria-hidden="true"><use href="#scroll"/></svg>
+  <svg class="corner tr" aria-hidden="true"><use href="#scroll"/></svg>
+  <svg class="corner bl" aria-hidden="true"><use href="#scroll"/></svg>
+  <svg class="corner br" aria-hidden="true"><use href="#scroll"/></svg>
+
+  <div class="frame">
+    <span class="studs t"></span>
+    <span class="studs b"></span>
+    <svg class="orn tl" aria-hidden="true"><use href="#cartouche"/></svg>
+    <svg class="orn tr" aria-hidden="true"><use href="#cartouche"/></svg>
+    <svg class="orn bl" aria-hidden="true"><use href="#cartouche"/></svg>
+    <svg class="orn br" aria-hidden="true"><use href="#cartouche"/></svg>
+  </div>
+
+  <div class="camframe">
+    <svg class="orn tl" aria-hidden="true"><use href="#cartouche"/></svg>
+    <svg class="orn tr" aria-hidden="true"><use href="#cartouche"/></svg>
+    <svg class="orn bl" aria-hidden="true"><use href="#cartouche"/></svg>
+    <svg class="orn br" aria-hidden="true"><use href="#cartouche"/></svg>
+  </div>
+
+  <div class="top">
+    <div class="emblem" aria-hidden="true">
+      <svg viewBox="0 0 48 48">
+        <defs>
+          <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stop-color="#9CC8E0"/>
+            <stop offset="1" stop-color="#F0B888"/>
+          </linearGradient>
+        </defs>
+        <circle cx="24" cy="24" r="20" fill="none" stroke="url(#g)" stroke-width="2.2"/>
+        <path d="M24 4 L24 44" stroke="url(#g)" stroke-width="2.2"/>
+        <path d="M24 4 A20 20 0 0 1 24 44 Z" fill="url(#g)" opacity=".28"/>
+        <circle cx="24" cy="24" r="4.4" fill="url(#g)"/>
+      </svg>
+      <i class="a"></i><i class="b"></i><span class="seam"></span>
+    </div>
+    <div class="top-text">
+      <div class="name">EPOCH &amp; EQUINOX</div>
+      <div class="tag">A Game Boy world rebuilt in 3D<br>from its own memory</div>
+    </div>
+  </div>
+
+  <!-- Live state, hidden until the player writes stream/live.js. -->
+  <div class="hud" id="hud" hidden>
+    <i class="dia tl"></i><i class="dia tr"></i>
+    <i class="dia bl"></i><i class="dia br"></i>
+
+    <div class="hud-top">
+      <span class="hud-game" id="hud-game">—</span>
+      <span class="hud-room" id="hud-room">—</span>
+      <span class="hud-linked" id="hud-linked" hidden>linked</span>
+    </div>
+
+    <div class="hud-row">
+      <div class="stat">
+        <span class="lbl">Essences</span>
+        <span class="pips" id="pips"></span>
+      </div>
+      <div class="stat">
+        <span class="lbl">Hearts</span>
+        <span class="hearts" id="hearts"></span>
+      </div>
+    </div>
+
+    <div class="hud-row">
+      <div class="stat" title="Rings collected">
+        <svg class="ico" viewBox="0 0 16 16" aria-hidden="true">
+          <circle cx="8" cy="9.5" r="5" fill="none" stroke="#DEB24C" stroke-width="1.6"/>
+          <path d="M8 1.6 5.6 4.4h4.8z" fill="#9CC8E0"/>
+        </svg>
+        <span id="rings">0</span><span class="of">/64</span>
+      </div>
+      <div class="stat" title="Rupees">
+        <svg class="ico" viewBox="0 0 16 16" aria-hidden="true">
+          <path d="M8 1.4 13 6l-5 8.6L3 6z" fill="#57C46A" stroke="#2E7A3B" stroke-width="1"/>
+          <path d="M8 1.4 13 6H3z" fill="#8FE49C" opacity=".75"/>
+        </svg>
+        <span id="rupees">0</span>
+      </div>
+      <div class="stat" title="Deaths">
+        <svg class="ico" viewBox="0 0 16 16" aria-hidden="true">
+          <path d="M8 1.8c3 0 5 2 5 4.6 0 1.8-1 2.6-1 4.1v1.2H4v-1.2C4 9 3 8.2 3 6.4 3 3.8 5 1.8 8 1.8z"
+                fill="none" stroke="#9FB4C6" stroke-width="1.4"/>
+          <circle cx="6.2" cy="6.6" r="1.2" fill="#9FB4C6"/>
+          <circle cx="9.8" cy="6.6" r="1.2" fill="#9FB4C6"/>
+        </svg>
+        <span id="deaths">0</span>
+      </div>
+      <div class="stat" title="Play time">
+        <svg class="ico" viewBox="0 0 16 16" aria-hidden="true">
+          <circle cx="8" cy="8" r="6" fill="none" stroke="#9FB4C6" stroke-width="1.4"/>
+          <path d="M8 4.4V8l2.6 1.6" fill="none" stroke="#9FB4C6"
+                stroke-width="1.4" stroke-linecap="round"/>
+        </svg>
+        <span id="time">0:00</span>
+      </div>
+    </div>
+
+    <div class="hud-ach">
+      <div class="ach-bar"><i id="ach-fill"></i></div>
+      <span class="ach-text" id="ach-text">— / —</span>
+    </div>
+  </div>
+
+  <!-- The most recent unlock, left standing between unlocks. -->
+  <div class="last" id="last" hidden>
+    <i class="dia tl"></i><i class="dia tr"></i>
+    <i class="dia bl"></i><i class="dia br"></i>
+    <svg class="medal" aria-hidden="true"><use href="#medal"/></svg>
+    <div>
+      <div class="last-kicker">Last earned</div>
+      <div class="last-title" id="last-title">—</div>
+      <div class="last-desc" id="last-desc"></div>
+    </div>
+  </div>
+
+  <!-- The unlock card, shown for a few seconds when one is earned. -->
+  <div class="card" id="card">
+    <i class="dia tl"></i><i class="dia tr"></i>
+    <i class="dia bl"></i><i class="dia br"></i>
+    <div class="card-sheen"></div>
+    <svg class="medal" aria-hidden="true"><use href="#medal"/></svg>
+    <div>
+      <div class="card-kicker">Achievement unlocked</div>
+      <div class="card-title" id="card-title">—</div>
+      <div class="card-desc" id="card-desc"></div>
+    </div>
+  </div>
+
+  <div class="now">
+    <span class="dot"></span>
+    <span class="now-text" id="now">building the voxel renderer</span>
+  </div>
+
+  <div class="cta">
+    <div class="cta-label">Open source &middot; come help</div>
+    <div class="link">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8a8 8 0 005.47 7.59c.4.07.55-.17.55-.38l-.01-1.49C3.8 14.16 3.34 12.9 3.34 12.9c-.36-.92-.88-1.16-.88-1.16-.72-.49.06-.48.06-.48.79.06 1.21.82 1.21.82.71 1.21 1.87.86 2.33.66.07-.52.28-.86.5-1.06-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.6 7.6 0 014 0c1.53-1.03 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.28.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48l-.01 2.19c0 .21.15.46.55.38A8 8 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+      <span>github.com/<b>ZakyPew/epoch-equinox</b></span>
+    </div>
+  </div>
+
+  <div class="guide"><div class="rect"></div><div class="camrect"></div></div>
+
+<script src="epoch-live.js"></script>
+<script>
+  /* OBS lets you type a source's position and size straight into its
+     Transform dialog, which beats dragging -- so ?guide (or G) prints
+     the opening's exact rectangle over it. */
+  (function () {
+    var q = location.search;
+    if (q.indexOf('guide') >= 0) document.body.classList.add('guide-on');
+    /* ?cam opens a second, camera-shaped hole below the game. */
+    if (q.indexOf('cam') >= 0) document.body.classList.add('cam-on');
+    addEventListener('keydown', function (e) {
+      if (e.key === 'g' || e.key === 'G') document.body.classList.toggle('guide-on');
+      if (e.key === 'c' || e.key === 'C') document.body.classList.toggle('cam-on');
+    });
+  })();
+</script>
+</body>
+</html>

@@ -501,11 +501,22 @@ that one run only.
 
 ## Streaming
 
-Transparent OBS overlays with the project name and repo link, plus a "now
-building" line you can edit live in `stream/now.txt`: `stream/overlay.html`
-(1920×1080) and `stream/overlay-vertical.html` (1080×1920, laid out around the
-UI mobile platforms draw over the frame). Setup is three clicks — see
-[stream/README.md](stream/README.md).
+Four transparent OBS overlays, landscape and vertical, each in two styles:
+`overlay.html` / `overlay-vertical.html` float a few panels over your capture,
+and `overlay-framed.html` / `overlay-framed-vertical.html` dress the whole
+canvas — a navy mat, a gilded frame around the play area with a real hole cut
+for the game, and a rail of live stats beside it (with an optional camera
+opening). The vertical pair stay clear of the UI mobile platforms draw over
+the frame.
+
+![the framed overlay](docs/stream-overlay-framed.png)
+
+While the player is running it writes `stream/live.js` once a second, and the
+overlays show the game, the room, essences, hearts, rings, rupees, deaths,
+play time and achievements earned — with an unlock card that lands the moment
+one is. Nothing is shown until you are actually in a room with a file loaded.
+There is also a "now building" line you can edit live in `stream/now.js`.
+Setup is three clicks — see [stream/README.md](stream/README.md).
 
 ## Roadmap
 

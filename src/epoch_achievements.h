@@ -120,6 +120,12 @@ bool ea_load_pam(const char* path, EaIcon* out);
  *  cached. NULL when the file is absent or malformed. */
 const EaIcon* ea_icon_get(const char* id);
 
+/** The most recent unlock this session, for the stream overlay. `serial`
+ *  counts unlocks, so a reader can tell a new one from a repeat draw; it
+ *  is 0 before anything has been earned. Any out-param may be NULL. */
+void epoch_achievements_last_unlock(const char** id, const char** title,
+                                    const char** desc, uint32_t* serial);
+
 /** The live set and cart id, for the Esc-menu browser. */
 const EaSet* epoch_achievements_set(void);
 const char*  epoch_achievements_cart(void);

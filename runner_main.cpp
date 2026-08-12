@@ -38,6 +38,7 @@ extern "C" {
 #include "platform_compat.h"
 #include "epoch_rewind.h"
 #include "epoch_achievements.h"
+#include "epoch_stream.h"
 #include "epoch_secrets.h"
 #include "epoch_panel.h"
 #include "epoch_overlay.h"
@@ -369,6 +370,7 @@ static int run_game(const EpochGame* game, unsigned long long frame_limit) {
          * ran and threw away. */
         epoch_rewind_tick(ctx, game->id);
         epoch_achievements_tick(ctx, game->id);
+        epoch_stream_tick(ctx, game->id);
         const uint32_t* fb = gb_get_framebuffer(ctx);
         if (fb) gb_platform_render_frame(fb);
 

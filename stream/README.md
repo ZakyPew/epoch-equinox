@@ -1,20 +1,23 @@
 # Stream overlays
 
-Two layouts, both transparent, both driven by the same `now.txt`:
+Four layouts, all transparent, all driven by the same two feeds:
 
 | file | canvas | for |
 |---|---|---|
-| `overlay.html` | 1920×1080 | Twitch / YouTube landscape |
+| `overlay.html` | 1920×1080 | Twitch / YouTube landscape, floating over your capture |
 | `overlay-vertical.html` | 1080×1920 | TikTok, Reels, Shorts, vertical Twitch |
+| `overlay-framed.html` | 1920×1080 | a full-screen scene with the game in a gilded frame |
+| `overlay-framed-vertical.html` | 1080×1920 | the same, vertical |
 
-Each carries the project name, a one-line description and the repository
-link, plus a "now building" pill you can change without touching OBS.
+The first two float a few panels over whatever you are capturing. The
+**framed** pair dress the whole canvas instead — a deep navy mat, a gilded
+picture frame around the play area, and a rail of live stats beside it —
+so the game sits in the scene like a painting rather than being covered up
+by it.
 
-The vertical layout keeps the middle of the canvas empty for gameplay and a
-facecam, and stays out of the two places mobile platforms draw their own UI:
-the right-hand button column and the bottom caption strip. Both insets are
-CSS variables at the top of the file (`--side-safe`, `--bottom-safe`) if your
-platform wants more or less room.
+![the framed layout, with the chase camera in the opening](../docs/stream-overlay-framed.png)
+
+![the framed vertical layout](../docs/stream-overlay-framed-vertical.png)
 
 ![vertical overlay](../docs/stream-overlay-vertical.png)
 
@@ -23,16 +26,80 @@ platform wants more or less room.
 ## Add it in OBS
 
 1. **Sources → + → Browser**
-2. Tick **Local file**, choose `stream/overlay.html` (or `overlay-vertical.html`)
-3. Width **1920**, height **1080** — or **1080**×**1920** for the vertical one
-4. Leave "Shutdown source when not visible" **off** so the ticker keeps polling
+2. Tick **Local file**, choose one of the four files above
+3. Width **1920**, height **1080** — or **1080**×**1920** for the vertical ones
+4. Leave "Shutdown source when not visible" **off** so the feeds keep polling
 
-That's it — the background is transparent, so it composites over whatever
-you're capturing.
+The floating layouts are done at that point; the background is transparent,
+so they composite over whatever is underneath.
+
+### The framed layouts, one extra step
+
+The opening in the frame is a real hole — the mat is four panels built
+*around* it, not one panel with a dark rectangle painted in — so your game
+capture shows through it. Put the game source **below** the browser source
+and give it these numbers in **Edit → Transform**:
+
+| layout | position | size |
+|---|---|---|
+| `overlay-framed.html` | 52, 36 | 1120 × 1008 |
+| `overlay-framed-vertical.html` | 85, 236 | 800 × 720 |
+
+Both are exact multiples of the Game Boy's 160×144 (7× and 5×), so flat
+mode stays pixel-crisp with no resampling.
+
+Rather than remember that, load the overlay with **`?guide`** on the end of
+the file path — or press **G** with the source selected and interacting —
+and it prints the rectangle over itself. Turn it off before you go live.
+
+### A camera opening too
+
+Add **`?cam`** (or press **C**) and a second, 16:9 hole opens in the rail
+with a matching frame. Same idea: put the camera source below the browser
+source at
+
+| layout | position | size |
+|---|---|---|
+| `overlay-framed.html` | 1220, 536 | 652 × 367 |
+| `overlay-framed-vertical.html` | 40, 1190 | 640 × 360 |
+
+Both can be combined: `overlay-framed.html?cam&guide`.
+
+Without `?cam` that part of the canvas is simply empty mat, which is a
+perfectly good place to float a round webcam of your own.
+
+### Moving the frame
+
+Every rectangle above is a CSS variable in the first twenty lines of the
+file (`--box-x`, `--box-y`, `--box-w`, `--box-h`, and the `--cam-*` four).
+Change them and the mat, the frame, the studs and the guide text all
+follow — nothing else is hard-coded.
+
+## Live game state
+
+When the player is running it writes `stream/live.js` beside itself once a
+second, and the overlays pick it up:
+
+- the game, the room, and a **linked game** badge
+- essences, heart containers, rings, rupees, deaths and play time
+- achievements earned out of the total, with a filling bar
+- an **achievement unlocked** card that lands the instant one is earned,
+  and (on the framed layouts) a standing *last earned* plaque between them
+
+Nothing is shown until the player is actually in a room with a file
+loaded — the file-select screen has a half-built save in memory and would
+otherwise drive the panel with someone else's numbers. If the player exits,
+the panel hides itself after twelve seconds rather than leave stale numbers
+on screen looking live.
+
+The release archives put `stream/` next to the binary, which is exactly
+where the player writes `live.js`, so it works out of the box. If you run
+the player from somewhere else, point OBS at the `stream/` folder in *that*
+working directory.
 
 ## Change the "now building" line mid-stream
 
-Edit `stream/now.js`, save, and the overlay picks it up within a few
+Edit `stream/now.js`, save, and every overlay picks it up within a few
 seconds. One line:
 
 ```js
@@ -42,22 +109,34 @@ NOW("chasing down the tree shapes");
 If the file is missing the overlay keeps its default text, so nothing
 breaks.
 
-(It is a `.js` file rather than plain text for an annoying reason: OBS
-loads a local overlay over `file://`, and browsers block `fetch()` against
-`file://` URLs. Loading a script from the same folder is allowed, so this
-is the version that actually works.)
+(Both feeds are `.js` files rather than JSON or plain text for an annoying
+reason: OBS loads a local overlay over `file://`, and browsers block
+`fetch()` against `file://` URLs. Loading a script from the same folder is
+allowed, so this is the version that actually works.)
 
 ## Cover art in the emblem
 
 The mark in the corner is your two covers as one split disc. Put
 `cover-ages.png` and `cover-seasons.png` next to the HTML — square crops,
-a few hundred pixels is plenty. Without them the emblem falls back to a
-plain gradient and nothing breaks.
+a few hundred pixels is plenty. Without them the project's own mark
+underneath shows through and nothing looks broken.
+
+## What is where
+
+| file | what it is |
+|---|---|
+| `overlay*.html` | the four layouts — placement, framing, decoration |
+| `epoch-live.css` | the live panel, plaque and unlock card, shared by all four |
+| `epoch-live.js` | reads `now.js` and `live.js`, fills the markup |
+| `now.js` | your one-line status |
+| `live.js` | written by the player; not in the repo |
 
 ## Notes
 
 - The glyph is the project's own mark (a split disc — two games, one
-  world). No game art is used anywhere in the overlay, which keeps it safe
-  to put on a thumbnail, a Linktree, or anywhere else.
-- Colours are the renderer's own sky palettes: the Ages daylight blue and
-  the autumn gold.
+  world), and every icon here is drawn from plain geometry: a heart from
+  two circles and a square, a ring, a rupee. No game art is used anywhere
+  in the overlays, which keeps them safe to put on a thumbnail, a
+  Linktree, or anywhere else.
+- Colours are the renderer's own sky palettes plus the achievement card's
+  gilding: the Ages daylight blue, the autumn gold, and deep navy.
