@@ -515,8 +515,12 @@ While the player is running it writes `stream/live.js` once a second, and the
 overlays show the game, the room, essences, hearts, rings, rupees, deaths,
 play time and achievements earned — with an unlock card that lands the moment
 one is. Nothing is shown until you are actually in a room with a file loaded.
-There is also a "now building" line you can edit live in `stream/now.js`.
-Setup is three clicks — see [stream/README.md](stream/README.md).
+The launcher's **Stream** page does the setup for you: pick a layout, copy
+the exact numbers to give OBS, move either opening (with a Snap button that
+rounds to a whole multiple of 160×144), toggle the camera hole and the
+alignment guide, and type the "now building" line. Everything it writes is
+a plain file you can still edit by hand — see
+[stream/README.md](stream/README.md).
 
 ## Roadmap
 
