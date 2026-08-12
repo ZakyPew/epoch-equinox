@@ -117,6 +117,22 @@ int main(void) {
     CHECK(strstr(buf, "rings:10") != NULL, "carries rings");
     CHECK(strstr(buf, "room:\"0-8A\"") != NULL, "carries the room label");
     CHECK(strstr(buf, "linked:false") != NULL, "carries a real boolean");
+    /* The heartbeat. Without it the overlay cannot tell a running player
+     * from the file one left behind when it exited -- live.js stays on
+     * disk either way, so re-reading it always succeeds. */
+    CHECK(strstr(buf, "tick:") != NULL, "carries a heartbeat");
+    {
+        char a[1024], b[1024];
+        s.tick = 7;
+        epoch_stream_format(&s, a, sizeof(a));
+        s.tick = 8;
+        epoch_stream_format(&s, b, sizeof(b));
+        CHECK(strstr(a, "tick:7") && strstr(b, "tick:8"),
+              "the heartbeat is what changes between writes");
+        CHECK(strcmp(a, b) != 0,
+              "two writes of identical game state still differ");
+        s.tick = 0;
+    }
 
     /* A tiny buffer must be refused, not truncated into broken JS. */
     char small[40];
