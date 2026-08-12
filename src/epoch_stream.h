@@ -44,6 +44,9 @@ typedef struct {
     char     last_desc[96];
     uint32_t unlock_serial;   /* bumps per unlock, so the overlay can
                                * tell a NEW one from a redraw */
+    uint32_t tick;            /* bumps per write: a heartbeat, so the
+                               * overlay can tell a running player from a
+                               * file left behind by one that exited */
 } EpochStreamState;
 
 /** Fill `out` from a WRAM snapshot (0x2000 bytes, 0xC000-based) for the

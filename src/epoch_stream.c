@@ -137,12 +137,13 @@ int epoch_stream_format(const EpochStreamState* s, char* buf, size_t cap) {
         "EPOCH({cart:\"%s\",title:\"%s\",room:\"%X-%02X\",essences:%d,"
         "hearts:%d,maxHearts:%d,rings:%d,deaths:%d,kills:%d,rupees:%d,"
         "rupeesTotal:%d,seconds:%d,linked:%s,unlocked:%d,total:%d,"
-        "lastId:\"%s\",lastTitle:\"%s\",lastDesc:\"%s\",serial:%u});\n",
+        "lastId:\"%s\",lastTitle:\"%s\",lastDesc:\"%s\",serial:%u,"
+        "tick:%u});\n",
         s->cart, cart_title, s->group & 0xFF, s->room & 0xFF, s->essences,
         s->hearts, s->max_hearts, s->rings, s->deaths, s->kills, s->rupees,
         s->rupees_total, s->play_seconds, s->linked ? "true" : "false",
         s->unlocked, s->total, id, title, desc,
-        (unsigned)s->unlock_serial);
+        (unsigned)s->unlock_serial, (unsigned)s->tick);
     return (n < 0 || (size_t)n >= cap) ? -1 : n;
 }
 
@@ -163,6 +164,14 @@ void epoch_stream_tick(GBContext* ctx, const char* game_id) {
     if (countdown-- > 0 && !unlocked_now) return;
     countdown = 60;
     last_serial = state.unlock_serial;
+
+    /* The heartbeat. The player leaves live.js on disk when it exits --
+     * deleting it would only help a clean shutdown anyway -- so "is the
+     * file there" says nothing about whether anyone is playing. This
+     * does: it moves on every write, and stops dead when the player
+     * does, which is how the overlay knows to take the panel down
+     * instead of leaving an hour-old heart count on screen. */
+    state.tick++;
 
     char line[1024];
     if (epoch_stream_format(&state, line, sizeof(line)) < 0) return;

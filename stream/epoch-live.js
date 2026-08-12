@@ -73,6 +73,40 @@
     fill('guide-cam', 'Camera', 'cam');
   }
 
+  /* Each layout declares the canvas it was drawn for. Put it in a browser
+     source of a different size and it does not scale -- it gets cropped,
+     or stranded in a corner with the mat ending mid-screen, which looks
+     like the overlay is broken rather than the source being misconfigured.
+     Say which numbers to type instead of leaving someone to work it out
+     from a mangled render. */
+  function checkSize() {
+    var want = document.documentElement.getBoundingClientRect();
+    var w = Math.round(want.width), h = Math.round(want.height);
+    var have = window.innerWidth, haveH = window.innerHeight;
+    var id = 'epoch-size-warning';
+    var box = el(id);
+    if (Math.abs(w - have) < 2 && Math.abs(h - haveH) < 2) {
+      if (box) box.remove();
+      return;
+    }
+    if (!box) {
+      box = document.createElement('div');
+      box.id = id;
+      box.style.cssText =
+        'position:fixed;left:0;top:0;right:0;z-index:9999;' +
+        'background:rgba(140,30,30,.94);color:#FFEFC0;' +
+        'font:600 20px/1.45 ui-monospace,Menlo,Consolas,monospace;' +
+        'padding:16px 22px;text-align:center;' +
+        'border-bottom:2px solid #DEB24C;';
+      document.body.appendChild(box);
+    }
+    box.textContent =
+      'This overlay is ' + w + ' × ' + h + ', but the browser source is ' +
+      have + ' × ' + haveH + '. Set the source to ' + w + ' × ' + h + '.';
+  }
+  checkSize();
+  addEventListener('resize', checkSize);
+
   if (location.search.indexOf('guide') >= 0) document.body.classList.add('guide-on');
   if (location.search.indexOf('cam') >= 0) document.body.classList.add('cam-on');
   addEventListener('keydown', function (e) {
@@ -85,7 +119,14 @@
   /* ---- live game state --------------------------------------------- */
   var hud = el('hud');
   var card = el('card');
-  var lastSerial = -1, lastSeen = 0, cardTimer = null;
+  var lastSerial = -1, cardTimer = null;
+  /* Liveness is "the numbers moved", not "the file was there".
+     The player leaves live.js on disk when it exits, so re-reading it
+     succeeds forever and the panel would sit there showing an hour-old
+     heart count. `tick` moves on every write and stops when the player
+     does; a player too old to send one falls back to the rest of the
+     payload changing, which it does while anyone is actually playing. */
+  var lastBeat = null, beatAt = 0;
 
   function hearts(cur, max) {
     /* Health is stored in quarter-hearts. Show whole containers, with
@@ -146,7 +187,13 @@
 
   window.EPOCH = function (s) {
     if (!s || !s.cart) return;
-    lastSeen = Date.now();
+
+    var beat = 'tick' in s ? String(s.tick)
+             : [s.seconds, s.rupees, s.hearts, s.room, s.deaths,
+                s.kills, s.serial].join('|');
+    if (beat !== lastBeat) { lastBeat = beat; beatAt = Date.now(); }
+    else if (beatAt && Date.now() - beatAt > 12000) { return; }
+
     if (hud) hud.hidden = false;
 
     set('hud-game', s.title || s.cart);
@@ -200,16 +247,17 @@
     }
   };
 
-  function tick() {
+  function poll() {
     inject('live.js');
-    /* The player stops writing when it exits. Rather than leave stale
-       numbers up as if they were live, hide the panel. */
-    if (lastSeen && Date.now() - lastSeen > 12000) {
+    /* Nothing new for twelve seconds means nobody is playing, whether
+       the player exited, crashed, or the file went away. Take the panel
+       down rather than leave stale numbers up looking live. */
+    if (beatAt && Date.now() - beatAt > 12000) {
       if (hud) hud.hidden = true;
       var last = el('last');
       if (last) last.hidden = true;
     }
   }
-  tick();
-  setInterval(tick, 1000);
+  poll();
+  setInterval(poll, 1000);
 })();
