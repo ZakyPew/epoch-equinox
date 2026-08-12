@@ -139,6 +139,64 @@ int main(void) {
     CHECK(epoch_stream_format(&s, small, sizeof(small)) == -1,
           "a buffer too small is refused, never half a line");
 
+    /* -- the item tracker and the run timer ---------------------------- *
+     * Both read the save block, and a wrong address invents an item or a
+     * time on someone's stream. These expectations come from the two real
+     * saves in tests/saves: a late-game Ages file has the harp and no rod
+     * of seasons, a linked Seasons file has the rod and no cane. */
+    ages_in_play();
+    /* wObtainedTreasureFlags, Ages at $c69a. Byte 0 covers ids 0-7. */
+    w8(0xC69A, 0x7E);            /* shield,punch,bombs,somaria,sword,boomerang */
+    w8(0xC69B, 0xC4);            /* switch hook, flute, seed shooter           */
+    w8(0xC69C, 0xE2);            /* harp, shovel, bracelet, feather            */
+    w8(0xC6B2, 2);               /* wSwordLevel                                */
+    w8(0xC6AF, 2);               /* wShieldLevel                               */
+    w8(0xC6B4, 2);               /* wSeedSatchelLevel                          */
+    w8(0xC6B8, 2);               /* wBraceletLevel (Ages only)                 */
+    w8(0xC6B0, 36); w8(0xC6B1, 48);   /* bombs / max                           */
+    w8(0xC69E, 0x0F);            /* four of the five seed types, ids $20-$24   */
+    CHECK(epoch_stream_read(&s, wram, "tlozooa"), "ages items read");
+    CHECK(s.sword == 2 && s.shield == 2, "sword and shield tiers");
+    CHECK(s.satchel == 2 && s.bracelet == 2, "satchel and bracelet tiers");
+    CHECK(s.bombs == 36 && s.max_bombs == 48, "bombs held and capacity");
+    CHECK(s.seeds == 4, "seed types counted from the treasure bits");
+    CHECK(s.treasures[0] == 0x7E, "treasure flags come through whole");
+    /* The bit layout is what the tracker indexes by, so pin it: id 17 is
+     * the harp and id 7 the rod of seasons, which Ages does not have. */
+    CHECK((s.treasures[17 >> 3] & (1 << (17 & 7))) != 0, "ages has the harp");
+    CHECK((s.treasures[7 >> 3] & (1 << (7 & 7))) == 0,
+          "ages does not have the rod of seasons");
+    CHECK(s.play_frames == 432000, "playtime kept as frames for the timer");
+    CHECK(s.play_seconds == 7200, "and still as seconds");
+
+    /* Seasons keeps all of it somewhere else. A wrong column would read
+     * the bracelet tier out of a byte that means something else. */
+    memset(wram, 0, sizeof(wram));
+    w8(0xC6A3, 64); w8(0xCD00, 1);
+    w8(0xC6AC, 3);               /* wSwordLevel (Seasons) */
+    w8(0xC6A9, 3);               /* wShieldLevel          */
+    w8(0xC6AE, 3);               /* wSeedSatchelLevel     */
+    w8(0xC6B8, 2);               /* Ages' bracelet address: must be ignored */
+    w8(0xC692, 0xEE);            /* flags incl. the rod of seasons */
+    CHECK(epoch_stream_read(&s, wram, "tlozoos"), "seasons items read");
+    CHECK(s.sword == 3 && s.shield == 3 && s.satchel == 3,
+          "seasons tiers use the seasons column");
+    CHECK(s.bracelet == 0,
+          "seasons has no bracelet address, so no bracelet is invented");
+    CHECK((s.treasures[7 >> 3] & (1 << (7 & 7))) != 0,
+          "seasons has the rod of seasons");
+
+    {   /* The emitted line has to carry all of it. */
+        char line[1024];
+        CHECK(epoch_stream_format(&s, line, sizeof(line)) > 0,
+              "formats with items");
+        CHECK(strstr(line, "items:\"EE") != NULL,
+              "treasure bits are emitted as hex");
+        CHECK(strstr(line, "sword:3") && strstr(line, "satchel:3"),
+              "tiers are emitted");
+        CHECK(strstr(line, "frames:") != NULL, "frames are emitted");
+    }
+
     /* -- escaping ------------------------------------------------------ */
     /* Pack titles are edited by players; a quote or a backslash in one
      * must not end the JavaScript string early. */

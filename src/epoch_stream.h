@@ -47,6 +47,20 @@ typedef struct {
     uint32_t tick;            /* bumps per write: a heartbeat, so the
                                * overlay can tell a running player from a
                                * file left behind by one that exited */
+
+    /* -- speedrun timer and item tracker --------------------------- *
+     * play_frames is the game's own counter, untouched: it is what a
+     * file's clock reads, it pauses when the game does, and it survives
+     * the overlay being reloaded mid-run. Seconds are derived from it
+     * for anything that does not want the precision. */
+    uint32_t play_frames;
+    /* One bit per treasure id, LSB first -- wObtainedTreasureFlags,
+     * straight out of the save block. 128 ids, and the tracker decides
+     * which of them are worth a square. */
+    uint8_t  treasures[16];
+    int      sword, shield, satchel, bracelet;  /* tiers, 0 = not held */
+    int      bombs, max_bombs;
+    int      seeds;           /* how many of the five seed types held */
 } EpochStreamState;
 
 /** Fill `out` from a WRAM snapshot (0x2000 bytes, 0xC000-based) for the

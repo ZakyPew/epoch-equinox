@@ -29,13 +29,24 @@ typedef struct {
     uint16_t rupees;          /* wNumRupees, 2 bytes */
     uint16_t essences;        /* wEssencesObtained, a bitmask */
     uint16_t group, room;     /* wActiveGroup / wActiveRoom */
+    /* Items. The two carts keep this block at different offsets too, and
+     * the levels are per-cart: Ages has a bracelet where Seasons has
+     * nothing at that address, so a wrong column here would invent an
+     * item on stream. Checked against real late-game saves of both. */
+    uint16_t treasures;       /* wObtainedTreasureFlags, 16 bytes  */
+    uint16_t sword, shield;   /* wSwordLevel / wShieldLevel        */
+    uint16_t satchel;         /* wSeedSatchelLevel                 */
+    uint16_t bracelet;        /* wBraceletLevel, 0 when the cart has none */
+    uint16_t bombs, max_bombs;
 } CartMap;
 
 static const CartMap CARTS[] = {
     { "tlozooa", "Oracle of Ages",
-      0xC6AA, 0xC6AB, 0xC6AD, 0xC6BF, 0xCC2D, 0xCC30 },
+      0xC6AA, 0xC6AB, 0xC6AD, 0xC6BF, 0xCC2D, 0xCC30,
+      0xC69A, 0xC6B2, 0xC6AF, 0xC6B4, 0xC6B8, 0xC6B0, 0xC6B1 },
     { "tlozoos", "Oracle of Seasons",
-      0xC6A2, 0xC6A3, 0xC6A5, 0xC6BB, 0xCC49, 0xCC4C },
+      0xC6A2, 0xC6A3, 0xC6A5, 0xC6BB, 0xCC49, 0xCC4C,
+      0xC692, 0xC6AC, 0xC6A9, 0xC6AE, 0x0000, 0xC6AA, 0xC6AB },
 };
 
 /* Same in both games. */
@@ -93,12 +104,33 @@ bool epoch_stream_read(EpochStreamState* out, const uint8_t* wram,
     out->rupees_total = rd16(wram, A_RUPEES_TOTAL);
     out->linked = rd(wram, A_LINKED) != 0;
 
-    {   /* A frame counter; the games run at ~60 Hz. */
+    {   /* A frame counter; the games run at ~60 Hz. Kept as frames as
+         * well as seconds -- a run timer wants the hundredths. */
         uint32_t frames = (uint32_t)rd(wram, A_PLAYTIME)
                         | ((uint32_t)rd(wram, A_PLAYTIME + 1) << 8)
                         | ((uint32_t)rd(wram, A_PLAYTIME + 2) << 16)
                         | ((uint32_t)rd(wram, A_PLAYTIME + 3) << 24);
+        out->play_frames = frames;
         out->play_seconds = (int)(frames / 60);
+    }
+
+    /* Items. The flags are a bit per treasure id straight out of the
+     * save block; the tracker in the overlay decides what to draw. */
+    for (int i = 0; i < 16; i++)
+        out->treasures[i] = rd(wram, cart->treasures + i);
+    out->sword    = rd(wram, cart->sword);
+    out->shield   = rd(wram, cart->shield);
+    out->satchel  = rd(wram, cart->satchel);
+    out->bracelet = cart->bracelet ? rd(wram, cart->bracelet) : 0;
+    out->bombs     = rd(wram, cart->bombs);
+    out->max_bombs = rd(wram, cart->max_bombs);
+    {   /* The five seed types are consecutive ids from EMBER_SEEDS. */
+        const int EMBER = 0x20;
+        out->seeds = 0;
+        for (int i = 0; i < 5; i++) {
+            int id = EMBER + i;
+            if (out->treasures[id >> 3] & (1 << (id & 7))) out->seeds++;
+        }
     }
 
     epoch_achievements_progress(&out->unlocked, &out->total);
@@ -128,6 +160,16 @@ static void js_escape(const char* in, char* out, size_t cap) {
 
 int epoch_stream_format(const EpochStreamState* s, char* buf, size_t cap) {
     char title[160], desc[240], id[120], cart_title[80];
+    /* The treasure bits as hex. A string rather than 16 numbers because
+     * the overlay only ever asks "is bit N set", and 32 characters is
+     * less to go wrong than an array literal. */
+    char items[33];
+    for (int i = 0; i < 16; i++) {
+        static const char HEX[] = "0123456789ABCDEF";
+        items[i * 2]     = HEX[(s->treasures[i] >> 4) & 0xF];
+        items[i * 2 + 1] = HEX[s->treasures[i] & 0xF];
+    }
+    items[32] = 0;
     js_escape(s->last_title, title, sizeof(title));
     js_escape(s->last_desc, desc, sizeof(desc));
     js_escape(s->last_id, id, sizeof(id));
@@ -138,12 +180,15 @@ int epoch_stream_format(const EpochStreamState* s, char* buf, size_t cap) {
         "hearts:%d,maxHearts:%d,rings:%d,deaths:%d,kills:%d,rupees:%d,"
         "rupeesTotal:%d,seconds:%d,linked:%s,unlocked:%d,total:%d,"
         "lastId:\"%s\",lastTitle:\"%s\",lastDesc:\"%s\",serial:%u,"
-        "tick:%u});\n",
+        "tick:%u,frames:%u,sword:%d,shield:%d,satchel:%d,bracelet:%d,"
+        "bombs:%d,maxBombs:%d,seeds:%d,items:\"%s\"});\n",
         s->cart, cart_title, s->group & 0xFF, s->room & 0xFF, s->essences,
         s->hearts, s->max_hearts, s->rings, s->deaths, s->kills, s->rupees,
         s->rupees_total, s->play_seconds, s->linked ? "true" : "false",
         s->unlocked, s->total, id, title, desc,
-        (unsigned)s->unlock_serial, (unsigned)s->tick);
+        (unsigned)s->unlock_serial, (unsigned)s->tick,
+        (unsigned)s->play_frames, s->sword, s->shield, s->satchel,
+        s->bracelet, s->bombs, s->max_bombs, s->seeds, items);
     return (n < 0 || (size_t)n >= cap) ? -1 : n;
 }
 
