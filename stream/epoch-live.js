@@ -65,6 +65,36 @@
   function set(id, text) { var e = el(id); if (e) e.textContent = text; }
   function html(id, markup) { var e = el(id); if (e) e.innerHTML = markup; }
 
+  /* The achievement's own icon, mirrored out of achievements/icons into
+     stream/icons as PNG -- the packs ship PAM, which no browser reads.
+     The drawn medal sits underneath and shows through whenever there is
+     no icon: an achievement from a mod, a typo in an id, a folder that
+     did not get copied. Ids come from pack files a player edits, so the
+     path is built from known-safe characters only rather than trusted. */
+  function icon(slotId, cart, id) {
+    var img = el(slotId);
+    if (!img) return;
+    var slot = img.parentNode;
+    /* The medal is drawn UNDER the icon, so it has to be taken away when
+       one loads -- an icon is mostly transparent, and a medal showing
+       through its gaps looks like a rendering fault. */
+    function show(on) {
+      img.hidden = !on;
+      if (slot && slot.classList) slot.classList.toggle('has-icon', on);
+    }
+    var safe = /^[A-Za-z0-9._-]+$/;
+    if (!cart || !id || !safe.test(cart) || !safe.test(id)) {
+      show(false);
+      return;
+    }
+    var src = 'icons/' + cart + '/' + id + '.png';
+    if (img.getAttribute('src') === src && !img.hidden) return;
+    show(false);
+    img.onload = function () { show(true); };
+    img.onerror = function () { show(false); };
+    img.setAttribute('src', src);
+  }
+
   window.EPOCH = function (s) {
     if (!s || !s.cart) return;
     lastSeen = Date.now();
@@ -97,6 +127,7 @@
       if (have) {
         set('last-title', s.lastTitle || s.lastId);
         set('last-desc', s.lastDesc || '');
+        icon('last-icon', s.cart, s.lastId);
       }
     }
 
@@ -109,6 +140,7 @@
       lastSerial = s.serial;
       set('card-title', s.lastTitle || s.lastId || '');
       set('card-desc', s.lastDesc || '');
+      icon('card-icon', s.cart, s.lastId);
       if (card) {
         card.classList.remove('show');
         void card.offsetWidth;            /* restart the animation */

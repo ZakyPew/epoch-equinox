@@ -136,6 +136,7 @@
 .last i.dia.bl { left:-4px; bottom:-4px; }
 .last i.dia.br { right:-4px; bottom:-4px; }
 .last .medal { width:44px; height:44px; opacity:.92; }
+.last .medal-slot, .last .medal-img { width:48px; height:48px; }
 .last-kicker {
   font-size:11px; letter-spacing:.2em; color:var(--gold);
   text-transform:uppercase; margin-bottom:4px;
@@ -170,6 +171,23 @@
 .card i.dia.br { right:-6px; bottom:-6px; }
 .card.show { animation:cardIn 7.5s cubic-bezier(.16,.84,.3,1) forwards; }
 .medal { width:62px; height:62px; flex:none; }
+
+/* The achievement's own icon when the pack has one, with the drawn medal
+   underneath for when it does not -- a mod's achievement, or an icon that
+   failed to load. The icons are 48x48 pixel art, so they are shown at a
+   whole multiple and told not to smooth. */
+.medal-slot {
+  position:relative; flex:none; display:grid; place-items:center;
+  width:96px; height:96px;
+}
+.medal-slot .medal { position:absolute; }
+.medal-slot.has-icon .medal { display:none; }
+.medal-img {
+  position:absolute; width:96px; height:96px;
+  image-rendering:pixelated;
+  filter:drop-shadow(0 3px 7px rgba(0,0,0,.55));
+}
+.medal-img[hidden] { display:none; }
 .card-kicker {
   font-size:13px; letter-spacing:.22em; color:var(--gold);
   text-transform:uppercase; margin-bottom:5px;
