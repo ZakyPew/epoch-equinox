@@ -42,6 +42,11 @@ a convenience, not a new source of truth.
 3. Width **1920**, height **1080** — or **1080**×**1920** for the vertical ones
 4. Leave "Shutdown source when not visible" **off** so the feeds keep polling
 
+Get step 3 wrong and the page says so: an overlay in a source of the wrong
+size does not scale, it gets cropped, so it prints the numbers to type
+across the top rather than leaving you to work it out from a mangled
+render.
+
 The floating layouts are done at that point; the background is transparent,
 so they composite over whatever is underneath.
 

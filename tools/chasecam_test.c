@@ -1,10 +1,10 @@
 /* Exercises the chase camera's yaw rules without a cart or a window.
  *
  * The camera's feel is the whole point of these rules, and feel is exactly
- * what a screenshot cannot check. What IS checkable: that the camera stays
- * where it was put while Link runs around, that a recentre tap finishes
- * its swing on its own, that a held recentre keeps following, and that the
- * stick always wins.
+ * what a screenshot cannot check. What IS checkable: that it trails him
+ * while he walks, that it hands control over the moment the stick moves
+ * and does not take it straight back, that a recentre tap finishes its
+ * swing on its own, and that a held recentre keeps following.
  *
  * Build like vox_shot (it links the same libraries):
  *
@@ -53,21 +53,62 @@ static void frame(int dir, float x, float y) {
 }
 
 int main(void) {
-    /* -- the camera stays where it is put ---------------------------- */
+    /* -- it trails him while he walks -------------------------------- */
     voxel_tuning_reset();
-    CHECK(voxel_tuning()->chase_follow == 0.0f,
-          "auto-follow ships off");
+    CHECK(voxel_tuning()->chase_follow > 0.0f,
+          "trailing ships on -- a chase camera that never chases is broken");
 
-    float start = voxel_chase_yaw();
-    for (int i = 0; i < 120; i++) frame(1, 60.0f + i, 100.0f);   /* runs east */
-    CHECK(fabsf(voxel_chase_yaw() - start) < 0.0001f,
-          "walking never moves the camera on its own");
+    for (int i = 0; i < 200; i++) frame(1, 60.0f + i, 100.0f);   /* runs east */
+    CHECK(ang_diff(voxel_chase_yaw(), DIR_YAW[1]) < 0.02f,
+          "walking east swings the camera round behind him");
+    for (int i = 0; i < 200; i++) frame(0, 60.0f, 100.0f - i);   /* runs north */
+    CHECK(ang_diff(voxel_chase_yaw(), DIR_YAW[0]) < 0.02f,
+          "and follows him round the corner");
 
+    /* Standing still and turning to talk to someone must not move it. */
+    float held_still = voxel_chase_yaw();
     for (int d = 0; d < 4; d++) {
         for (int i = 0; i < 30; i++) frame(d, 60.0f, 100.0f);
     }
-    CHECK(fabsf(voxel_chase_yaw() - start) < 0.0001f,
-          "turning on the spot never moves it either");
+    CHECK(fabsf(voxel_chase_yaw() - held_still) < 0.0001f,
+          "turning on the spot never moves it");
+
+    /* -- the stick wins, and keeps winning for a moment --------------- */
+    for (int i = 0; i < 200; i++) frame(2, 60.0f, 100.0f + i);   /* settle, walking south */
+    float before = voxel_chase_yaw();
+    voxel_chase_turn(1.0f);
+    frame(2, 60.0f, 300.0f);
+    float nudged = voxel_chase_yaw();
+    CHECK(fabsf(nudged - before) > 0.01f, "the stick turns the camera");
+
+    /* The old version resumed the instant the stick went still, which is
+     * what made it feel like a fight. It has to hold for a beat. */
+    for (int i = 0; i < 10; i++) frame(2, 60.0f, 310.0f + i);
+    CHECK(fabsf(voxel_chase_yaw() - nudged) < 0.0001f,
+          "it stays where the stick left it for a moment, mid-walk");
+
+    /* ...and then eases back on its own rather than staying put forever. */
+    for (int i = 0; i < 300; i++) frame(2, 60.0f, 400.0f + i);
+    CHECK(ang_diff(voxel_chase_yaw(), DIR_YAW[2]) < 0.02f,
+          "after the pause it trails him again");
+
+    /* The ease is gradual: one frame of it must not close the whole gap. */
+    voxel_chase_turn(6.0f);
+    frame(2, 60.0f, 800.0f);
+    float far_off = voxel_chase_yaw();
+    for (int i = 0; i < 40; i++) frame(2, 60.0f, 810.0f + i);
+    float part_way = voxel_chase_yaw();
+    CHECK(ang_diff(part_way, far_off) > 0.01f &&
+          ang_diff(part_way, DIR_YAW[2]) > 0.01f,
+          "the swing is eased, not a snap");
+
+    /* -- holding still is still available ----------------------------- */
+    voxel_tuning()->chase_follow = 0.0f;
+    float parked = voxel_chase_yaw();
+    for (int i = 0; i < 200; i++) frame(1, 60.0f + i, 100.0f);
+    CHECK(fabsf(voxel_chase_yaw() - parked) < 0.0001f,
+          "trailing off holds whatever angle it was left at");
+    voxel_tuning_reset();
 
     /* -- a tap swings round and finishes itself ----------------------- */
     voxel_chase_recenter(true);
@@ -76,11 +117,11 @@ int main(void) {
     CHECK(ang_diff(voxel_chase_yaw(), DIR_YAW[2]) < 0.01f,
           "a recentre tap completes the swing after the button is up");
 
-    /* Having arrived, it must stay: no drift once the ease is spent. */
+    /* Having arrived, it must stay while he stands there. */
     float landed = voxel_chase_yaw();
-    for (int i = 0; i < 60; i++) frame(0, 60.0f, 100.0f + i);     /* now walks north */
+    for (int i = 0; i < 60; i++) frame(2, 60.0f, 100.0f);
     CHECK(fabsf(voxel_chase_yaw() - landed) < 0.0001f,
-          "after recentring it holds still again");
+          "after recentring it holds still while he does");
 
     /* -- a held recentre keeps following ------------------------------ */
     for (int i = 0; i < 90; i++) {
@@ -96,13 +137,6 @@ int main(void) {
     CHECK(ang_diff(voxel_chase_yaw(), DIR_YAW[1]) < 0.01f,
           "held recentre keeps following when he turns");
     voxel_chase_recenter(false);
-
-    /* -- the optional walk-follow still works when asked for ---------- */
-    voxel_tuning()->chase_follow = 0.2f;
-    for (int i = 0; i < 120; i++) frame(0, 60.0f, 100.0f - i);    /* walks north */
-    CHECK(ang_diff(voxel_chase_yaw(), DIR_YAW[0]) < 0.01f,
-          "chase_follow>0 restores the walk-follow");
-    voxel_tuning_reset();
 
     /* -- recentring is idempotent when already there ------------------ */
     for (int i = 0; i < 40; i++) { voxel_chase_recenter(true); frame(2, 60.0f, 100.0f); }

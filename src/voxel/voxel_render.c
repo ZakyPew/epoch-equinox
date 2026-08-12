@@ -88,7 +88,7 @@ static const VoxCam VOX_CAMS[VOXEL_MODE_COUNT] = {
     .chase_height = 32.0f,                  \
     .chase_fov    = 0.62f,                  \
     .chase_hpx    = 3.2f,                   \
-    .chase_follow = 0.0f,                   \
+    .chase_follow = 0.05f,                  \
     .chase_recenter = 0.16f,                \
     .cliff_unify = 1.0f,                    \
     .fog_start    = 70.0f,                  \
@@ -105,6 +105,13 @@ static const VoxelTuning VOX_TUNE_DEFAULTS = VOX_TUNE_INIT;
 VoxelTuning* voxel_tuning(void) { return &g_tune; }
 
 float voxel_chase_yaw(void) { return g_chase_yaw; }
+
+/* Set by voxel_chase_turn, consumed and cleared by the next step. */
+static float g_turn_request = 0.0f;
+/* Frames left before the camera may drift again; see the step below. */
+static int   g_manual_hold = 0;
+
+void voxel_chase_turn(float amount) { g_turn_request += amount; }
 
 void voxel_chase_recenter(bool held) {
     if (held && !g_recentre_held) g_recentring = true;   /* on the press */
@@ -399,19 +406,20 @@ void vox_chase_step(const VoxTileGrid* grid, float* out_lx, float* out_ly) {
      * round behind him; hold it and it keeps following until you let go.
      * chase_follow in the tuning block brings the old walk-follow back for
      * anyone who preferred it, and defaults to 0. */
-    float turn = 0.0f;
 #ifdef GB_HAS_SDL2
     {
+        float stick = 0.0f;
         const Uint8* keys = SDL_GetKeyboardState(NULL);
         if (keys) {
-            if (keys[SDL_SCANCODE_Q]) turn -= 1.0f;
-            if (keys[SDL_SCANCODE_E]) turn += 1.0f;
+            if (keys[SDL_SCANCODE_Q]) stick -= 1.0f;
+            if (keys[SDL_SCANCODE_E]) stick += 1.0f;
         }
         SDL_GameController* pad = SDL_GameControllerFromPlayerIndex(0);
         if (pad) {
             Sint16 ax = SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_RIGHTX);
-            if (ax > 6000 || ax < -6000) turn += (float)ax / 32767.0f;
+            if (ax > 6000 || ax < -6000) stick += (float)ax / 32767.0f;
         }
+        if (stick != 0.0f) voxel_chase_turn(stick);
         /* Recentre: right stick click, or C. Either one held keeps the
          * camera behind him; a tap starts an ease that finishes itself. */
         bool want_recentre = keys && keys[SDL_SCANCODE_C];
@@ -420,13 +428,20 @@ void vox_chase_step(const VoxTileGrid* grid, float* out_lx, float* out_ly) {
         voxel_chase_recenter(want_recentre);
     }
 #endif
+    const float turn = g_turn_request;
+    g_turn_request = 0.0f;
     {
         /* Walking, not just facing: Link's own position has to have moved,
          * and a room transition teleports it, so only small steps count.
          * Only the optional walk-follow uses this. */
         static float prev_lx = 0.0f, prev_ly = 0.0f;
         static bool  pos_live = false;
-        static int   manual_hold = 0;
+        /* Frames left before the camera is allowed to drift again, and how
+         * long it has been drifting. The first is why the old auto-swing
+         * felt like a fight: it resumed the instant the stick went still,
+         * so every adjustment was undone before you let go. The second
+         * eases the drift in, so it starts as a lean rather than a jerk. */
+        static int   drift_age = 0;
         float dx = lx - prev_lx, dy = ly - prev_ly;
         bool walking = pos_live && (dx * dx + dy * dy) > 0.02f &&
                        (dx * dx + dy * dy) < 64.0f;
@@ -441,10 +456,13 @@ void vox_chase_step(const VoxTileGrid* grid, float* out_lx, float* out_ly) {
 
         if (turn != 0.0f) {
             g_chase_yaw += turn * 0.055f;
-            manual_hold = 1;
+            /* About half a second at 60fps. Long enough to line a shot up
+             * and let go without the camera immediately taking it back. */
+            g_manual_hold = 32;
+            drift_age = 0;
             g_recentring = false;     /* the stick always wins */
-        } else if (walking) {
-            manual_hold = 0;
+        } else if (g_manual_hold > 0) {
+            g_manual_hold--;
         }
 
         /* Shortest way round, so facing left from up turns a quarter turn
@@ -464,10 +482,21 @@ void vox_chase_step(const VoxTileGrid* grid, float* out_lx, float* out_ly) {
                 g_chase_yaw = behind;
                 g_recentring = false;
             }
-        } else if (g_tune.chase_follow > 0.0f && walking && !manual_hold) {
+        } else if (g_tune.chase_follow > 0.0f && walking && g_manual_hold == 0) {
+            /* Trail him. Only while he is actually walking -- turning on
+             * the spot to talk to someone should not move the camera --
+             * and eased in over about a third of a second, so a corner
+             * taken at speed reads as the view swinging round to follow
+             * rather than snapping to the new heading. */
             float rate = g_tune.chase_follow;
             if (rate > 1.0f) rate = 1.0f;
-            g_chase_yaw += delta * rate;
+            if (drift_age < 20) drift_age++;
+            rate *= (float)drift_age / 20.0f;
+            /* Close enough is close enough: without this the last fraction
+             * of a degree keeps the camera imperceptibly creeping. */
+            if (delta > 0.015f || delta < -0.015f) g_chase_yaw += delta * rate;
+        } else {
+            drift_age = 0;
         }
         /* Keep the angle in (-pi, pi] rather than letting a session's worth
          * of turns wind it into the thousands, where float steps coarsen. */

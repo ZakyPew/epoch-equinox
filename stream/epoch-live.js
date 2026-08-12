@@ -73,6 +73,40 @@
     fill('guide-cam', 'Camera', 'cam');
   }
 
+  /* Each layout declares the canvas it was drawn for. Put it in a browser
+     source of a different size and it does not scale -- it gets cropped,
+     or stranded in a corner with the mat ending mid-screen, which looks
+     like the overlay is broken rather than the source being misconfigured.
+     Say which numbers to type instead of leaving someone to work it out
+     from a mangled render. */
+  function checkSize() {
+    var want = document.documentElement.getBoundingClientRect();
+    var w = Math.round(want.width), h = Math.round(want.height);
+    var have = window.innerWidth, haveH = window.innerHeight;
+    var id = 'epoch-size-warning';
+    var box = el(id);
+    if (Math.abs(w - have) < 2 && Math.abs(h - haveH) < 2) {
+      if (box) box.remove();
+      return;
+    }
+    if (!box) {
+      box = document.createElement('div');
+      box.id = id;
+      box.style.cssText =
+        'position:fixed;left:0;top:0;right:0;z-index:9999;' +
+        'background:rgba(140,30,30,.94);color:#FFEFC0;' +
+        'font:600 20px/1.45 ui-monospace,Menlo,Consolas,monospace;' +
+        'padding:16px 22px;text-align:center;' +
+        'border-bottom:2px solid #DEB24C;';
+      document.body.appendChild(box);
+    }
+    box.textContent =
+      'This overlay is ' + w + ' × ' + h + ', but the browser source is ' +
+      have + ' × ' + haveH + '. Set the source to ' + w + ' × ' + h + '.';
+  }
+  checkSize();
+  addEventListener('resize', checkSize);
+
   if (location.search.indexOf('guide') >= 0) document.body.classList.add('guide-on');
   if (location.search.indexOf('cam') >= 0) document.body.classList.add('cam-on');
   addEventListener('keydown', function (e) {

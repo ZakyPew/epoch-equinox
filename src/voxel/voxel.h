@@ -71,7 +71,7 @@ typedef struct {
     float chase_height;   /* camera height above the player's ground */
     float chase_fov;      /* focal length as a fraction of output width */
     float chase_hpx;      /* screen px per height unit in perspective */
-    float chase_follow;   /* auto-swing behind Link while walking, 0 = off */
+    float chase_follow;   /* drift behind Link while walking, 0 = off */
     float chase_recenter; /* how fast the recenter button swings behind him */
     float cliff_unify;    /* 1 = one height per connected solid mass */
     float fog_start;      /* distance where distance fog begins */
@@ -91,6 +91,13 @@ float voxel_chase_yaw(void);
  *  Driven by the right stick click / C on the keyboard, and callable from
  *  a test. */
 void voxel_chase_recenter(bool held);
+
+/** Turn the camera by `amount` radians-ish (the right stick's deflection
+ *  for this frame, or +/-1 from Q and E). Taking the turn through here
+ *  rather than reading the stick inside the step is what lets a test
+ *  drive the same rule the game does -- including the pause before the
+ *  camera starts trailing him again. */
+void voxel_chase_turn(float amount);
 
 /** Restore the shipped defaults. */
 void voxel_tuning_reset(void);
