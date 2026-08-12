@@ -103,6 +103,26 @@ jobs:
           # vcpkg retries an individual download, but still exits after three
           # quick attempts. Retrying the install preserves packages already
           # built on this runner and resumes at the failed dependency.
+          # GitHub's /archive endpoint has also returned a sustained 503 for
+          # EGL-Registry while codeload served the byte-identical tarball.
+          # Seed that one verified archive under vcpkg's expected filename;
+          # vcpkg will independently verify the port's SHA-512 before use.
+          $eglName = 'KhronosGroup-EGL-Registry-3ae2b7c48690d2ce13cc6db3db02dfc0572be65e.tar.gz'
+          $downloads = Join-Path $env:VCPKG_INSTALLATION_ROOT 'downloads'
+          $eglArchive = Join-Path $downloads $eglName
+          $eglPart = "$eglArchive.part"
+          New-Item -ItemType Directory -Force -Path $downloads | Out-Null
+          Invoke-WebRequest `
+            -Uri 'https://codeload.github.com/KhronosGroup/EGL-Registry/tar.gz/3ae2b7c48690d2ce13cc6db3db02dfc0572be65e' `
+            -OutFile $eglPart
+          $expectedSha256 = '00F6D5656D8A075EE72EC2CCBE9B803D29BB56695B05622AC4CDE95D760A1528'
+          $actualSha256 = (Get-FileHash -Algorithm SHA256 $eglPart).Hash
+          if ($actualSha256 -ne $expectedSha256) {
+            Remove-Item -LiteralPath $eglPart -Force
+            throw "unexpected EGL-Registry archive SHA-256: $actualSha256"
+          }
+          Move-Item -LiteralPath $eglPart -Destination $eglArchive -Force
+
           $packages = @(
             'sdl2:x64-windows',
             'curl:x64-windows',
