@@ -60,13 +60,15 @@ source at
 
 | layout | position | size |
 |---|---|---|
-| `overlay-framed.html` | 1220, 536 | 652 × 367 |
+| `overlay-framed.html` | 1220, 560 | 560 × 315 |
 | `overlay-framed-vertical.html` | 40, 1190 | 640 × 360 |
 
 Both can be combined: `overlay-framed.html?cam&guide`.
 
 Without `?cam` that part of the canvas is simply empty mat, which is a
-perfectly good place to float a round webcam of your own.
+perfectly good place to float a round webcam of your own. On the vertical
+layout the camera takes the lower band, so the repo link and the "now
+building" pill step aside while it is on.
 
 ### Moving the frame
 
@@ -85,6 +87,7 @@ second, and the overlays pick it up:
 - achievements earned out of the total, with a filling bar
 - an **achievement unlocked** card that lands the instant one is earned,
   and (on the framed layouts) a standing *last earned* plaque between them
+- the achievement's **own icon** on both, from `stream/icons/`
 
 Nothing is shown until the player is actually in a room with a file
 loaded — the file-select screen has a half-built save in memory and would
@@ -128,15 +131,27 @@ underneath shows through and nothing looks broken.
 | `overlay*.html` | the four layouts — placement, framing, decoration |
 | `epoch-live.css` | the live panel, plaque and unlock card, shared by all four |
 | `epoch-live.js` | reads `now.js` and `live.js`, fills the markup |
+| `icons/` | the achievement icons as PNG, mirrored from `achievements/icons` |
 | `now.js` | your one-line status |
 | `live.js` | written by the player; not in the repo |
+
+## Achievement icons
+
+The unlock card and the plaque show the achievement's own icon, loaded
+from `stream/icons/<cart>/<id>.png`. Those are mirrors: the packs ship
+48×48 **PAM** files, which the player reads directly and no browser can,
+so `tools/pam_to_png.py` writes PNG copies and CI fails if they ever fall
+out of step with the originals.
+
+An achievement with no icon — one from a mod, say — falls back to a drawn
+medal rather than a broken image, so nothing on screen ever looks faulty.
 
 ## Notes
 
 - The glyph is the project's own mark (a split disc — two games, one
-  world), and every icon here is drawn from plain geometry: a heart from
-  two circles and a square, a ring, a rupee. No game art is used anywhere
-  in the overlays, which keeps them safe to put on a thumbnail, a
-  Linktree, or anywhere else.
+  world), and every part of the furniture is drawn from plain geometry: a
+  heart from two circles and a square, a ring, a rupee. The only pictures
+  are the achievement icons, which are the project's own artwork, and your
+  cover crops if you add them — no art is lifted out of the games.
 - Colours are the renderer's own sky palettes plus the achievement card's
   gilding: the Ages daylight blue, the autumn gold, and deep navy.

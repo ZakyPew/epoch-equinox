@@ -75,7 +75,10 @@
   .mat.cam { display:none; }
   body.cam-on .mat.b { display:none; }
   body.cam-on .mat.cam { display:block; }
-  body.cam-on .last, body.cam-on .now { display:none; }
+  body.cam-on .last, body.cam-on .now, body.cam-on .cta { display:none; }
+  /* With the camera in the lower band there is one slot left below it,
+     and the unlock card is what belongs in it. */
+  body.cam-on .card { top:1580px; bottom:auto; }
   .mat.c1 { left:0; top:calc(var(--box-y) + var(--box-h)); width:1080px;
             height:calc(var(--cam-y) - var(--box-y) - var(--box-h));
             background-position:0 calc(-1 * (var(--box-y) + var(--box-h))); }
@@ -249,7 +252,7 @@
   }
   .card {
     left:40px; right:var(--side-safe);
-    bottom:calc(var(--bottom-safe) + 300px);
+    bottom:calc(var(--bottom-safe) + 270px);
   }
   @keyframes cardIn {
     0%   { opacity:0; transform:translateY(38px) scale(.97); }
@@ -438,7 +441,10 @@
   <div class="last" id="last" hidden>
     <i class="dia tl"></i><i class="dia tr"></i>
     <i class="dia bl"></i><i class="dia br"></i>
-    <svg class="medal" aria-hidden="true"><use href="#medal"/></svg>
+    <span class="medal-slot">
+      <svg class="medal" aria-hidden="true"><use href="#medal"/></svg>
+      <img class="medal-img" id="last-icon" alt="" hidden>
+    </span>
     <div>
       <div class="last-kicker">Last earned</div>
       <div class="last-title" id="last-title">—</div>
@@ -451,7 +457,10 @@
     <i class="dia tl"></i><i class="dia tr"></i>
     <i class="dia bl"></i><i class="dia br"></i>
     <div class="card-sheen"></div>
-    <svg class="medal" aria-hidden="true"><use href="#medal"/></svg>
+    <span class="medal-slot">
+      <svg class="medal" aria-hidden="true"><use href="#medal"/></svg>
+      <img class="medal-img" id="card-icon" alt="" hidden>
+    </span>
     <div>
       <div class="card-kicker">Achievement unlocked</div>
       <div class="card-title" id="card-title">—</div>
