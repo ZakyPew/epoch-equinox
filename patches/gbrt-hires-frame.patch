@@ -46,17 +46,42 @@ diff --git a/runtime/src/platform_sdl.cpp b/runtime/src/platform_sdl.cpp
  #ifdef GB_HAS_SDL2
  #include <SDL.h>
  #if defined(_WIN32)
-@@ -2547,6 +2559,54 @@
+@@ -2547,6 +2559,79 @@
      g_lcd_off_framebuffer_initialized = true;
  }
  
-+/* Host-supplied high-resolution frame: swizzle ARGB->RGBA into a staging
-+ * buffer sized on demand and keep it in its own texture. Palette override
-+ * and colour correction don't apply -- this frame is host-composed, not
-+ * PPU output. */
++/* Host-supplied high-resolution frame: apply the same display colour
++ * correction as the normal Game Boy texture, then swizzle ARGB->RGBA into
++ * a staging buffer sized on demand. The voxel renderer reconstructs its
++ * colours directly from CGB palette RAM; treating that as already display-
++ * corrected made every high-resolution voxel mode neon while the untouched
++ * game used the selected GBC/GBA correction. */
 +static GLuint g_hires_tex = 0;
 +static int g_hires_tex_w = 0;
 +static int g_hires_tex_h = 0;
++
++static uint32_t correct_hires_color(uint32_t c) {
++    static const int16_t cc_gbc[9] = {
++          893, 123,   8,    102, 840,  82,    102, 133, 789,
++    };
++    static const int16_t cc_gba[9] = {
++          860, 169,  -5,     92, 676, 256,     92, 261, 671,
++    };
++    const int16_t* cc = (g_color_correction == 1) ? cc_gbc :
++                        (g_color_correction == 2) ? cc_gba : NULL;
++    if (!cc) return c;
++    int r = (int)((c >> 16) & 0xFFu);
++    int g = (int)((c >> 8) & 0xFFu);
++    int b = (int)(c & 0xFFu);
++    int rn = (r * cc[0] + g * cc[1] + b * cc[2]) >> 10;
++    int gn = (r * cc[3] + g * cc[4] + b * cc[5]) >> 10;
++    int bn = (r * cc[6] + g * cc[7] + b * cc[8]) >> 10;
++    if (rn < 0) rn = 0; else if (rn > 255) rn = 255;
++    if (gn < 0) gn = 0; else if (gn > 255) gn = 255;
++    if (bn < 0) bn = 0; else if (bn > 255) bn = 255;
++    return (c & 0xFF000000u) | ((uint32_t)rn << 16) |
++           ((uint32_t)gn << 8) | (uint32_t)bn;
++}
 +
 +static void upload_hires_frame(void) {
 +    static uint32_t* staging = NULL;
@@ -72,7 +97,7 @@ diff --git a/runtime/src/platform_sdl.cpp b/runtime/src/platform_sdl.cpp
 +        return;
 +    }
 +    for (size_t i = 0; i < need; i++) {
-+        uint32_t c = g_hires_src[i];
++        uint32_t c = correct_hires_color(g_hires_src[i]);
 +        uint32_t a = c & 0xFF000000u;
 +        uint32_t r = (c >> 16) & 0xFFu;
 +        uint32_t g2 = (c >> 8) & 0xFFu;
@@ -101,7 +126,7 @@ diff --git a/runtime/src/platform_sdl.cpp b/runtime/src/platform_sdl.cpp
  static void render_frame_internal(const uint32_t* framebuffer, bool count_guest_frame) {
      if (!framebuffer) {
          DBG_FRAME("Platform render_frame: SKIPPED (null: tex=%d, gl=%d, fb=%d)",
-@@ -2639,6 +2699,9 @@
+@@ -2639,6 +2724,9 @@
       * override (Original / Pocket / Plasma) is applied during the same
       * pass since we're touching every pixel anyway. */
      double upload_start_ms = sdl_now_ms();
@@ -111,7 +136,7 @@ diff --git a/runtime/src/platform_sdl.cpp b/runtime/src/platform_sdl.cpp
      static uint32_t s_upload_buf[GB_FRAMEBUFFER_SIZE];
      {
          const uint32_t* src = framebuffer;
-@@ -2707,6 +2770,7 @@
+@@ -2707,6 +2795,7 @@
                      GB_SCREEN_WIDTH, GB_SCREEN_HEIGHT,
                      GL_RGBA, GL_UNSIGNED_BYTE, s_upload_buf);
      glBindTexture(GL_TEXTURE_2D, 0);
@@ -119,7 +144,7 @@ diff --git a/runtime/src/platform_sdl.cpp b/runtime/src/platform_sdl.cpp
      g_last_timing.upload_ms = sdl_now_ms() - upload_start_ms;
  
      /* Clear + compose. */
-@@ -2719,6 +2783,12 @@
+@@ -2719,6 +2808,12 @@
      glEnable(GL_BLEND);
      glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
  
@@ -132,7 +157,7 @@ diff --git a/runtime/src/platform_sdl.cpp b/runtime/src/platform_sdl.cpp
      refresh_sgb_cart_border_texture();
      GLuint active_border = 0;
      if (sgb_cart_border_active()) {
-@@ -2761,14 +2831,14 @@
+@@ -2761,14 +2856,14 @@
                  gb_shader_pipeline_set_active(g_shader_pipeline, active_shader);
              }
              gb_shader_pipeline_draw(g_shader_pipeline,
@@ -151,7 +176,7 @@ diff --git a/runtime/src/platform_sdl.cpp b/runtime/src/platform_sdl.cpp
                                      vp_x, vp_y, vp_w, vp_h,
                                      draw_w, draw_h);
          }
-@@ -5315,6 +5385,19 @@
+@@ -5315,6 +5410,19 @@
  
  
  void gb_platform_render_frame(const uint32_t* framebuffer) {

@@ -69,7 +69,7 @@ int main(void) {
     const uint32_t RED = 0xFFC04030u, BLUE = 0xFF3040C0u;
 
     /* Room 0x6A: red ground, a wall band across room-tile rows 6-9
-     * (room px 48-79), and one billboard tree at room cell (5, 2). */
+     * (room px 48-79), and one voxel tree at room cell (5, 2). */
     make_room(&room_north, RED);
     for (int rty = 6; rty <= 9; rty++) {
         int gty = rty + HUD / 8;          /* fine offsets are zero */
@@ -83,8 +83,10 @@ int main(void) {
         t->sx = sx;
         t->sy = sy;
         t->hcls = VOX_H_HIGH;
-        t->lit = t->mid = t->dark = t->bark = RED;
-        for (int i = 0; i < 16 * 16; i++) t->tex[i] = RED;
+        for (int i = 0; i < 16 * 16; i++) {
+            t->tex[i] = RED;
+            t->solid[i] = 1;
+        }
         room_north.tree_count = 1;
         for (int dy = 0; dy < 2; dy++)
             for (int dx = 0; dx < 2; dx++)

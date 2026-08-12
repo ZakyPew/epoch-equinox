@@ -12,9 +12,11 @@
  *   wOpenedMenuType  $CBCB  bank 0   nonzero while a menu owns the screen
  *   hCameraY/X       HRAM   16-bit camera, at different addresses per game
  *
- * Collision values (constants/common/specialCollisionValues.s):
+ * Collision values (constants/common/specialCollisionValues.s and
+ * checkGivenCollision_allowHoles::_simpleCollision):
  *   $00        walkable
- *   $01-$0F    solid shapes (corners, edges, full block)
+ *   $01-$0F    four solid-quadrant bits, from bit 3 top-left through
+ *              bit 0 bottom-right
  *   $10        hole / deep water / lava -- the things you sink into
  *   $11-$1B    bridges, minecart track, stairs -- walkable
  *   $FE/$FF    screen boundary filler
@@ -39,6 +41,7 @@
 
 #define WRAM_BANK_SIZE 4096
 
+#define A_wCutsceneIndex  0xC2EF
 #define A_wTextIsActive   0xCBA0
 #define A_wOpenedMenuType 0xCBCB
 #define A_wScrollMode     0xCD00
@@ -61,12 +64,13 @@ typedef struct {
     uint16_t state_addr;    /* wRoomStateModifier (the season, in Seasons) */
     uint16_t room_addr;     /* wActiveRoom (verified live: changes 7A->6A
                              * crossing one room north in Ages) */
+    uint16_t disabled_addr; /* wDisabledObjects */
     bool is_seasons;
 } OracleProfile;
 
 static const OracleProfile PROFILES[] = {
-    {"ZELDA NAYRU", 0x2A, 0x2C, 0xCC2D, 0xCC32, 0xCC30, false},
-    {"ZELDA DIN",   0x28, 0x2A, 0xCC49, 0xCC4E, 0xCC4C, true},
+    {"ZELDA NAYRU", 0x2A, 0x2C, 0xCC2D, 0xCC32, 0xCC30, 0xCC8A, false},
+    {"ZELDA DIN",   0x28, 0x2A, 0xCC49, 0xCC4E, 0xCC4C, 0xCCA4, true},
 };
 
 /* Cached per-ROM detection. GBContext has no user slot, so key the cache on
@@ -103,6 +107,37 @@ static inline uint8_t wram0(GBContext* ctx, uint16_t addr) {
     return ctx->wram[addr - 0xC000];
 }
 
+int vox_oracle_page_offset(uint8_t raw, int page_offset) {
+    int value = (int8_t)raw;
+    int best = value;
+    int minus_page = value - page_offset;
+    int plus_page = value + page_offset;
+    if (abs(minus_page) < abs(best)) best = minus_page;
+    if (abs(plus_page) < abs(best)) best = plus_page;
+    return best;
+}
+
+bool vox_oracle_scripted_scene(uint8_t cutscene_index,
+                               uint8_t disabled_objects) {
+    /* Index 1 is ordinary gameplay. Interaction scripts commonly remain at
+     * index 1 but set wDisabledObjects while they stage Link and NPCs. */
+    return cutscene_index > 1 || disabled_objects != 0;
+}
+
+bool vox_oracle_link_holds_item(uint8_t link_state) {
+    /* constants/common/linkStates.s and treasure.s: LINK_STATE_04 is the
+     * forced state used while Link raises a treasure over his head. */
+    return link_state == 0x04;
+}
+
+uint8_t vox_oracle_object_height(uint8_t layout_id) {
+    /* constants/common/tileIndices.s: $F0 opened chest, $F1 closed chest.
+     * Their interaction/collision remains walkable, but visually each is a
+     * 16x16 prop. Raising the four source quadrants preserves the exact live
+     * pixels as its top and folds those same pixels onto the shallow sides. */
+    return (layout_id == 0xF0 || layout_id == 0xF1) ? VOX_H_MID : 0xFF;
+}
+
 bool vox_oracle_read(GBContext* ctx, VoxOracleState* st) {
     memset(st, 0, sizeof(*st));
     g_last_live = false;
@@ -121,6 +156,10 @@ bool vox_oracle_read(GBContext* ctx, VoxOracleState* st) {
 
     st->menu_open = wram0(ctx, A_wOpenedMenuType) != 0;
     st->text_active = wram0(ctx, A_wTextIsActive) != 0;
+    st->cutscene_index = wram0(ctx, A_wCutsceneIndex);
+    st->disabled_objects = wram0(ctx, prof->disabled_addr);
+    st->scripted_scene = vox_oracle_scripted_scene(
+        (uint8_t)st->cutscene_index, (uint8_t)st->disabled_objects);
 
     /* wScrollMode is 1 in normal play. Anything else -- 0 (no room), bit 2
      * (scrolling), and the other transition values the disasm names -- means
@@ -150,20 +189,18 @@ bool vox_oracle_read(GBContext* ctx, VoxOracleState* st) {
                 ((int)ctx->hram[prof->cam_y_off + 1] << 8);
     st->cam_x = (int)ctx->hram[prof->cam_x_off] |
                 ((int)ctx->hram[prof->cam_x_off + 1] << 8);
-    /* wScreenOffsetY carries two different things in one byte. Small values
-     * are the transient draw shift this field is named for (screen shake),
-     * and screen->room conversions have to undo them. But a room whose
-     * tilemap lives in the lower half of the 256px-tall BG map reports a
-     * whole room height here -- 0x80, seen on every odd overworld row in
-     * Ages (SCY 112 there against 240 on even rows) -- and that is where
-     * the room was *drawn*, not where it moved to. Feeding it to the
-     * converters pushed every collision and layout lookup a full room off
-     * the table, which is why odd-row rooms rendered as bare smeared ground
-     * with no trees and never made it into the world cache. Page offsets
-     * are whole rooms, shakes never are, so fold them out here. */
-    int8_t oy = (int8_t)wram0(ctx, A_wScreenOffsetY);
-    st->off_y = (oy % VOX_ROOM_H == 0) ? 0 : oy;
-    st->off_x = (int8_t)wram0(ctx, A_wScreenOffsetX);
+    /* wScreenOffsetY/X carry two different things in one byte. Small values
+     * are transient displacement (shake); large values select the alternate
+     * page in the 256x256 double-buffered BG map. The horizontal page starts
+     * at 256-room_width = 96px, while the vertical page starts one 128px room
+     * down. Choose the nearest page-relative signed value so 96/160 on X and
+     * 128 on Y become zero, while 95/97 remain -1/+1 shakes. Treating the
+     * page origin as motion shifted Link and room objects by 96px, pulling
+     * trees from the far side of the layout over unrelated props. */
+    st->off_y = vox_oracle_page_offset(wram0(ctx, A_wScreenOffsetY),
+                                       VOX_ROOM_H);
+    st->off_x = vox_oracle_page_offset(wram0(ctx, A_wScreenOffsetX),
+                                       256 - VOX_ROOM_W);
     st->is_seasons = prof->is_seasons;
     st->active_group = wram0(ctx, prof->group_addr);
     st->active_room = wram0(ctx, prof->room_addr);
@@ -178,6 +215,7 @@ bool vox_oracle_read(GBContext* ctx, VoxOracleState* st) {
         st->link_x = link[0x0D];
         st->link_z = (int8_t)link[0x0F];
         st->link_dir = link[0x08] & 3;   /* SpecialObjectStruct.direction */
+        st->link_state = link[0x04];     /* SpecialObjectStruct.state */
     }
 
     /* Copy the room's collision grid, and require it to be populated:
@@ -209,10 +247,12 @@ bool vox_oracle_read(GBContext* ctx, VoxOracleState* st) {
         if ((tick++ % 60) == 0) {
             fprintf(stderr,
                     "\n[room] group %02X room %02X  scroll %02X  "
-                    "cam (%d,%d)  off (%d,%d)  link (%d,%d)\n",
+                    "cam (%d,%d)  off (%d,%d)  link (%d,%d)  "
+                    "cut %02X disabled %02X\n",
                     st->active_group, st->active_room, st->scroll_mode,
                     st->cam_x, st->cam_y, st->off_x, st->off_y,
-                    st->link_x, st->link_y);
+                    st->link_x, st->link_y, st->cutscene_index,
+                    st->disabled_objects);
             for (int r = 0; r < COLL_H; r++) {
                 fprintf(stderr, "  ");
                 for (int c = 0; c < COLL_W; c++)
@@ -240,29 +280,24 @@ void vox_oracle_status(int* live, int* scroll_mode, const char** reason) {
     if (reason) *reason = g_last_reason ? g_last_reason : "";
 }
 
-/* Map a collision value to a height class, using the tile's colour features
- * only to split ambiguous cases (solid: wall vs bush; walkable: grass vs
- * path). The load-bearing decisions -- what sinks, what rises, what is
- * flat -- come from the game. */
+static uint8_t solid_height(uint8_t colour_class) {
+    /* Collision establishes that this quadrant has volume. The artwork may
+     * still distinguish a full-height wall/tree from a lower fence/rock,
+     * but a visually quiet solid can never collapse to flat ground. */
+    return (colour_class >= VOX_H_HIGH) ? VOX_H_HIGH : VOX_H_MID;
+}
+
+/* Map a collision value to the coarse class of its solid portion. This is
+ * useful for room summaries and 16x16 override templates; rendering calls
+ * vox_oracle_quadrant_height below so partial cells keep their real shape. */
 uint8_t vox_oracle_height(uint8_t collision, uint8_t colour_class) {
     if (collision == 0x10) return VOX_H_WATER;              /* hole/water/lava */
 
     if (collision >= 0x11 && collision <= 0x1F) return VOX_H_FLOOR;  /* bridges, stairs */
     if (collision == 0xFE || collision == 0xFF) return VOX_H_FLOOR;  /* boundary fill */
 
-    if (collision == 0x0F) {
-        /* Full solid block. The colour classifier is good at telling a
-         * tree from a fence once it KNOWS the thing is solid -- its
-         * failure mode was calling flat things tall, not mis-ranking
-         * tall things. */
-        return (colour_class >= VOX_H_HIGH) ? VOX_H_HIGH : VOX_H_MID;
-    }
-    if (collision >= 0x01 && collision <= 0x0E) {
-        /* Partial shapes: diagonal cliff corners and edges. Rendering them
-         * at full height turns every diagonal into a hard staircase; a low
-         * bevel keeps the slope readable. */
-        return VOX_H_LOW;
-    }
+    if (collision >= 0x01 && collision <= 0x0F)
+        return solid_height(colour_class);
 
     /* Walkable ($00): flat, full stop. An earlier revision let "textured"
      * grass rise one step, which turned every decorated meadow into a
@@ -270,4 +305,18 @@ uint8_t vox_oracle_height(uint8_t collision, uint8_t colour_class) {
      * read as grass, not a ledge. */
     (void)colour_class;
     return VOX_H_FLOOR;
+}
+
+uint8_t vox_oracle_quadrant_height(uint8_t collision,
+                                   uint8_t colour_class, int quadrant) {
+    if (collision >= 0x01 && collision <= 0x0F) {
+        /* The original collision routine tests these in screen order:
+         * bit 3 TL, bit 2 TR, bit 1 BL, bit 0 BR. A partial cell therefore
+         * changes footprint, never vertical elevation. */
+        if (quadrant < 0 || quadrant > 3) return VOX_H_FLOOR;
+        uint8_t bit = (uint8_t)(0x08u >> quadrant);
+        return (collision & bit) ? solid_height(colour_class)
+                                 : VOX_H_FLOOR;
+    }
+    return vox_oracle_height(collision, colour_class);
 }

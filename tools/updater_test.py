@@ -366,9 +366,22 @@ def test_end_to_end_over_a_local_server() -> None:
 
     with tempfile.TemporaryDirectory() as tmp:
         tmp = Path(tmp)
-        asset_name = "epoch-equinox-linux-x64.tar.gz"
+        asset_name = "epoch-equinox" + suffix
         archive = tmp / asset_name
-        make_release_tar(archive, "epoch-equinox-linux-x64", {"epoch": "served player"})
+        if suffix.endswith(".zip"):
+            player_name = "epoch.exe"
+            with zipfile.ZipFile(archive, "w") as zf:
+                zf.writestr(
+                    "epoch-equinox-windows-x64/epoch.exe",
+                    "served player",
+                )
+        else:
+            player_name = "epoch"
+            make_release_tar(
+                archive,
+                "epoch-equinox-linux-x64",
+                {player_name: "served player"},
+            )
         payload = archive.read_bytes()
 
         install_dir = tmp / "install"
@@ -430,7 +443,11 @@ def test_end_to_end_over_a_local_server() -> None:
             check("progress ends at the total", ticks[-1][0], len(payload))
 
             updater.install(got, install_dir)
-            check("installed from download", (install_dir / "epoch").read_text(), "served player")
+            check(
+                "installed from download",
+                (install_dir / player_name).read_text(),
+                "served player",
+            )
             check("save survived the round trip",
                   (install_dir / "tlozooa.sav").read_text(), "120 hours of save")
             check("both endpoints were hit", sorted(seen), ["/asset", "/releases/latest"])

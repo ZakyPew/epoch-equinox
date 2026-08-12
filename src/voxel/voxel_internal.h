@@ -53,15 +53,22 @@ typedef struct {
      * words; the frame passes through flat instead, like menus. Verified
      * live: $CBA0 is 1 exactly while text shows, 0 otherwise. */
     bool text_active;
+    /* Scripted gameplay scene in an otherwise live room. The room still has
+     * trustworthy terrain, but a chase camera tied to Link is the wrong
+     * framing while scripts disable/move him. */
+    bool scripted_scene;
     /* wScrollMode == 0: no room is active at all (title, file select,
      * cutscenes). There is no terrain to extrude; pass through flat. */
     bool no_room;
     int  scroll_mode;          /* wScrollMode, for the status readout */
+    int  cutscene_index;       /* wCutsceneIndex */
+    int  disabled_objects;     /* wDisabledObjects, profile-specific */
     int  cam_y, cam_x;          /* hCameraY/X, room pixels */
     int  off_y, off_x;          /* wScreenOffsetY/X, transient draw offset */
     int  link_y, link_x;        /* w1Link whole-pixel position (room space) */
     int  link_z;                /* w1Link zh: 0 on the ground, negative airborne */
     int  link_dir;              /* w1Link direction: 0 up, 1 right, 2 down, 3 left */
+    int  link_state;            /* w1Link state; $04 is the item-get pose */
     bool is_seasons;            /* which cart the profile matched */
     int  active_group;          /* wActiveGroup: 0/1 outdoors, 2+ interiors */
     int  active_room;           /* wActiveRoom: room index within the group */
@@ -76,12 +83,38 @@ typedef struct {
  * this frame's room data can't be trusted (boot, transition, empty). */
 bool vox_oracle_read(GBContext* ctx, VoxOracleState* st);
 
+/* Fold a double-buffered BG-map page origin out of the signed screen offset,
+ * leaving only the small displacement (shake, scripted nudge). */
+int vox_oracle_page_offset(uint8_t raw, int page_offset);
+
+/* Gameplay scripts either enter a formal cutscene index or disable one or
+ * more object classes while staging an interaction. */
+bool vox_oracle_scripted_scene(uint8_t cutscene_index,
+                               uint8_t disabled_objects);
+
+/* LINK_STATE_04 is the one pose where a separate sprite really is held over
+ * Link's head. Position alone is ambiguous: a nearby two-row NPC can occupy
+ * exactly the same OAM coordinates. */
+bool vox_oracle_link_holds_item(uint8_t link_state);
+
+/* Semantic room-layout props whose collision is deliberately walkable.
+ * 0xFF means the object should keep its collision/colour-derived height. */
+uint8_t vox_oracle_object_height(uint8_t layout_id);
+
 /* Last frame's terrain decision, for the HUD: whether the game's own data
  * drove the terrain, the wScrollMode it saw, and why it was refused. */
 void vox_oracle_status(int* live, int* scroll_mode, const char** reason);
 
-/* Height for one room cell: collision decides, colour breaks ties. */
+/* Coarse height for one room cell: collision decides, colour breaks ties.
+ * For $01-$0F this reports the class of the solid part of the cell. */
 uint8_t vox_oracle_height(uint8_t collision, uint8_t colour_class);
+
+/* Height for one 8x8 quadrant inside a 16x16 room cell. Quadrants are in
+ * screen order: 0=top-left, 1=top-right, 2=bottom-left, 3=bottom-right.
+ * The game's $01-$0F collision values are a bit mask of those quadrants,
+ * not a ladder of successively taller shapes. */
+uint8_t vox_oracle_quadrant_height(uint8_t collision,
+                                   uint8_t colour_class, int quadrant);
 
 /* Per-room hand-authored height overrides (voxel/overrides/*.txt next to
  * the binary). Returns a 8x10 grid of height classes (0xFF = keep) or
@@ -90,29 +123,56 @@ uint8_t vox_oracle_height(uint8_t collision, uint8_t colour_class);
 const uint8_t* vox_override_lookup(bool is_seasons, int group, int room,
                                    const uint8_t* collisions);
 
-/* One 16x16 tree object, for the chase camera's billboard trees. The
- * canopy palette is sampled from the tree's own tile art so seasonal
- * palettes carry over. Screen px of the cell's top-left corner. */
+/* One 16x16 vegetation object for the chase camera. The live tile art is
+ * kept verbatim. Full trees split into canopy/trunk geometry and low
+ * vegetation becomes a shallow relief. Screen px of the source cell's
+ * top-left corner. */
 typedef struct {
     int sx, sy;
     int hcls;                  /* VOX_H_MID = shrub, VOX_H_HIGH = tree */
-    uint32_t lit, mid, dark;   /* canopy shades, bright to shadow */
-    uint32_t bark;             /* trunk */
-    /* The tree's own 16x16 tile art, upright: the canopy billboard is
-     * textured with this (masked to a rounded silhouette), so a tree in
-     * 3D is literally the tree the 2D game draws -- and modded tilesets
-     * carry over for free. */
+    bool custom_art;           /* voxel/tree.ppm or voxel/tuft.ppm */
+    uint8_t joins;             /* neighbouring vegetation: W/E/N/S bits */
+    /* Source 16x16 texture and its foreground silhouette. The mask is
+     * derived once while scraping by flood-filling ground-coloured pixels
+     * from the cell border; dark outlines enclosed by that background stay
+     * part of the artwork. */
     uint32_t tex[16 * 16];
+    uint8_t solid[16 * 16];
 } VoxTree;
 
-#define VOX_MAX_TREES 64
+#define VOX_TREE_JOIN_W 0x01u
+#define VOX_TREE_JOIN_E 0x02u
+#define VOX_TREE_JOIN_N 0x04u
+#define VOX_TREE_JOIN_S 0x08u
+
+#define VOX_MAX_TREES 96
+
+/* A compound facade reconstructed from the room's own metatiles. Impa's
+ * tree house is authored as a three-cell canopy row over a three-cell
+ * doorway row; treating those six cells independently turns it into cliff
+ * blocks. Keep both 48x16 strips verbatim and fold them onto one volume. */
+#define VOX_STRUCTURE_W 48
+#define VOX_STRUCTURE_H 16
+typedef struct {
+    int sx, sy;                 /* back-left of its 48x16 ground footprint */
+    uint32_t roof[VOX_STRUCTURE_W * VOX_STRUCTURE_H];
+    uint32_t front[VOX_STRUCTURE_W * VOX_STRUCTURE_H];
+    uint8_t roof_solid[VOX_STRUCTURE_W * VOX_STRUCTURE_H];
+    uint8_t front_solid[VOX_STRUCTURE_W * VOX_STRUCTURE_H];
+} VoxStructure;
+
+#define VOX_MAX_STRUCTURES 4
 
 typedef struct {
-    /* Per visible tile: height class and whether it's part of the window
-     * layer (HUD) rather than the scrolling BG. */
+    /* Per visible tile: object height and walkable ground base class are
+     * deliberately separate. A cliff lip is solid collision geometry, but
+     * the plateau behind it is still walkable; folding both into `height`
+     * made the lip stand like a fence on an otherwise flat field. Elevation
+     * is zero at the datum or the VOX_H_* class of the bordering cliff. */
     uint8_t height[VOX_TILES_H][VOX_TILES_W];
-    /* Foliage flag per tile (green-leaning pattern): raised leafy cells get
-     * domed tops in the renderer so trees read as canopies, not crates. */
+    uint8_t elevation[VOX_TILES_H][VOX_TILES_W];
+    /* Foliage flag per tile (green-leaning pattern): used for soft terrain
+     * relief and for identifying vegetation objects. */
     uint8_t leafy[VOX_TILES_H][VOX_TILES_W];
     /* Terrain texture decoded straight from the BG tilemap -- the composed
      * frame has sprites baked into it, and using it as the ground texture
@@ -127,11 +187,15 @@ typedef struct {
      * FROZEN previous state (the game is paused under dialog), and the
      * box rectangle is blitted flat on top from the composed frame. */
     bool text_overlay;
+    /* In chase mode, scripted room scenes use a fixed voxel stage camera so
+     * the script can move Link without dragging the camera off its set. */
+    bool scripted_scene;
     int box_x, box_y, box_w, box_h;    /* GB pixels, screen space */
     /* Link in screen space, when the oracle state was readable. The renderer
      * uses it to anchor his billboard to the ground he jumped FROM rather
      * than to wherever his sprite happens to be drawn mid-air. */
     bool link_known;
+    bool link_item_get;         /* true only for LINK_STATE_04 */
     int  link_sx;               /* centre x */
     int  link_feet_sy;          /* feet row at z=0 (his shadow's row) */
     int  link_jump;             /* pixels airborne, >= 0 */
@@ -143,13 +207,19 @@ typedef struct {
     /* Sub-tile scroll remainder, so the height grid can be sampled in
      * screen space. */
     uint8_t fine_x, fine_y;
-    /* Billboard trees (chase camera only): 16px room cells that are one
-     * whole tree. treecell marks their 8px tiles so the chase heightfield
-     * can treat them as open ground under a free-standing canopy; the
-     * diorama ignores both fields and keeps its extruded domes. */
+    /* Object-aware vegetation (chase camera only): 16px room cells that are
+     * one whole tree or tuft. treecell marks their 8px tiles so the chase
+     * heightfield can treat them as open ground under fixed voxel geometry;
+     * the diorama ignores both fields and keeps its terrain extrusion. */
     uint8_t treecell[VOX_TILES_H][VOX_TILES_W];
     VoxTree trees[VOX_MAX_TREES];
     int tree_count;
+    /* Compound architecture removed from the chase heightfield and drawn as
+     * coherent tile-faithful geometry. Unlike treecell, these remain solid
+     * to the chase camera. */
+    uint8_t structurecell[VOX_TILES_H][VOX_TILES_W];
+    VoxStructure structures[VOX_MAX_STRUCTURES];
+    int structure_count;
     /* Height in screen pixels of the HUD band at the top of the screen.
      *
      * Oracles does not use the window layer for its status bar — probing the
@@ -213,7 +283,7 @@ void vox_world_lose(void);
  * any edge of the screen; that is the point. All return false where the
  * position is unknown or the room there has never been visited (or was
  * last seen in a different season). Heights use chase-camera semantics:
- * billboard tree cells read as open ground. */
+ * volumetric vegetation cells read as open ground. */
 bool vox_world_height(float sx, float sy, float* out);
 bool vox_world_tex(float sx, float sy, uint32_t* out);
 /* The 8px tile art under a position, one row of it, for texturing riser
@@ -221,8 +291,8 @@ bool vox_world_tex(float sx, float sy, uint32_t* out);
 bool vox_world_face(float sx, float sy, int art_row, uint32_t* out,
                     bool* leafy);
 
-/* Billboard trees of the cached rooms around the current one (the current
- * room's own trees stay live in the grid). Screen-space positions. */
+/* Volumetric vegetation of cached rooms around the current one (the current
+ * room's own objects stay live in the grid). Screen-space positions. */
 typedef struct {
     const VoxTree* t;
     int sx, sy;
@@ -236,14 +306,35 @@ void vox_render(GBContext* ctx, const VoxTileGrid* grid,
                 const VoxSpriteList* sprites, const uint32_t* fb,
                 int mode, int scale, uint32_t* out);
 
+/* Resolve the requested camera for this frame. Exposed for the headless
+ * camera test so cutscenes cannot silently regress to a Link chase. */
+int vox_scene_render_mode(int requested_mode, bool scripted_scene);
+
 /** One frame of chase-camera aim: reads the stick and the recentre
  *  button, updates the heading, and reports Link's held anchor. Split out
  *  of the renderer so tools/chasecam_test.c can drive the yaw rules with
  *  no window and no cart. Either out-param may be NULL. */
 void vox_chase_step(const VoxTileGrid* grid, float* out_lx, float* out_ly);
 
-/** Give every connected mass of solid (MID/HIGH) cells a single height,
- *  by majority vote of its members. Exposed for tools/cliff_test.c. */
+/** Clamp a requested chase-camera distance before its centre crosses a
+ *  solid terrain cell. The side probes give the camera a small footprint
+ *  instead of treating it as a point. Exposed for tools/chasecam_test.c. */
+float vox_chase_camera_back(const VoxTileGrid* grid, float lx, float ly,
+                            float fx, float fy, float requested);
+
+/* Active-high d-pad bits transformed from screen space into world space for
+ * a camera heading. Pure helper used by the live remapper and its tests. */
+uint8_t vox_chase_remap_pressed(uint8_t pressed, float yaw);
+
+/** Give every connected mass of occupied solid quadrants (MID/HIGH cells)
+ *  a single height by majority vote of its members. Exposed for
+ *  tools/cliff_test.c. */
 void vox_unify_solid_masses(uint8_t height[VOX_TILES_H][VOX_TILES_W]);
+
+/* Infer outdoor plateaus after vegetation has been identified.
+ * Enclosed walkable regions behind architectural collision receive a base
+ * class matching the bordering cliff height; tree lines are transparent to
+ * this inference because they are obstacles, not changes in ground level. */
+void vox_infer_plateaus(VoxTileGrid* grid);
 
 #endif /* EPOCH_VOXEL_INTERNAL_H */
