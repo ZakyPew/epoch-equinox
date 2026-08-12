@@ -87,21 +87,28 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMessageBox,
+    QComboBox,
+    QFormLayout,
+    QFrame,
+    QGridLayout,
+    QLineEdit,
     QProgressBar,
     QPushButton,
     QScrollArea,
+    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
 
 import oracle_secrets
+import stream_config
 import updater
 from gamepad import GamepadBridge
 
 # The version this build was released as. The updater compares it against
 # the repository's release tags, so it has to match the tag it ships under
 # -- the release workflow refuses to publish a tag that disagrees with it.
-APP_VERSION = "0.4.2"
+APP_VERSION = "0.4.3"
 
 # The diagonal that splits the two panels. x is a fraction of the window
 # width; the seam runs from (TOP, 0) down to (BOTTOM, height).
@@ -420,7 +427,7 @@ def draw_seasons_motif(pr: QPainter, c: QPointF, r: float, col: QColor) -> None:
 
 MENU_ITEMS = [
     "Start game", "Mods", "Achievements", "Secrets", "Install ROM",
-    "Updates", "Exit",
+    "Stream", "Updates", "Exit",
 ]
 
 
@@ -1241,6 +1248,325 @@ DIALOG_STYLE = """
 """
 
 
+class StreamDialog(QDialog):
+    """The stream overlays: which layout, where the openings are, what OBS
+    should be told, and the line the ticker shows.
+
+    Everything here edits files in `stream/`, and every one of them stays
+    editable by hand -- this is a convenience, not a new source of truth.
+    Nothing is written until Apply, so a half-typed number never reaches a
+    page that OBS is reading several times a second.
+    """
+
+    def __init__(self, folder: Path, parent=None):
+        super().__init__(parent)
+        self.folder = folder
+        self.setWindowTitle("Stream overlays")
+        self.setMinimumSize(660, 620)
+        self.setStyleSheet(
+            """
+            QDialog { background: #12151a; }
+            QLabel { color: #d6dde4; }
+            QCheckBox { color: #d6dde4; font-size: 13px; }
+            QCheckBox::indicator { width: 16px; height: 16px; }
+            QComboBox, QSpinBox, QLineEdit {
+                background: #1b2129; color: #dfe8ee; border: 1px solid #2b3540;
+                border-radius: 5px; padding: 5px 8px; font-size: 13px;
+            }
+            QSpinBox { min-width: 92px; }
+            QPushButton {
+                background: #23303a; color: #dfe8ee; border: 0; padding: 8px 16px;
+                border-radius: 6px;
+            }
+            QPushButton:hover { background: #2e414f; }
+            QFrame[role="rule"] { background: #232c36; max-height: 1px; border: 0; }
+            """
+        )
+
+        outer = QVBoxLayout(self)
+
+        if not folder.is_dir():
+            # Someone running from a tree without the folder, or an archive
+            # unpacked oddly. Say which folder rather than failing blankly.
+            msg = QLabel(
+                f"No stream folder at:\n{folder}\n\n"
+                "The overlays ship beside the player. Point OBS at the "
+                "stream/ folder in whatever directory you run it from."
+            )
+            msg.setWordWrap(True)
+            outer.addWidget(msg)
+            close = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+            close.rejected.connect(self.reject)
+            outer.addWidget(close)
+            return
+
+        outer.addWidget(self._layout_row())
+        outer.addWidget(self._rule())
+        outer.addWidget(self._obs_block())
+        outer.addWidget(self._rule())
+        outer.addWidget(self._switches_block())
+        outer.addWidget(self._rule())
+        outer.addWidget(self._now_block())
+        outer.addStretch(1)
+
+        self.note = QLabel("")
+        self.note.setWordWrap(True)
+        self.note.setStyleSheet("color: #8b97a2; font-size: 11px;")
+        outer.addWidget(self.note)
+
+        row = QHBoxLayout()
+        open_btn = QPushButton("Open Stream Folder")
+        open_btn.clicked.connect(self.open_folder)
+        row.addWidget(open_btn)
+        row.addStretch(1)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Apply
+            | QDialogButtonBox.StandardButton.Close
+        )
+        buttons.button(QDialogButtonBox.StandardButton.Apply).clicked.connect(self.apply)
+        buttons.rejected.connect(self.reject)
+        row.addWidget(buttons)
+        outer.addLayout(row)
+
+        self.load_layout()
+
+    # -- construction ------------------------------------------------
+    def _rule(self) -> QFrame:
+        line = QFrame()
+        line.setProperty("role", "rule")
+        line.setFrameShape(QFrame.Shape.HLine)
+        return line
+
+    def _layout_row(self) -> QWidget:
+        w = QWidget()
+        row = QHBoxLayout(w)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.addWidget(QLabel("Layout"))
+        self.picker = QComboBox()
+        for layout in stream_config.LAYOUTS:
+            self.picker.addItem(
+                f"{layout.title}  ({layout.width}×{layout.height})", layout
+            )
+        self.picker.currentIndexChanged.connect(self.load_layout)
+        row.addWidget(self.picker, 1)
+        return w
+
+    def _obs_block(self) -> QWidget:
+        w = QWidget()
+        col = QVBoxLayout(w)
+        col.setContentsMargins(0, 0, 0, 0)
+
+        self.path_label = QLabel("")
+        self.path_label.setStyleSheet("color: #8b97a2; font-size: 11px;")
+        self.path_label.setWordWrap(True)
+        col.addWidget(self.path_label)
+
+        self.grid = QGridLayout()
+        self.grid.setHorizontalSpacing(10)
+        self.spins: dict[str, dict[str, QSpinBox]] = {}
+        for r, (prefix, title) in enumerate(
+            (("box", "Game opening"), ("cam", "Camera opening"))
+        ):
+            self.grid.addWidget(QLabel(title), r, 0)
+            self.spins[prefix] = {}
+            for c, axis in enumerate("xywh"):
+                spin = QSpinBox()
+                spin.setRange(0, 4096)
+                spin.setPrefix({"x": "x ", "y": "y ", "w": "w ", "h": "h "}[axis])
+                spin.valueChanged.connect(self.refresh_summary)
+                self.grid.addWidget(spin, r, c + 1)
+                self.spins[prefix][axis] = spin
+            snap = QPushButton("Snap")
+            snap.setToolTip(
+                "Round to a whole multiple of the Game Boy's 160×144, so flat "
+                "mode stays pixel-crisp"
+            )
+            snap.clicked.connect(lambda _=False, p=prefix: self.snap(p))
+            self.grid.addWidget(snap, r, 5)
+        col.addLayout(self.grid)
+
+        self.summary = QLabel("")
+        self.summary.setWordWrap(True)
+        self.summary.setStyleSheet("color: #9fb4c6; font-size: 12px;")
+        col.addWidget(self.summary)
+
+        row = QHBoxLayout()
+        copy_rects = QPushButton("Copy OBS Numbers")
+        copy_rects.clicked.connect(self.copy_numbers)
+        copy_url = QPushButton("Copy Overlay Path")
+        copy_url.clicked.connect(self.copy_path)
+        row.addWidget(copy_rects)
+        row.addWidget(copy_url)
+        row.addStretch(1)
+        col.addLayout(row)
+        return w
+
+    def _switches_block(self) -> QWidget:
+        w = QWidget()
+        col = QVBoxLayout(w)
+        col.setContentsMargins(0, 0, 0, 0)
+        self.cam_box = QCheckBox("Camera opening — a second, 16:9 hole in the rail")
+        self.guide_box = QCheckBox(
+            "Alignment guide — print each rectangle over itself (turn off before going live)"
+        )
+        col.addWidget(self.cam_box)
+        col.addWidget(self.guide_box)
+        hint = QLabel(
+            "These apply to every layout at once, and to a browser source "
+            "added as a local file — no URL query needed."
+        )
+        hint.setWordWrap(True)
+        hint.setStyleSheet("color: #8b97a2; font-size: 11px;")
+        col.addWidget(hint)
+        return w
+
+    def _now_block(self) -> QWidget:
+        w = QWidget()
+        form = QFormLayout(w)
+        form.setContentsMargins(0, 0, 0, 0)
+        self.now_edit = QLineEdit()
+        self.now_edit.setMaxLength(120)
+        self.now_edit.setPlaceholderText("chasing down the tree shapes")
+        form.addRow(QLabel("Now building"), self.now_edit)
+        return w
+
+    # -- state -------------------------------------------------------
+    @property
+    def layout_info(self) -> stream_config.Layout:
+        return self.picker.currentData()
+
+    @property
+    def layout_path(self) -> Path:
+        return self.folder / self.layout_info.filename
+
+    def load_layout(self) -> None:
+        """Read the selected overlay, and the folder-wide settings."""
+        info = self.layout_info
+        self.path_label.setText(str(self.layout_path))
+        try:
+            rects = stream_config.read_rects(self.layout_path)
+        except stream_config.StreamConfigError as exc:
+            rects = {}
+            self.note.setText(str(exc))
+
+        for prefix, spins in self.spins.items():
+            rect = rects.get(prefix)
+            for axis, spin in spins.items():
+                spin.blockSignals(True)
+                spin.setEnabled(rect is not None)
+                spin.setValue(getattr(rect, axis) if rect else 0)
+                spin.blockSignals(False)
+        for r in range(self.grid.rowCount()):
+            item = self.grid.itemAtPosition(r, 5)
+            if item and item.widget():
+                item.widget().setEnabled(bool(rects))
+
+        switches = stream_config.read_switches(self.folder)
+        self.cam_box.setChecked(switches["cam"])
+        self.guide_box.setChecked(switches["guide"])
+        self.now_edit.setText(stream_config.read_now(self.folder))
+        self.refresh_summary()
+
+    def rect_of(self, prefix: str) -> stream_config.Rect | None:
+        spins = self.spins[prefix]
+        if not spins["w"].isEnabled():
+            return None
+        return stream_config.Rect(**{a: s.value() for a, s in spins.items()})
+
+    def refresh_summary(self) -> None:
+        info = self.layout_info
+        if not info.framed:
+            self.summary.setText(
+                "This layout floats over your capture — there is nothing to "
+                "line up. Add it as a browser source and you are done."
+            )
+            return
+        lines = []
+        for prefix, title in (("box", "Game capture"), ("cam", "Camera")):
+            rect = self.rect_of(prefix)
+            if rect is None:
+                continue
+            complaint = stream_config.validate(
+                rect, info.canvas, title.lower()
+            )
+            lines.append(f"{title}: {rect.describe()}" + (f"  ⚠ {complaint}" if complaint else ""))
+        self.summary.setText("\n".join(lines))
+
+    # -- actions -----------------------------------------------------
+    def snap(self, prefix: str) -> None:
+        rect = self.rect_of(prefix)
+        if rect is None:
+            return
+        snapped = stream_config.snap(rect, self.layout_info.canvas)
+        for axis, spin in self.spins[prefix].items():
+            spin.setValue(getattr(snapped, axis))
+
+    def obs_numbers(self) -> str:
+        info = self.layout_info
+        parts = [f"{info.title} — canvas {info.width} × {info.height}"]
+        for prefix, title in (("box", "Game capture"), ("cam", "Camera")):
+            rect = self.rect_of(prefix)
+            if rect is not None:
+                parts.append(f"{title}: {rect.describe()}")
+        return "\n".join(parts)
+
+    def copy_numbers(self) -> None:
+        QApplication.clipboard().setText(self.obs_numbers())
+        self.note.setText("Copied. Paste into OBS's Edit → Transform box.")
+
+    def copy_path(self) -> None:
+        QApplication.clipboard().setText(str(self.layout_path))
+        self.note.setText(
+            "Copied. In OBS: Sources → + → Browser, tick Local file, paste."
+        )
+
+    def apply(self) -> None:
+        """Write geometry, switches and the status line -- or none of them.
+
+        The rectangles are checked before anything is written, because a
+        box hanging off the canvas is a black bar on stream and the file
+        would already be saved by the time it showed up.
+        """
+        info = self.layout_info
+        rects: dict[str, stream_config.Rect] = {}
+        for prefix, title in (("box", "game opening"), ("cam", "camera opening")):
+            rect = self.rect_of(prefix)
+            if rect is None:
+                continue
+            complaint = stream_config.validate(rect, info.canvas, title)
+            if complaint:
+                QMessageBox.warning(self, "That will not fit", complaint)
+                return
+            rects[prefix] = rect
+
+        try:
+            if rects:
+                stream_config.write_rects(self.layout_path, rects)
+            stream_config.write_switches(
+                self.folder,
+                {"cam": self.cam_box.isChecked(), "guide": self.guide_box.isChecked()},
+            )
+            stream_config.write_now(self.folder, self.now_edit.text())
+        except stream_config.StreamConfigError as exc:
+            QMessageBox.warning(self, "Could not save", str(exc))
+            return
+
+        what = "Saved." if rects else "Saved the switches and the ticker."
+        self.note.setText(
+            f"{what} A live overlay picks this up within a few seconds — "
+            "no need to touch OBS."
+        )
+
+    def open_folder(self) -> None:
+        """Open stream/ in the file manager, so OBS can be pointed at it."""
+        if os.name == "nt":
+            os.startfile(str(self.folder))  # noqa: S606 - opening our own folder
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", str(self.folder)])
+        else:
+            subprocess.Popen(["xdg-open", str(self.folder)])
+
+
 class UpdateDialog(QDialog):
     """Check for a newer release, then download and unpack it in place.
 
@@ -1521,6 +1847,10 @@ class MainWindow(QWidget):
         if item == "Updates":
             # The only item that does not need a playable game behind it.
             UpdateDialog(PROJECT_ROOT, self.pending_update, self).exec()
+            return
+        if item == "Stream":
+            # Also independent of any game: the overlays are files on disk.
+            StreamDialog(PROJECT_ROOT / "stream", self).exec()
             return
         if game is None:
             return

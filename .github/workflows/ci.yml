@@ -66,6 +66,13 @@ jobs:
       - name: Icon mirrors are current
         run: python3 tools/pam_to_png.py --check
 
+      # The launcher's Stream page edits files a stream is reading live,
+      # so its read/write round trips run against copies of the real
+      # overlays -- geometry, switches, and the escaping on a status line
+      # somebody types by hand.
+      - name: Stream settings round trips
+        run: python3 tools/stream_config_test.py
+
       # Qt's offscreen platform constructs the whole UI headlessly, which
       # catches paint-path and signal-wiring breakage that a syntax check
       # would sail straight past.

@@ -33,6 +33,55 @@
   inject('now.js');
   setInterval(function () { inject('now.js'); }, 4000);
 
+  /* ---- scene options ------------------------------------------------
+     The camera opening and the alignment guide are switches rather than
+     layout: the launcher's Stream page writes them into config.js, and
+     ?cam / ?guide (or the C and G keys) still override for a quick look.
+     A query string is no use in OBS's "Local file" mode, which is how
+     most people add these, so the file is the real setting. */
+  function scene(opts) {
+    if (!opts) return;
+    var body = document.body;
+    if ('cam' in opts) body.classList.toggle('cam-on', !!opts.cam);
+    if ('guide' in opts) body.classList.toggle('guide-on', !!opts.guide);
+    label();
+  }
+  window.CONFIG = scene;
+
+  /* The guide prints the rectangle to type into OBS's Transform box. It
+     is read back out of the CSS rather than written twice, so moving a
+     box in config or by hand cannot leave the label lying. */
+  function label() {
+    var css = getComputedStyle(document.documentElement);
+    function num(name) { return parseInt(css.getPropertyValue(name), 10); }
+    function fill(id, prefix, p) {
+      var e = el(id);
+      if (!e) return;
+      var x = num('--' + p + '-x'), y = num('--' + p + '-y'),
+          w = num('--' + p + '-w'), h = num('--' + p + '-h');
+      if ([x, y, w, h].some(isNaN)) { e.textContent = ''; return; }
+      var text = prefix + ' — position ' + x + ', ' + y +
+                 ' · size ' + w + ' × ' + h;
+      /* Whole multiples of the Game Boy screen keep flat mode crisp, so
+         say so when it is one -- that is the reason for the odd sizes. */
+      if (w % 160 === 0 && h % 144 === 0 && w / 160 === h / 144) {
+        text += ' (' + (w / 160) + '× of 160×144)';
+      }
+      e.textContent = text;
+    }
+    fill('guide-game', 'Game capture', 'box');
+    fill('guide-cam', 'Camera', 'cam');
+  }
+
+  if (location.search.indexOf('guide') >= 0) document.body.classList.add('guide-on');
+  if (location.search.indexOf('cam') >= 0) document.body.classList.add('cam-on');
+  addEventListener('keydown', function (e) {
+    if (e.key === 'g' || e.key === 'G') document.body.classList.toggle('guide-on');
+    if (e.key === 'c' || e.key === 'C') document.body.classList.toggle('cam-on');
+  });
+  label();
+  inject('config.js');
+
   /* ---- live game state --------------------------------------------- */
   var hud = el('hud');
   var card = el('card');

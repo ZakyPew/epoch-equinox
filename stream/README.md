@@ -23,6 +23,18 @@ by it.
 
 ![overlay composited over gameplay](../docs/stream-overlay.png)
 
+## The launcher's Stream page
+
+The launcher has a **Stream** item that does all of the below without a
+text editor: pick a layout, see the exact numbers to give OBS (and copy
+them), move either opening, turn the camera hole and the alignment guide
+on or off, and edit the "now building" line. Nothing is written until you
+press Apply, and an opening that would hang off the canvas is refused
+rather than saved.
+
+Everything it writes stays a plain file you can edit by hand — the page is
+a convenience, not a new source of truth.
+
 ## Add it in OBS
 
 1. **Sources → + → Browser**
@@ -48,15 +60,19 @@ and give it these numbers in **Edit → Transform**:
 Both are exact multiples of the Game Boy's 160×144 (7× and 5×), so flat
 mode stays pixel-crisp with no resampling.
 
-Rather than remember that, load the overlay with **`?guide`** on the end of
-the file path — or press **G** with the source selected and interacting —
-and it prints the rectangle over itself. Turn it off before you go live.
+Rather than remember that, turn the **alignment guide** on — from the
+launcher's Stream page, with **`?guide`** on the end of the file path, or
+by pressing **G** with the source selected and interacting — and it prints
+the rectangle over itself. Turn it off before you go live.
+
+The guide reads its numbers back out of the layout, so moving an opening
+can never leave a stale caption behind.
 
 ### A camera opening too
 
-Add **`?cam`** (or press **C**) and a second, 16:9 hole opens in the rail
-with a matching frame. Same idea: put the camera source below the browser
-source at
+Tick **Camera opening** on the Stream page (or add **`?cam`**, or press
+**C**) and a second, 16:9 hole opens in the rail with a matching frame.
+Same idea: put the camera source below the browser source at
 
 | layout | position | size |
 |---|---|---|
@@ -74,8 +90,11 @@ building" pill step aside while it is on.
 
 Every rectangle above is a CSS variable in the first twenty lines of the
 file (`--box-x`, `--box-y`, `--box-w`, `--box-h`, and the `--cam-*` four).
-Change them and the mat, the frame, the studs and the guide text all
-follow — nothing else is hard-coded.
+Change them — by hand or from the Stream page — and the mat, the frame, the
+studs and the guide caption all follow. Nothing else is hard-coded.
+
+The **Snap** button rounds an opening to the nearest whole multiple of
+160×144 that still fits, which is what keeps flat mode pixel-crisp.
 
 ## Live game state
 
@@ -102,8 +121,8 @@ working directory.
 
 ## Change the "now building" line mid-stream
 
-Edit `stream/now.js`, save, and every overlay picks it up within a few
-seconds. One line:
+Type it on the launcher's Stream page, or edit `stream/now.js` and save —
+either way every overlay picks it up within a few seconds. One line:
 
 ```js
 NOW("chasing down the tree shapes");
@@ -133,6 +152,7 @@ underneath shows through and nothing looks broken.
 | `epoch-live.js` | reads `now.js` and `live.js`, fills the markup |
 | `icons/` | the achievement icons as PNG, mirrored from `achievements/icons` |
 | `now.js` | your one-line status |
+| `config.js` | the camera and guide switches |
 | `live.js` | written by the player; not in the repo |
 
 ## Achievement icons

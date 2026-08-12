@@ -261,7 +261,9 @@
     100% { opacity:0; transform:translateY(-18px) scale(.99); }
   }
 
-  /* ---- alignment guide --------------------------------------------- */
+  /* ---- alignment guide --------------------------------------------
+     Turned on from the launcher's Stream page, ?guide, or the G key.
+     The label is filled in by epoch-live.js from the numbers above. */
   .guide { position:absolute; inset:0; display:none; pointer-events:none; }
   body.guide-on .guide { display:block; }
   .guide .rect {
@@ -270,12 +272,11 @@
     width:var(--box-w); height:var(--box-h);
     border:2px dashed rgba(222,178,76,.85);
   }
-  .guide .rect::after {
-    content:"Game capture — position 85, 236 · size 800 × 720 (5× of 160×144)";
+  .guide .rect .tag, .guide .camrect .tag {
     position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
     background:rgba(10,14,28,.92); color:var(--gold-lit);
     border:1px solid var(--gold-dim); border-radius:6px;
-    padding:12px 18px; font-size:17px; letter-spacing:.02em; white-space:nowrap;
+    padding:12px 20px; font-size:18px; letter-spacing:.02em; white-space:nowrap;
   }
   .guide .camrect { display:none; }
   body.cam-on .guide .camrect {
@@ -283,13 +284,6 @@
     left:var(--cam-x); top:var(--cam-y);
     width:var(--cam-w); height:var(--cam-h);
     border:2px dashed rgba(222,178,76,.85);
-  }
-  .guide .camrect::after {
-    content:"Camera — position 40, 1190 · size 640 × 360";
-    position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
-    background:rgba(10,14,28,.92); color:var(--gold-lit);
-    border:1px solid var(--gold-dim); border-radius:6px;
-    padding:10px 16px; font-size:16px; white-space:nowrap;
   }
 </style>
 </head>
@@ -481,23 +475,11 @@
     </div>
   </div>
 
-  <div class="guide"><div class="rect"></div><div class="camrect"></div></div>
+  <div class="guide">
+    <div class="rect"><span class="tag" id="guide-game"></span></div>
+    <div class="camrect"><span class="tag" id="guide-cam"></span></div>
+  </div>
 
 <script src="epoch-live.js"></script>
-<script>
-  /* OBS lets you type a source's position and size straight into its
-     Transform dialog, which beats dragging -- so ?guide (or G) prints
-     the opening's exact rectangle over it. */
-  (function () {
-    var q = location.search;
-    if (q.indexOf('guide') >= 0) document.body.classList.add('guide-on');
-    /* ?cam opens a second, camera-shaped hole below the game. */
-    if (q.indexOf('cam') >= 0) document.body.classList.add('cam-on');
-    addEventListener('keydown', function (e) {
-      if (e.key === 'g' || e.key === 'G') document.body.classList.toggle('guide-on');
-      if (e.key === 'c' || e.key === 'C') document.body.classList.toggle('cam-on');
-    });
-  })();
-</script>
 </body>
 </html>
