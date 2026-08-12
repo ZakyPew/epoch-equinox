@@ -99,7 +99,25 @@ jobs:
       - uses: actions/checkout@v4
       - name: Dependencies (vcpkg is preinstalled on the runner)
         run: |
-          & "$env:VCPKG_INSTALLATION_ROOT\vcpkg.exe" install sdl2:x64-windows curl:x64-windows glew:x64-windows
+          # Source archives occasionally return a transient 5xx from GitHub.
+          # vcpkg retries an individual download, but still exits after three
+          # quick attempts. Retrying the install preserves packages already
+          # built on this runner and resumes at the failed dependency.
+          $packages = @(
+            'sdl2:x64-windows',
+            'curl:x64-windows',
+            'glew:x64-windows'
+          )
+          for ($attempt = 1; $attempt -le 4; $attempt++) {
+            & "$env:VCPKG_INSTALLATION_ROOT\vcpkg.exe" install $packages
+            if ($LASTEXITCODE -eq 0) { break }
+            if ($attempt -eq 4) {
+              throw "vcpkg install failed after $attempt attempts"
+            }
+            $delay = 15 * $attempt
+            Write-Warning "vcpkg install failed; retrying in $delay seconds"
+            Start-Sleep -Seconds $delay
+          }
       - name: Build
         run: |
           cmake -S . -B build `
