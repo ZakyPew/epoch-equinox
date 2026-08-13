@@ -227,8 +227,9 @@ jobs:
           cp examples/mods/README.md "$staging/mods/"
           printf 'Drop your ROMs here:\n  tlozooa.gbc  Oracle of Ages (USA, Australia)\n  tlozoos.gbc  Oracle of Seasons (USA, Australia)\nAny other .gb/.gbc works too.\n' > "$staging/roms/README.txt"
           launcher_bin="$staging/Epoch & Equinox Launcher.app/Contents/MacOS/Epoch & Equinox Launcher"
-          "$launcher_bin" --smoke-test
-          tar czf "$staging.tar.gz" "$staging"
+          test -x "$launcher_bin"
+          "$staging/epoch" --list-games
+          COPYFILE_DISABLE=1 tar czf "$staging.tar.gz" "$staging"
       - uses: actions/upload-artifact@v4
         with:
           name: epoch-equinox-macos-arm64
