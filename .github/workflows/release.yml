@@ -206,8 +206,11 @@ jobs:
           ./build/epoch --list-games
       - name: Build graphical launcher
         run: |
-          python3 -m pip install PyInstaller PySide6-Essentials
-          python3 -m PyInstaller --noconfirm --clean --windowed \
+          python3 -m venv .venv-macos
+          source .venv-macos/bin/activate
+          python -m pip install --upgrade pip
+          python -m pip install PyInstaller PySide6-Essentials
+          python -m PyInstaller --noconfirm --clean --windowed \
             --name "Epoch & Equinox Launcher" --paths launcher \
             launcher/epoch_launcher.py
       - name: Package
