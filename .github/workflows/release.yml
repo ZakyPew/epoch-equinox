@@ -191,12 +191,17 @@ jobs:
       - uses: actions/checkout@v4
       - name: Dependencies
         run: |
-          brew install cmake ninja sdl2 curl
+          # SDL2's OpenGL ES wrapper includes Khronos GLES headers. macOS
+          # supplies the OpenGL framework but not those headers, so Mesa is
+          # used for the portable header set only.
+          brew install cmake ninja sdl2 curl mesa
       - name: Build
         run: |
           cmake -S . -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_PREFIX_PATH="$(brew --prefix sdl2);$(brew --prefix curl)"
+            -DCMAKE_PREFIX_PATH="$(brew --prefix sdl2);$(brew --prefix curl);$(brew --prefix mesa)" \
+            -DCMAKE_C_FLAGS="-I$(brew --prefix mesa)/include" \
+            -DCMAKE_CXX_FLAGS="-I$(brew --prefix mesa)/include"
           cmake --build build --parallel
           ./build/epoch --list-games
       - name: Build graphical launcher
