@@ -175,7 +175,7 @@ Build and run the C checks from `tools/` against `epoch_support` and `gbrt`:
 - `achievements_test`, `secrets_c_test`, `typist_test`, and `stream_test` for
   shared-player regressions.
 
-The exact Linux compile loop lives in `.github/workflows/release.yml`; Windows
+The exact Linux and macOS compile loops live in `.github/workflows/release.yml`; Windows
 contributors can use the generated Visual Studio/vcpkg include and library
 paths or let the PR run the portable matrix. Always launch the built player
 and confirm `--list-games` before calling the build healthy.

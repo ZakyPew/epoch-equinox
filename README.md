@@ -12,7 +12,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/license-MIT-informational?style=for-the-badge" alt="MIT">
-  <img src="https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey?style=for-the-badge" alt="Platforms">
+  <img src="https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20(Apple%20Silicon)%20%7C%20Windows-lightgrey?style=for-the-badge" alt="Platforms">
   <img src="https://img.shields.io/badge/ROM-not%20included-critical?style=for-the-badge" alt="No ROM included">
 </p>
 

@@ -84,7 +84,11 @@ def release(tag: str, names: list[str]) -> dict:
     }
 
 
-ASSETS = ["epoch-equinox-linux-x64.tar.gz", "epoch-equinox-windows-x64.zip"]
+ASSETS = [
+    "epoch-equinox-linux-x64.tar.gz",
+    "epoch-equinox-windows-x64.zip",
+    "epoch-equinox-macos-arm64.tar.gz",
+]
 
 
 def test_release_reading() -> None:
