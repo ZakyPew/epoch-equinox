@@ -183,8 +183,51 @@ jobs:
           name: epoch-equinox-windows-x64
           path: epoch-equinox-windows-x64.zip
 
+  macos:
+    # macos-14 is Apple Silicon, matching the current supported Homebrew
+    # runner and producing a native arm64 package for modern Macs.
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Dependencies
+        run: |
+          brew install cmake ninja sdl2 curl
+      - name: Build
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH="$(brew --prefix sdl2);$(brew --prefix curl)"
+          cmake --build build --parallel
+          ./build/epoch --list-games
+      - name: Build graphical launcher
+        run: |
+          python3 -m pip install PyInstaller PySide6-Essentials
+          python3 -m PyInstaller --noconfirm --clean --windowed \
+            --name "Epoch & Equinox Launcher" --paths launcher \
+            launcher/epoch_launcher.py
+      - name: Package
+        run: |
+          staging=epoch-equinox-macos-arm64
+          mkdir -p "$staging/roms" "$staging/mods" "$staging/covers"
+          cp build/epoch "$staging/"
+          cp -r art/covers/. "$staging/covers/"
+          cp -r launcher "$staging/"
+          cp -r achievements "$staging/"
+          cp -r stream "$staging/"
+          cp -r "dist/Epoch & Equinox Launcher.app" "$staging/"
+          cp README.md LICENSE CREDITS.md "$staging/"
+          cp examples/mods/README.md "$staging/mods/"
+          printf 'Drop your ROMs here:\n  tlozooa.gbc  Oracle of Ages (USA, Australia)\n  tlozoos.gbc  Oracle of Seasons (USA, Australia)\nAny other .gb/.gbc works too.\n' > "$staging/roms/README.txt"
+          launcher_bin="$staging/Epoch & Equinox Launcher.app/Contents/MacOS/Epoch & Equinox Launcher"
+          "$launcher_bin" --smoke-test
+          tar czf "$staging.tar.gz" "$staging"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: epoch-equinox-macos-arm64
+          path: epoch-equinox-macos-arm64.tar.gz
+
   release:
-    needs: [linux, windows]
+    needs: [linux, windows, macos]
     # Either a pushed tag, or a dispatch that named one. The second path
     # exists because tags cannot always be pushed from a sandboxed
     # session; the workflow's own token can create them.

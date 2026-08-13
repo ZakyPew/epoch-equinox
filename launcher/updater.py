@@ -115,7 +115,9 @@ def platform_asset_suffix() -> str | None:
         return "-windows-x64.zip"
     if sys.platform.startswith("linux"):
         return "-linux-x64.tar.gz"
-    return None  # macOS et al: the workflow builds no asset to offer
+    if sys.platform == "darwin":
+        return "-macos-arm64.tar.gz"
+    return None
 
 
 def asset_for_platform(assets: Iterable[dict]) -> dict | None:
