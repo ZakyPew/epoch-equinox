@@ -61,6 +61,20 @@ typedef struct {
     int      sword, shield, satchel, bracelet;  /* tiers, 0 = not held */
     int      bombs, max_bombs;
     int      seeds;           /* how many of the five seed types held */
+
+    /* Buttons held this frame, for an input display. One bit each:
+     * right, left, up, down, A, B, select, start. Active HIGH here --
+     * the hardware's active-low is inverted on the way in, because a
+     * feed that reads "1 means pressed" is one less thing to get
+     * backwards in the overlay. */
+    int      pad;
+
+    /* The run, when the cart has a split file. Names come along every
+     * write: it is a few hundred bytes once a second and it means the
+     * overlay needs no second channel to learn the route. */
+    int      split_count, split_next;
+    uint32_t split_frame[16];
+    const char* split_name[16];
 } EpochStreamState;
 
 /** Fill `out` from a WRAM snapshot (0x2000 bytes, 0xC000-based) for the

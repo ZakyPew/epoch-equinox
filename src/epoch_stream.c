@@ -9,6 +9,7 @@
 #include "epoch_stream.h"
 
 #include "epoch_achievements.h"
+#include "epoch_splits.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -133,6 +134,23 @@ bool epoch_stream_read(EpochStreamState* out, const uint8_t* wram,
         }
     }
 
+    {   /* The run. Capped at what the feed carries rather than what the
+         * engine holds: a longer route still splits, the overlay just
+         * shows the first sixteen segments. */
+        const EsRun* run = epoch_splits_run();
+        out->split_count = 0;
+        out->split_next = 0;
+        if (run) {
+            int n = run->count < 16 ? run->count : 16;
+            for (int i = 0; i < n; i++) {
+                out->split_frame[i] = run->hit[i].done ? run->hit[i].frame : 0;
+                out->split_name[i] = epoch_splits_name(run, i);
+            }
+            out->split_count = n;
+            out->split_next = run->next;
+        }
+    }
+
     epoch_achievements_progress(&out->unlocked, &out->total);
     {
         const char *id = NULL, *title = NULL, *desc = NULL;
@@ -170,6 +188,23 @@ int epoch_stream_format(const EpochStreamState* s, char* buf, size_t cap) {
         items[i * 2 + 1] = HEX[s->treasures[i] & 0xF];
     }
     items[32] = 0;
+
+    /* The split list as JS array literals: [["Harp of Ages",600],...].
+     * Names come from pack files a player edits, so they go through the
+     * same escaping as everything else here. */
+    char splits[768];
+    {
+        size_t o = 0;
+        splits[0] = 0;
+        for (int i = 0; i < s->split_count && i < 16; i++) {
+            char name[96];
+            js_escape(s->split_name[i] ? s->split_name[i] : "", name, sizeof(name));
+            int n = snprintf(splits + o, sizeof(splits) - o, "%s[\"%s\",%u]",
+                             o ? "," : "", name, (unsigned)s->split_frame[i]);
+            if (n < 0 || (size_t)n >= sizeof(splits) - o) break;  /* keep what fits */
+            o += (size_t)n;
+        }
+    }
     js_escape(s->last_title, title, sizeof(title));
     js_escape(s->last_desc, desc, sizeof(desc));
     js_escape(s->last_id, id, sizeof(id));
@@ -181,14 +216,16 @@ int epoch_stream_format(const EpochStreamState* s, char* buf, size_t cap) {
         "rupeesTotal:%d,seconds:%d,linked:%s,unlocked:%d,total:%d,"
         "lastId:\"%s\",lastTitle:\"%s\",lastDesc:\"%s\",serial:%u,"
         "tick:%u,frames:%u,sword:%d,shield:%d,satchel:%d,bracelet:%d,"
-        "bombs:%d,maxBombs:%d,seeds:%d,items:\"%s\"});\n",
+        "bombs:%d,maxBombs:%d,seeds:%d,items:\"%s\",pad:%d,"
+        "splitNext:%d,splits:[%s]});\n",
         s->cart, cart_title, s->group & 0xFF, s->room & 0xFF, s->essences,
         s->hearts, s->max_hearts, s->rings, s->deaths, s->kills, s->rupees,
         s->rupees_total, s->play_seconds, s->linked ? "true" : "false",
         s->unlocked, s->total, id, title, desc,
         (unsigned)s->unlock_serial, (unsigned)s->tick,
         (unsigned)s->play_frames, s->sword, s->shield, s->satchel,
-        s->bracelet, s->bombs, s->max_bombs, s->seeds, items);
+        s->bracelet, s->bombs, s->max_bombs, s->seeds, items, s->pad,
+        s->split_next, splits);
     return (n < 0 || (size_t)n >= cap) ? -1 : n;
 }
 
@@ -199,6 +236,18 @@ void epoch_stream_tick(GBContext* ctx, const char* game_id) {
     static uint32_t last_serial = 0;
     static int countdown = 0;
     static bool warned = false;
+
+    {   /* Buttons, for the input display. The runtime keeps these
+         * active-low the way the hardware does; invert once here so the
+         * overlay never has to think about it. The cast is the runtime's
+         * own idiom for this pointer (see gbrt.c). */
+        const GBJoypadState* jp = (const GBJoypadState*)ctx->joypad;
+        state.pad = 0;
+        if (jp) {
+            uint8_t d = (uint8_t)~jp->dpad, b = (uint8_t)~jp->buttons;
+            state.pad = (d & 0x0F) | ((b & 0x0F) << 4);
+        }
+    }
 
     const bool fresh = epoch_stream_read(&state, ctx->wram, game_id);
     if (!fresh && state.cart[0] == 0) return;   /* nothing worth writing yet */
@@ -218,7 +267,7 @@ void epoch_stream_tick(GBContext* ctx, const char* game_id) {
      * instead of leaving an hour-old heart count on screen. */
     state.tick++;
 
-    char line[1024];
+    char line[4096];
     if (epoch_stream_format(&state, line, sizeof(line)) < 0) return;
 
     es_mkdir("stream");

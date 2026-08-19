@@ -73,6 +73,16 @@ jobs:
       - name: Stream settings round trips
         run: python3 tools/stream_config_test.py
 
+      # The overlays are the part of this whose failures an audience
+      # sees, and they were the part with no automated check -- a panel
+      # that never hid itself shipped that way. Chromium loads them over
+      # file:// here, the same way OBS does.
+      - name: Overlays render
+        run: |
+          python3 -m pip install --quiet playwright pillow
+          python3 -m playwright install --with-deps chromium
+          python3 tools/overlay_render_test.py
+
       # Qt's offscreen platform constructs the whole UI headlessly, which
       # catches paint-path and signal-wiring breakage that a syntax check
       # would sail straight past.

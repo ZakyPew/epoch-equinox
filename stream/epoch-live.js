@@ -44,6 +44,18 @@
     var body = document.body;
     if ('cam' in opts) body.classList.toggle('cam-on', !!opts.cam);
     if ('guide' in opts) body.classList.toggle('guide-on', !!opts.guide);
+    /* The four speedrunning blocks. Each is hidden unless switched on,
+       so a layout carries the markup for all of them and shows none by
+       default -- most people streaming this are not running it. */
+    var running = false;
+    ['timer', 'splits', 'tracker', 'inputs'].forEach(function (k) {
+      if (k in opts) {
+        var e = el(k);
+        if (e) e.hidden = !opts[k];
+      }
+      if (opts[k]) running = true;
+    });
+    body.classList.toggle('run-mode', running);
     label();
   }
   window.CONFIG = scene;
@@ -152,6 +164,128 @@
     return h + ':' + (m < 10 ? '0' : '') + m;
   }
 
+  /* ---- speedrunning -------------------------------------------------
+     The item grid, per cart. Treasure ids are the game's own (see
+     constants/common/treasure.s in the disassembly); `tier` names the
+     field in the feed that says which level of it you hold, so the
+     bracelet reads L2 rather than just "have". Ages has no rod of
+     seasons and Seasons no cane of somaria -- listing the wrong one
+     would be a cell that can never light. */
+  var ITEMS = {
+    tlozooa: [
+      {id: 0x11, s: 'Harp'},      {id: 0x16, s: 'Brac', tier: 'bracelet'},
+      {id: 0x17, s: 'Feath'},     {id: 0x2e, s: 'Flip'},
+      {id: 0x0a, s: 'Hook'},      {id: 0x0f, s: 'Shoot'},
+      {id: 0x4a, s: 'Suit'},      {id: 0x04, s: 'Cane'},
+      {id: 0x06, s: 'Boom'},      {id: 0x15, s: 'Shovel'},
+      {id: 0x0e, s: 'Flute'},     {id: 0x03, s: 'Bomb'},
+      {id: 0x19, s: 'Satch', tier: 'satchel'},
+      {id: 0x05, s: 'Sword', tier: 'sword'},
+      {id: 0x01, s: 'Shield', tier: 'shield'},
+      {id: 0x2c, s: 'Rings'}
+    ],
+    tlozoos: [
+      {id: 0x07, s: 'Rod'},       {id: 0x08, s: 'Magnet'},
+      {id: 0x17, s: 'Feath'},     {id: 0x2e, s: 'Flip'},
+      {id: 0x13, s: 'Sling'},     {id: 0x06, s: 'Boom'},
+      {id: 0x0c, s: 'BigSw'},     {id: 0x0d, s: 'Chus'},
+      {id: 0x15, s: 'Shovel'},    {id: 0x0e, s: 'Flute'},
+      {id: 0x03, s: 'Bomb'},      {id: 0x16, s: 'Brac'},
+      {id: 0x19, s: 'Satch', tier: 'satchel'},
+      {id: 0x05, s: 'Sword', tier: 'sword'},
+      {id: 0x01, s: 'Shield', tier: 'shield'},
+      {id: 0x2c, s: 'Rings'}
+    ]
+  };
+
+  /* The treasure bits arrive as hex, one bit per id, low bit first. */
+  function hasItem(hex, id) {
+    if (!hex) return false;
+    var byteIndex = id >> 3;
+    if (byteIndex * 2 + 2 > hex.length) return false;
+    var b = parseInt(hex.substr(byteIndex * 2, 2), 16);
+    return !isNaN(b) && (b & (1 << (id & 7))) !== 0;
+  }
+
+  function runClock(frames) {
+    /* The game counts frames at sixty a second; a run list is read to
+       hundredths or it is not worth reading. Distinct from clock()
+       above, which is the play-time readout in hours and minutes -- two
+       functions with one name silently cost the HUD its clock. */
+    var cs = Math.floor(frames / 60 * 100) % 100;
+    var t = Math.floor(frames / 60);
+    var h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), sec = t % 60;
+    var two = function (n) { return (n < 10 ? '0' : '') + n; };
+    var body = h ? (h + ':' + two(m) + ':' + two(sec)) : (m + ':' + two(sec));
+    return {body: body, cs: two(cs)};
+  }
+
+  function drawTimer(s) {
+    var box = el('timer');
+    if (!box) return;
+    var t = runClock(s.frames || 0);
+    var v = el('timer-value');
+    if (v) v.innerHTML = t.body + '<small>.' + t.cs + '</small>';
+  }
+
+  function drawSplits(s) {
+    var box = el('splits');
+    if (!box) return;
+    var rows = s.splits || [];
+    if (!rows.length) { box.hidden = true; return; }
+    var next = s.splitNext || 0, out = '';
+    for (var i = 0; i < rows.length; i++) {
+      var name = rows[i][0], frames = rows[i][1];
+      var done = frames > 0;
+      var cls = 'split-row' + (done ? ' done' : '') + (i === next ? ' current' : '');
+      var t = done ? runClock(frames) : null;
+      out += '<div class="' + cls + '"><span class="nm"></span>' +
+             '<span class="tm">' + (t ? t.body + '.' + t.cs : '—') +
+             '</span></div>';
+    }
+    box.innerHTML = out;
+    /* Names come from pack files someone edits, so they go in as text
+       rather than markup. */
+    var cells = box.querySelectorAll('.nm');
+    for (var j = 0; j < cells.length && j < rows.length; j++) {
+      cells[j].textContent = rows[j][0];
+    }
+  }
+
+  function drawTracker(s) {
+    var box = el('tracker');
+    if (!box) return;
+    var list = ITEMS[s.cart];
+    if (!list) { box.hidden = true; return; }
+    var out = '';
+    for (var i = 0; i < list.length; i++) {
+      var it = list[i];
+      var have = hasItem(s.items, it.id);
+      var tier = it.tier ? (s[it.tier] || 0) : 0;
+      out += '<div class="cell' + (have ? ' has' : '') + '">' +
+             '<span class="lb"></span>' +
+             (have && tier > 1 ? '<span class="tier">' + tier + '</span>' : '') +
+             '</div>';
+    }
+    box.innerHTML = out;
+    var labels = box.querySelectorAll('.lb');
+    for (var j = 0; j < labels.length && j < list.length; j++) {
+      labels[j].textContent = list[j].s;
+    }
+  }
+
+  function drawInputs(s) {
+    var box = el('inputs');
+    if (!box) return;
+    var p = s.pad || 0;
+    /* right, left, up, down, A, B, select, start */
+    var bits = ['r', 'l', 'u', 'd', 'a', 'b', 'sel', 'st'];
+    for (var i = 0; i < bits.length; i++) {
+      var e = el('pad-' + bits[i]);
+      if (e) e.classList.toggle('on', (p & (1 << i)) !== 0);
+    }
+  }
+
   function set(id, text) { var e = el(id); if (e) e.textContent = text; }
   function html(id, markup) { var e = el(id); if (e) e.innerHTML = markup; }
 
@@ -216,6 +350,11 @@
        that have the room for it show a plaque; the ones that do not just
        have no #last and skip this. Empty until the first unlock of the
        save, so a fresh file does not advertise a blank. */
+    drawTimer(s);
+    drawSplits(s);
+    drawTracker(s);
+    drawInputs(s);
+
     var last = el('last');
     if (last) {
       var have = !!(s.lastTitle || s.lastId);

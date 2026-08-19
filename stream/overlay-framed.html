@@ -165,8 +165,22 @@
   .camframe .orn.br { right:-26px; bottom:-26px; transform:scale(-1,-1); }
 
   /* ---- the rail ---------------------------------------------------- */
+  /* The rail is a column, not a stack of fixed offsets. Blocks can be
+     switched on and off in any combination and still lay out, which is
+     the only way four optional panels do not collide with each other. */
+  .rail {
+    position:absolute;
+    left:var(--rail-x); top:var(--box-y); width:var(--rail-w);
+    bottom:var(--box-y);
+    display:flex; flex-direction:column; gap:18px;
+    overflow:hidden;
+  }
+  /* With the camera open the rail stops above it. */
+  body.cam-on .rail { bottom:calc(1080px - var(--cam-y) + 22px); }
+  .rail > * { flex:0 0 auto; }
+  .rail .spacer { flex:1 1 auto; min-height:0; }
+
   .crest {
-    position:absolute; left:var(--rail-x); top:var(--box-y); width:var(--rail-w);
     display:flex; align-items:center; gap:22px;
     background:var(--panel);
     border:1px solid var(--line);
@@ -210,8 +224,7 @@
   .link svg { width:16px; height:16px; fill:currentColor; opacity:.9; flex:0 0 auto; }
 
   .now {
-    position:absolute; left:var(--rail-x); top:198px;
-    max-width:var(--rail-w);
+    align-self:flex-start; max-width:100%;
     display:flex; align-items:center; gap:12px;
     background:var(--panel);
     border:1px solid var(--line);
@@ -236,13 +249,10 @@
   /* Live panel and unlock card: look comes from epoch-live.css, only
      their place on the canvas is decided here. */
   .hud {
-    left:var(--rail-x); top:266px; width:var(--rail-w);
-    display:flex; flex-direction:column; gap:13px;
+    position:static; display:flex; flex-direction:column; gap:13px;
   }
   .hud-row { flex-wrap:wrap; gap:12px 20px; }
-  .last {
-    left:var(--rail-x); top:428px; width:var(--rail-w);
-  }
+  .last { position:static; }
   .card {
     left:var(--rail-x); bottom:var(--box-y); width:var(--rail-w);
   }
@@ -344,6 +354,7 @@
     <svg class="orn br" aria-hidden="true"><use href="#cartouche"/></svg>
   </div>
 
+  <div class="rail">
   <div class="crest">
     <div class="emblem" aria-hidden="true">
       <svg viewBox="0 0 48 48">
@@ -452,6 +463,33 @@
     <span class="now-label">Building</span>
     <span class="now-text" id="now">the voxel renderer</span>
   </div>
+
+
+  <!-- Speedrunning. All four ship hidden; the Stream page switches them
+       on. The rail is a flex column, so any combination of them stacks
+       without anyone having to work out y coordinates. -->
+  <div class="timer" id="timer" hidden>
+    <div class="timer-label">File time</div>
+    <div class="timer-value" id="timer-value">0:00<small>.00</small></div>
+  </div>
+
+  <div class="splits" id="splits" hidden></div>
+
+  <div class="tracker" id="tracker" hidden></div>
+
+  <div class="inputs" id="inputs" hidden>
+    <span class="dpad">
+      <i class="u" id="pad-u"></i><i class="d" id="pad-d"></i>
+      <i class="l" id="pad-l"></i><i class="r" id="pad-r"></i>
+    </span>
+    <span class="face">
+      <s id="pad-sel"></s><s id="pad-st"></s>
+      <b id="pad-b">B</b><b id="pad-a">A</b>
+    </span>
+  </div>
+
+  <div class="spacer"></div>
+  </div><!-- /rail -->
 
   <!-- The unlock card, shown for a few seconds when one is earned. -->
   <div class="card" id="card">
