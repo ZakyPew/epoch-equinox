@@ -1261,6 +1261,7 @@ class StreamDialog(QDialog):
     def __init__(self, folder: Path, parent=None):
         super().__init__(parent)
         self.folder = folder
+        self.splits_folder = folder.parent / "splits"
         self.setWindowTitle("Stream overlays")
         self.setMinimumSize(660, 620)
         self.setStyleSheet(
@@ -1401,23 +1402,69 @@ class StreamDialog(QDialog):
         col.addLayout(row)
         return w
 
+    # The switch label and the tooltip that explains it, in the order
+    # they read on screen. Keyed by what goes into config.js.
+    SWITCH_LABELS = {
+        "cam": ("Camera opening",
+                "A second, 16:9 hole in the rail with a matching frame"),
+        "guide": ("Alignment guide",
+                  "Print each opening's rectangle over itself, for lining a "
+                  "capture up in OBS. Turn it off before going live."),
+        "timer": ("Run timer",
+                  "The file's own clock, to hundredths"),
+        "splits": ("Split list",
+                   "The route from splits/<cart>.txt, with the segment you "
+                   "are on marked"),
+        "tracker": ("Item tracker",
+                    "A grid of the run's items, lit as you collect them"),
+        "inputs": ("Input display",
+                   "The buttons being held"),
+    }
+
     def _switches_block(self) -> QWidget:
         w = QWidget()
         col = QVBoxLayout(w)
         col.setContentsMargins(0, 0, 0, 0)
-        self.cam_box = QCheckBox("Camera opening — a second, 16:9 hole in the rail")
-        self.guide_box = QCheckBox(
-            "Alignment guide — print each rectangle over itself (turn off before going live)"
-        )
-        col.addWidget(self.cam_box)
-        col.addWidget(self.guide_box)
+
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(24)
+        self.switch_boxes: dict[str, QCheckBox] = {}
+        for i, (key, (label, tip)) in enumerate(self.SWITCH_LABELS.items()):
+            box = QCheckBox(label)
+            box.setToolTip(tip)
+            grid.addWidget(box, i // 2, i % 2)
+            self.switch_boxes[key] = box
+        col.addLayout(grid)
+
         hint = QLabel(
             "These apply to every layout at once, and to a browser source "
-            "added as a local file — no URL query needed."
+            "added as a local file — no URL query needed. Any of the last "
+            "four puts the rail in run mode, where the ticker and the "
+            "standing plaque step aside."
         )
         hint.setWordWrap(True)
         hint.setStyleSheet("color: #8b97a2; font-size: 11px;")
         col.addWidget(hint)
+
+        # LiveSplit is the player's setting rather than an overlay one: it
+        # decides whether a split goes down a socket, not what gets drawn.
+        row = QHBoxLayout()
+        self.ls_box = QCheckBox("Send splits to LiveSplit")
+        self.ls_box.setToolTip(
+            "Start the server in LiveSplit first: right-click → Control → "
+            "Start TCP Server. Loopback only, and a failed connection is "
+            "silent, so leaving this on with LiveSplit closed costs nothing."
+        )
+        self.ls_port = QSpinBox()
+        self.ls_port.setRange(1, 65535)
+        self.ls_port.setPrefix("port ")
+        row.addWidget(self.ls_box)
+        row.addWidget(self.ls_port)
+        row.addStretch(1)
+        self.ls_state = QLabel("")
+        self.ls_state.setStyleSheet("color: #8b97a2; font-size: 11px;")
+        row.addWidget(self.ls_state)
+        col.addLayout(row)
         return w
 
     def _now_block(self) -> QWidget:
@@ -1462,8 +1509,15 @@ class StreamDialog(QDialog):
                 item.widget().setEnabled(bool(rects))
 
         switches = stream_config.read_switches(self.folder)
-        self.cam_box.setChecked(switches["cam"])
-        self.guide_box.setChecked(switches["guide"])
+        for key, box in self.switch_boxes.items():
+            box.setChecked(switches.get(key, False))
+
+        # splits/ sits beside stream/, not inside it.
+        on, port = stream_config.read_livesplit(self.splits_folder)
+        self.ls_box.setChecked(on)
+        self.ls_port.setValue(port)
+        have = (self.splits_folder / f"{'tlozooa'}.txt").exists()
+        self.ls_state.setText("" if have else "no split routes found")
         self.now_edit.setText(stream_config.read_now(self.folder))
         self.refresh_summary()
 
@@ -1544,9 +1598,13 @@ class StreamDialog(QDialog):
                 stream_config.write_rects(self.layout_path, rects)
             stream_config.write_switches(
                 self.folder,
-                {"cam": self.cam_box.isChecked(), "guide": self.guide_box.isChecked()},
+                {k: b.isChecked() for k, b in self.switch_boxes.items()},
             )
             stream_config.write_now(self.folder, self.now_edit.text())
+            self.splits_folder.mkdir(parents=True, exist_ok=True)
+            stream_config.write_livesplit(
+                self.splits_folder, self.ls_box.isChecked(), self.ls_port.value()
+            )
         except stream_config.StreamConfigError as exc:
             QMessageBox.warning(self, "Could not save", str(exc))
             return

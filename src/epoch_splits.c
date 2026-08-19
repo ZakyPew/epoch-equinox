@@ -113,6 +113,27 @@ void epoch_splits_tick(GBContext* ctx, const char* game_id) {
                 strcmp(game_id, "tlozooa") == 0 ? 0xC6AB : 0xC6A3;
             g_run.set.gate_addr2 = 0xCD00;
         }
+        /* Whether to talk to LiveSplit, and on which port. A plain file
+         * beside the routes rather than a flag, because the launcher's
+         * Stream page writes it and someone editing routes by hand is
+         * already in this folder. Absent means off, which is right for
+         * everyone who does not run LiveSplit. */
+        {
+            FILE* f = fopen("splits/livesplit.txt", "r");
+            bool on = false;
+            int port = 0;
+            if (f) {
+                char line[128];
+                while (fgets(line, sizeof(line), f)) {
+                    int v;
+                    if (sscanf(line, " enabled = %d", &v) == 1) on = v != 0;
+                    else if (sscanf(line, " port = %d", &v) == 1) port = v;
+                }
+                fclose(f);
+            }
+            epoch_livesplit_enable(on, port);
+            if (on) fprintf(stderr, "[splits] LiveSplit output enabled\n");
+        }
         g_loaded = true;
     }
     if (g_run.count == 0) return;

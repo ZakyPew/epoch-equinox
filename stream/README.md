@@ -101,6 +101,29 @@ studs and the guide caption all follow. Nothing else is hard-coded.
 The **Snap** button rounds an opening to the nearest whole multiple of
 160×144 that still fits, which is what keeps flat mode pixel-crisp.
 
+## For speedrunners
+
+Four more blocks, all off unless switched on from the Stream page:
+
+| switch | what it shows |
+|---|---|
+| **Run timer** | the file's own clock, to hundredths |
+| **Split list** | the route from `splits/<cart>.txt`, with your current segment marked |
+| **Item tracker** | a grid of the run's items, lit as you collect them, with tiers |
+| **Input display** | the buttons being held |
+
+The framed layouts take all four in the rail; the floating pair take the
+timer and the input display, since a split list and an item grid need a
+column to live in. Turning any of them on puts the rail in **run mode**,
+where the "now building" line and the standing plaque step aside.
+
+The timer is the game's own counter rather than one counted in the
+browser: it is what the file reads, it pauses when the game does, and
+reloading the overlay mid-run cannot lose it.
+
+Splitting itself — and pushing splits to LiveSplit — is
+[splits/README.md](../splits/README.md).
+
 ## Live game state
 
 When the player is running it writes `stream/live.js` beside itself once a

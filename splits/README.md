@@ -51,7 +51,14 @@ Treasure ids are in
 ## Connecting LiveSplit
 
 1. In LiveSplit: right-click → **Control** → **Start TCP Server**
-2. Turn the connection on in the launcher's Stream page
+2. Tick **Send splits to LiveSplit** on the launcher's Stream page
+
+That writes `splits/livesplit.txt`, which the player reads on startup:
+
+```
+enabled = 1
+port = 16834
+```
 
 It talks to `127.0.0.1` only — a run is not something to put on the
 network by accident — and it never blocks the emulator: LiveSplit not

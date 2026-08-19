@@ -107,17 +107,46 @@ def main() -> int:
 
         # -- switches --------------------------------------------------
         check("missing config reads as all off",
-              sc.read_switches(folder), {"cam": False, "guide": False})
+              set(sc.read_switches(folder).values()), {False})
         sc.write_switches(folder, {"cam": True, "guide": False})
-        check("switches round trip",
-              sc.read_switches(folder), {"cam": True, "guide": False})
+        got = sc.read_switches(folder)
+        check("switches round trip", [got["cam"], got["guide"]], [True, False])
         text = (folder / "config.js").read_text(encoding="utf-8")
         truthy("switches are written as one CONFIG call", "CONFIG({" in text)
         truthy("switches are real booleans, not strings", "cam: true" in text)
 
         (folder / "config.js").write_text("this is not javascript {", encoding="utf-8")
         check("a damaged config reads as all off rather than throwing",
-              sc.read_switches(folder), {"cam": False, "guide": False})
+              set(sc.read_switches(folder).values()), {False})
+
+        # -- the run switches ------------------------------------------
+        sc.write_switches(folder, {"timer": True, "splits": True,
+                                   "tracker": False, "inputs": True})
+        got = sc.read_switches(folder)
+        check("the run switches round trip",
+              [got["timer"], got["splits"], got["tracker"], got["inputs"]],
+              [True, True, False, True])
+        check("a switch left out reads as off", got["cam"], False)
+        truthy("every switch the overlays read is written",
+               all(k in got for k in sc.SWITCHES))
+
+        # -- LiveSplit --------------------------------------------------
+        # This one is the player's, not the overlays': it decides whether
+        # a split goes down a socket. Off by default, because most people
+        # do not have LiveSplit open.
+        splits = Path(tmp) / "splits"
+        splits.mkdir()
+        check("no LiveSplit file means off",
+              sc.read_livesplit(splits), (False, sc.LIVESPLIT_DEFAULT_PORT))
+        sc.write_livesplit(splits, True, 16835)
+        check("LiveSplit settings round trip",
+              sc.read_livesplit(splits), (True, 16835))
+        sc.write_livesplit(splits, True, 99999)
+        check("an impossible port falls back to the default",
+              sc.read_livesplit(splits)[1], sc.LIVESPLIT_DEFAULT_PORT)
+        (splits / "livesplit.txt").write_text("nonsense", encoding="utf-8")
+        check("a damaged LiveSplit file reads as off rather than throwing",
+              sc.read_livesplit(splits), (False, sc.LIVESPLIT_DEFAULT_PORT))
 
         # -- the status line -------------------------------------------
         sc.write_now(folder, "chasing down the tree shapes")
