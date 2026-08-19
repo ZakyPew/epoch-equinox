@@ -131,6 +131,9 @@ PROBE = """() => {
     current: q('.split-row.current .nm')
       ? q('.split-row.current .nm').textContent : null,
     cells: document.querySelectorAll('#tracker .cell').length,
+    // An upgradeable item names its tier rather than numbering it.
+    labels: [...document.querySelectorAll('#tracker .cell .lb')]
+      .map(e => e.textContent),
     lit: document.querySelectorAll('#tracker .cell.has').length,
     padOn: document.querySelectorAll('.dpad i.on, .face b.on').length,
     icon: q('#card-icon')
@@ -211,6 +214,11 @@ def run(shots: Path | None) -> int:
                     check(f"{tag}: the tracker lights what the file holds",
                           info["cells"] == 16 and info["lit"] == 13,
                           f"{info['lit']} of {info['cells']}")
+                    # sword 2 is the Noble Sword, bracelet 2 the Power
+                    # Gloves -- the sample feed holds both.
+                    check(f"{tag}: an upgraded item names its tier",
+                          "Noble" in info["labels"] and "Gloves" in info["labels"],
+                          ", ".join(info["labels"]))
                 check(f"{tag}: the input display follows the buttons",
                       info["padOn"] == 2, str(info["padOn"]))
 

@@ -171,6 +171,16 @@
      bracelet reads L2 rather than just "have". Ages has no rod of
      seasons and Seasons no cane of somaria -- listing the wrong one
      would be a cell that can never light. */
+  /* Upgradeable items are named for the tier you hold, not numbered:
+     a run cares that it is the Noble Sword, not that sword == 2. Index
+     is level - 1. */
+  var TIERS = {
+    sword:    ['Wooden', 'Noble', 'Master', 'Master'],
+    shield:   ['Wooden', 'Iron', 'Mirror'],
+    bracelet: ['Bracelet', 'Gloves'],
+    satchel:  ['Satchel', 'Satchel', 'Satchel']
+  };
+
   var ITEMS = {
     tlozooa: [
       {id: 0x11, s: 'Harp'},      {id: 0x16, s: 'Brac', tier: 'bracelet'},
@@ -270,7 +280,13 @@
     box.innerHTML = out;
     var labels = box.querySelectorAll('.lb');
     for (var j = 0; j < labels.length && j < list.length; j++) {
-      labels[j].textContent = list[j].s;
+      var it2 = list[j];
+      var lvl = it2.tier ? (s[it2.tier] || 0) : 0;
+      var names = it2.tier ? TIERS[it2.tier] : null;
+      /* The tier's own name once you hold it, the short label until
+         then -- an empty cell should say what it is waiting for. */
+      labels[j].textContent =
+        (names && lvl > 0 && names[lvl - 1]) ? names[lvl - 1] : it2.s;
     }
   }
 
