@@ -1,0 +1,87 @@
+# Epoch & Equinox auto-splits — Oracle of Ages
+#
+# Same format as an achievement pack (achievements/README.md): every
+# entry is one segment, in the order they appear here, and the title is
+# what shows on the split list.
+#
+# Every address is from the oracles disassembly (include/wram.s, Ages
+# column) and every treasure bit was checked against a real late-game
+# save: wObtainedTreasureFlags starts at $c69a, one bit per treasure id,
+# low bit first -- so treasure $11 (the Harp of Ages) is bit 1 of $c69c.
+#
+# This is an essence route with the major items in between. Yours will
+# differ; copy this file, cut what you skip, reorder what you don't.
+
+[harp]
+title = Harp of Ages
+desc = Treasure $11
+
+when = flag c69c 1
+
+[essence-1]
+title = Eternal Spirit
+desc = First essence
+when = bits c6bf >= 1
+
+[bracelet]
+title = Power Bracelet
+desc = Treasure $16
+when = flag c69c 6
+
+[essence-2]
+title = Ancient Wood
+when = bits c6bf >= 2
+
+[feather]
+title = Roc's Feather
+desc = Treasure $17
+when = flag c69c 7
+
+[essence-3]
+title = Echoing Howl
+when = bits c6bf >= 3
+
+[flippers]
+title = Zora's Flippers
+desc = Treasure $2e
+when = flag c69f 6
+
+[essence-4]
+title = Burning Flame
+when = bits c6bf >= 4
+
+[switch-hook]
+title = Switch Hook
+desc = Treasure $0a
+when = flag c69b 2
+
+[essence-5]
+title = Sacred Soil
+when = bits c6bf >= 5
+
+[seed-shooter]
+title = Seed Shooter
+desc = Treasure $0f
+when = flag c69b 7
+
+[essence-6]
+title = Lonely Peak
+when = bits c6bf >= 6
+
+[mermaid-suit]
+title = Mermaid Suit
+desc = Treasure $4a
+when = flag c6a3 2
+
+[essence-7]
+title = Rolling Sea
+when = bits c6bf >= 7
+
+[cane]
+title = Cane of Somaria
+desc = Treasure $04
+when = flag c69a 4
+
+[essence-8]
+title = Falling Star
+when = bits c6bf >= 8

@@ -1,0 +1,82 @@
+# Epoch & Equinox auto-splits — Oracle of Seasons
+#
+# Same format as an achievement pack (achievements/README.md): every
+# entry is one segment, in the order they appear here, and the title is
+# what shows on the split list.
+#
+# Every address is from the oracles disassembly (include/wram.s, Seasons
+# column) and every treasure bit was checked against a real late-game
+# save: wObtainedTreasureFlags starts at $c692, one bit per treasure id,
+# low bit first -- so treasure $07 (the Rod of Seasons) is bit 7 of
+# $c692.
+#
+# This is an essence route with the major items in between. Yours will
+# differ; copy this file, cut what you skip, reorder what you don't.
+
+[rod]
+title = Rod of Seasons
+desc = Treasure $07
+when = flag c692 7
+
+[essence-1]
+title = Fertile Soil
+desc = First essence
+when = bits c6bb >= 1
+
+[satchel]
+title = Seed Satchel
+desc = Treasure $19
+when = flag c695 1
+
+[essence-2]
+title = Gift of Time
+when = bits c6bb >= 2
+
+[feather]
+title = Roc's Feather
+desc = Treasure $17
+when = flag c694 7
+
+[essence-3]
+title = Bright Sun
+when = bits c6bb >= 3
+
+[magnet-gloves]
+title = Magnetic Gloves
+desc = Treasure $08
+when = flag c693 0
+
+[essence-4]
+title = Soothing Rain
+when = bits c6bb >= 4
+
+[slingshot]
+title = Slingshot
+desc = Treasure $13
+when = flag c694 3
+
+[essence-5]
+title = Nurturing Warmth
+when = bits c6bb >= 5
+
+[flippers]
+title = Zora's Flippers
+desc = Treasure $2e
+when = flag c697 6
+
+[essence-6]
+title = Blowing Wind
+when = bits c6bb >= 6
+
+[boomerang]
+title = Magical Boomerang
+desc = Treasure $06
+when = flag c692 6
+
+[essence-7]
+title = Seed of Life
+when = bits c6bb >= 7
+
+[essence-8]
+title = Changing Seasons
+when = bits c6bb >= 8
