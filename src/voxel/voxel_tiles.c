@@ -1022,7 +1022,13 @@ bool vox_scrape(GBContext* ctx, const uint32_t* fb, VoxTileGrid* grid,
                 int wy = sy - grid->hud_rows + oracle.cam_y + oracle.off_y;
                 int col = wx >> 4, row = wy >> 4;
 
-                if (row >= 0 && row < 12 && col >= 0 && col < 16) {
+                /* HUD tiles are not part of the room. Outdoors their wy
+                 * is negative and the row bound already skips them, but a
+                 * large scrolling interior (cam_y > 0) maps them onto
+                 * real room rows -- Veran's tower drew its off-screen top
+                 * wall into the HUD band as floating blocks. */
+                if (sy >= grid->hud_rows &&
+                    row >= 0 && row < 12 && col >= 0 && col < 16) {
                     uint8_t coll = oracle.collisions[row * 16 + col];
                     /* $01-$0F is a four-bit occupancy mask, not a height
                      * code. Preserve its exact 8x8 footprint: bit 3 is the
@@ -1336,6 +1342,13 @@ scan_sprites:
         int sy = (int)e[0] - 16;
         int sx = (int)e[1] - 8;
         if (sy <= -16 || sy >= 144 || sx <= -8 || sx >= 160) continue;
+        /* A sprite wholly behind the opaque HUD bar is interface, not
+         * world: the games park indicator sprites under it (Veran's
+         * tower keeps two at sy=0), invisible in 2D but billboarded by
+         * the chase cam as phantom pillars on the horizon. A sprite
+         * merely crossing the top edge still shows below the bar and is
+         * kept. */
+        if (sy + (tall ? 16 : 8) <= grid->hud_rows) continue;
         VoxSprite* s = &sprites->entries[sprites->count++];
         s->y = (int16_t)sy;
         s->x = (int16_t)sx;
