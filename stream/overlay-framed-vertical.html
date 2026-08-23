@@ -239,17 +239,34 @@
   /* Live panel and unlock card: look comes from epoch-live.css, only
      their place on the canvas is decided here. The panel sits directly
      under the opening, where a viewer's eye already is. */
-  .hud {
+  /* The band under the game is a column, not a stack of fixed offsets,
+     so the optional blocks can be switched on in any combination and
+     still lay out. */
+  .rail {
+    position:absolute;
     left:40px; right:var(--side-safe);
-    top:calc(var(--box-y) + var(--box-h) + 62px);
+    top:calc(var(--box-y) + var(--box-h) + 34px);
+    bottom:var(--bottom-safe);
+    display:flex; flex-direction:column; gap:14px;
+    overflow:hidden;
+  }
+  body.cam-on .rail { bottom:calc(1920px - var(--cam-y) + 22px); }
+  .rail > * { flex:0 0 auto; }
+  .rail .spacer { flex:1 1 auto; min-height:0; }
+  /* A run has no room for the repo plug as well. */
+  body.run-mode .cta { display:none; }
+
+  .hud {
+    position:static;
     display:flex; flex-direction:column; gap:14px;
   }
+  /* A vertical canvas has less room below the game than a rail has
+     beside it, and the caption strip takes the bottom tenth. Tighter
+     rows here rather than dropping a segment off the end. */
+  .split-row { font-size:13px; padding:2px; }
   .hud-top { flex-wrap:wrap; }
   .hud-row { flex-wrap:wrap; gap:14px 22px; }
-  .last {
-    left:40px; right:var(--side-safe);
-    top:calc(var(--box-y) + var(--box-h) + 247px);
-  }
+  .last { position:static; }
   .card {
     left:40px; right:var(--side-safe);
     bottom:calc(var(--bottom-safe) + 270px);
@@ -369,6 +386,7 @@
     </div>
   </div>
 
+  <div class="rail">
   <!-- Live state, hidden until the player writes stream/live.js. -->
   <div class="hud" id="hud" hidden>
     <i class="dia tl"></i><i class="dia tr"></i>
@@ -445,6 +463,33 @@
       <div class="last-desc" id="last-desc"></div>
     </div>
   </div>
+
+
+  <!-- Speedrunning. All four ship hidden; the Stream page switches them
+       on. The band below the game is a flex column, so any combination
+       of them stacks without anyone working out y coordinates. -->
+  <div class="timer" id="timer" hidden>
+    <div class="timer-label">File time</div>
+    <div class="timer-value" id="timer-value">0:00<small>.00</small></div>
+  </div>
+
+  <div class="splits" id="splits" hidden></div>
+
+  <div class="tracker" id="tracker" hidden></div>
+
+  <div class="inputs" id="inputs" hidden>
+    <span class="dpad">
+      <i class="u" id="pad-u"></i><i class="d" id="pad-d"></i>
+      <i class="l" id="pad-l"></i><i class="r" id="pad-r"></i>
+    </span>
+    <span class="face">
+      <s id="pad-sel"></s><s id="pad-st"></s>
+      <b id="pad-b">B</b><b id="pad-a">A</b>
+    </span>
+  </div>
+
+  <div class="spacer"></div>
+  </div><!-- /rail -->
 
   <!-- The unlock card, shown for a few seconds when one is earned. -->
   <div class="card" id="card">

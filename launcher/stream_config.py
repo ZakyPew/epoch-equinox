@@ -151,6 +151,8 @@ def write_rects(path: Path, rects: dict[str, Rect]) -> None:
     _write_atomic(path, text)
 
 
+SWITCHES = ("cam", "guide", "timer", "splits", "tracker", "inputs")
+
 CONFIG_HEADER = """\
 /* Stream overlay switches.
  *
@@ -159,16 +161,23 @@ CONFIG_HEADER = """\
  * their own folder, because OBS opens them over file:// where fetch()
  * is blocked.
  *
- *   cam    a second, camera-shaped opening in the framed layouts
- *   guide  print each opening's exact rectangle over it, for lining a
- *          capture up in OBS -- turn it off before going live
+ *   cam      a second, camera-shaped opening in the framed layouts
+ *   guide    print each opening's exact rectangle over it, for lining a
+ *            capture up in OBS -- turn it off before going live
+ *   timer    the file clock, to hundredths
+ *   splits   the route, with the segment you are on marked
+ *   tracker  the item grid
+ *   inputs   the buttons being held
+ *
+ * Any of the last four also puts the rail in run mode, where the "now
+ * building" line and the standing plaque step aside.
  */
 """
 
 
 def read_switches(folder: Path) -> dict[str, bool]:
-    """Current cam/guide state. Missing or damaged file reads as all off."""
-    out = {"cam": False, "guide": False}
+    """Current switch state. Missing or damaged file reads as all off."""
+    out = {k: False for k in SWITCHES}
     try:
         text = (folder / "config.js").read_text(encoding="utf-8")
     except OSError:
@@ -187,7 +196,7 @@ def read_switches(folder: Path) -> dict[str, bool]:
 
 def write_switches(folder: Path, switches: dict[str, bool]) -> None:
     body = ", ".join(
-        f"{k}: {'true' if switches.get(k) else 'false'}" for k in ("cam", "guide")
+        f"{k}: {'true' if switches.get(k) else 'false'}" for k in SWITCHES
     )
     _write_atomic(folder / "config.js", f"{CONFIG_HEADER}CONFIG({{{body}}});\n")
 
@@ -247,3 +256,50 @@ def snap(rect: Rect, canvas: tuple[int, int]) -> Rect:
 def file_url(path: Path) -> str:
     """A file:// URL for OBS's browser source when Local file is off."""
     return path.resolve().as_uri()
+
+
+# ---------------------------------------------------------------------------
+# LiveSplit
+# ---------------------------------------------------------------------------
+# The player reads this, not the overlays: it says whether to push splits
+# down a socket to LiveSplit and on which port. It lives beside the
+# routes because anyone editing routes by hand is already in that folder.
+
+LIVESPLIT_DEFAULT_PORT = 16834
+
+LIVESPLIT_HEADER = """\
+# Whether the player pushes splits to LiveSplit's Server component.
+#
+# Start it in LiveSplit with right-click -> Control -> Start TCP Server.
+# Loopback only, and a failed connection is silent and retried, so
+# leaving this on with LiveSplit closed costs nothing.
+"""
+
+
+def read_livesplit(folder: Path) -> tuple[bool, int]:
+    """(enabled, port). A missing file is off, which suits most people."""
+    on, port = False, LIVESPLIT_DEFAULT_PORT
+    try:
+        text = (folder / "livesplit.txt").read_text(encoding="utf-8")
+    except OSError:
+        return on, port
+    for line in text.splitlines():
+        m = re.match(r"\s*(\w+)\s*=\s*(\d+)", line)
+        if not m:
+            continue
+        if m.group(1) == "enabled":
+            on = m.group(2) != "0"
+        elif m.group(1) == "port":
+            port = int(m.group(2))
+    if not (0 < port < 65536):
+        port = LIVESPLIT_DEFAULT_PORT
+    return on, port
+
+
+def write_livesplit(folder: Path, enabled: bool, port: int) -> None:
+    if not (0 < port < 65536):
+        port = LIVESPLIT_DEFAULT_PORT
+    _write_atomic(
+        folder / "livesplit.txt",
+        f"{LIVESPLIT_HEADER}enabled = {1 if enabled else 0}\nport = {port}\n",
+    )

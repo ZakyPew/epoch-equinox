@@ -12,6 +12,10 @@
  */
 extern "C" {
 #include "voxel/voxel.h"
+/* Sculpt mode lives in voxel_edit.c; declared here rather than dragging
+ * in voxel_internal.h, matching the height-class enum below. */
+void vox_edit_set_enabled(bool on);
+bool vox_edit_enabled(void);
 }
 
 #include "imgui.h"
@@ -85,6 +89,18 @@ extern "C" void voxel_menu_draw(void) {
                         "where you put it for half a second before it starts\n"
                         "trailing again. Click the right stick (or C) to\n"
                         "swing behind Link now -- hold it to keep it there.");
+    ImGui::Spacing();
+    ImGui::TextDisabled("Room sculpting");
+    {
+        bool editing = vox_edit_enabled();
+        if (ImGui::Checkbox("Sculpt room heights (F4)", &editing)) {
+            vox_edit_set_enabled(editing);
+        }
+        ImGui::TextDisabled("The gold cell in front of Link is the brush.\n"
+                            "1 flat  2 water  3 low  4 mid  5 high  0 keep.\n"
+                            "Writes voxel/overrides/, live -- no restart.");
+    }
+
     ImGui::SliderFloat("Fog begins", &t->fog_start, 0.0f, 200.0f, "%.0f");
     ImGui::SliderFloat("Fog strength", &t->fog_max, 0.0f, 256.0f, "%.0f");
 

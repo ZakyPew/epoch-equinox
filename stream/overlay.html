@@ -93,6 +93,11 @@
     88%  { opacity:1; transform:translateX(0) scale(1); }
     100% { opacity:0; transform:translateX(40px) scale(.99); }
   }
+
+  /* The run blocks float like everything else here: the timer under the
+     ticker, the inputs above the identity bar. */
+  .timer  { position:absolute; right:48px; top:110px; min-width:300px; }
+  .inputs { position:absolute; left:48px; bottom:224px; }
 </style>
 </head>
 <body>
@@ -189,6 +194,26 @@
       <div class="ach-bar"><i id="ach-fill"></i></div>
       <span class="ach-text" id="ach-text">— / —</span>
     </div>
+  </div>
+
+
+  <!-- Speedrunning, hidden until switched on. The floating layouts take
+       the two blocks that work over gameplay; the split list and the
+       item grid need a rail, so they live in the framed pair. -->
+  <div class="timer" id="timer" hidden>
+    <div class="timer-label">File time</div>
+    <div class="timer-value" id="timer-value">0:00<small>.00</small></div>
+  </div>
+
+  <div class="inputs" id="inputs" hidden>
+    <span class="dpad">
+      <i class="u" id="pad-u"></i><i class="d" id="pad-d"></i>
+      <i class="l" id="pad-l"></i><i class="r" id="pad-r"></i>
+    </span>
+    <span class="face">
+      <s id="pad-sel"></s><s id="pad-st"></s>
+      <b id="pad-b">B</b><b id="pad-a">A</b>
+    </span>
   </div>
 
   <!-- The unlock card, shown for a few seconds when one is earned. -->

@@ -123,6 +123,20 @@ uint8_t vox_oracle_quadrant_height(uint8_t collision,
 const uint8_t* vox_override_lookup(bool is_seasons, int group, int room,
                                    const uint8_t* collisions);
 
+/* In-game room sculpting (voxel_edit.c). The tile builder tracks where
+ * Link is each frame; the HUD paints; the tint asks for the cursor. */
+void vox_override_invalidate(void);
+void vox_edit_set_enabled(bool on);
+bool vox_edit_enabled(void);
+void vox_edit_track(bool is_seasons, int group, int room,
+                    int link_col, int link_row, int dir,
+                    const uint8_t* collisions);
+bool vox_edit_cursor(int* col, int* row);
+int  vox_edit_pulse(void);   /* tint blend, /256 */
+char vox_edit_cell(void);
+bool vox_edit_room(bool* is_seasons, int* group, int* room);
+bool vox_edit_paint(char code);
+
 /* One 16x16 vegetation object for the chase camera. The live tile art is
  * kept verbatim. Full trees split into canopy/trunk geometry and low
  * vegetation becomes a shallow relief. Screen px of the source cell's

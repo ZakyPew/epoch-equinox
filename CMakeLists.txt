@@ -91,6 +91,8 @@ set(EPOCH_SUPPORT_SOURCES
     src/epoch_rewind_hud.cpp
     src/epoch_achievements.c
     src/epoch_stream.c
+    src/epoch_splits.c
+    src/epoch_livesplit.c
     src/epoch_secrets.c
     src/epoch_secrets_menu.cpp
     src/epoch_panel.cpp
@@ -101,6 +103,8 @@ if(EPOCH_WITH_VOXEL)
         src/voxel/voxel_tiles.c
         src/voxel/voxel_oracle.c
         src/voxel/voxel_overrides.c
+        src/voxel/voxel_edit.c
+        src/voxel/voxel_edit_hud.cpp
         src/voxel/voxel_render.c
         src/voxel/voxel_world.c
         src/voxel/voxel_menu.cpp)

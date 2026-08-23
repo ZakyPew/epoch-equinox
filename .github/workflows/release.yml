@@ -63,7 +63,7 @@ jobs:
       - name: Achievements, secrets, typist and camera checks
         run: |
           cd build
-          for t in achievements_test secrets_c_test typist_test chasecam_test cliff_test stream_test; do
+          for t in achievements_test secrets_c_test typist_test chasecam_test cliff_test stream_test splits_test voxedit_test; do
             cc -O2 -o $t ../tools/$t.c -I ../src \
                -I _deps/gb_recompiled-src/runtime/include \
                $(sdl2-config --cflags) libepoch_support.a _gbrt_build/libgbrt.a \
@@ -81,6 +81,7 @@ jobs:
           cp -r art/covers/. "$staging/covers/"
           cp -r launcher "$staging/"
           cp -r achievements "$staging/"
+          cp -r splits "$staging/"
           # The stream overlays live beside the binary because the player
           # writes stream/live.js relative to its own working directory.
           cp -r stream "$staging/"
@@ -167,6 +168,7 @@ jobs:
           Copy-Item "dist\Epoch & Equinox Launcher.exe" $staging
           Copy-Item -Recurse launcher "$staging/launcher"
           Copy-Item -Recurse achievements "$staging/achievements"
+          Copy-Item -Recurse splits "$staging/splits"
           # The player writes stream/live.js relative to its own working
           # directory, so the overlays ship beside it.
           Copy-Item -Recurse stream "$staging/stream"
@@ -221,6 +223,7 @@ jobs:
           cp -r art/covers/. "$staging/covers/"
           cp -r launcher "$staging/"
           cp -r achievements "$staging/"
+          cp -r splits "$staging/"
           cp -r stream "$staging/"
           cp -r "dist/Epoch & Equinox Launcher.app" "$staging/"
           cp README.md LICENSE CREDITS.md "$staging/"

@@ -927,6 +927,14 @@ bool vox_scrape(GBContext* ctx, const uint32_t* fb, VoxTileGrid* grid,
                              + grid->hud_rows + 8;
         grid->link_jump = oracle.link_z < 0 ? -oracle.link_z : 0;
         grid->link_dir = oracle.link_dir;
+        /* The in-game editor's brush follows Link: his cell, in room
+         * cells, plus one in his facing. link_x/y are room-space
+         * already; +4 biases his feet toward the cell he is standing
+         * in rather than the boundary he is touching. */
+        vox_edit_track(oracle.is_seasons, oracle.active_group,
+                       oracle.active_room, oracle.link_x >> 4,
+                       (oracle.link_y + 4) >> 4, oracle.link_dir,
+                       oracle.collisions);
         if (getenv("VOXEL_DEBUG")) {
             static int n = 0;
             if ((n++ % 30) == 0) {
@@ -1033,6 +1041,34 @@ bool vox_scrape(GBContext* ctx, const uint32_t* fb, VoxTileGrid* grid,
                     if (ov && row < 8 && col < 10 &&
                         ov[row * 10 + col] != 0xFF) {
                         hcls = ov[row * 10 + col];
+                    }
+                    /* Sculpt mode: pulse the brush cell gold in the
+                     * terrain texture itself, so the highlight lands on
+                     * the real extruded geometry in every voxel mode
+                     * rather than floating in screen space. */
+                    {
+                        int ec, er;
+                        if (vox_edit_cursor(&ec, &er) &&
+                            col == ec && row == er) {
+                            int a = vox_edit_pulse();      /* /256 */
+                            uint32_t* px =
+                                &grid->tex[(ty * 8) * VOX_TEX_W + tx * 8];
+                            for (int yy = 0; yy < 8; yy++) {
+                                for (int xx = 0; xx < 8; xx++) {
+                                    uint32_t c = px[yy * VOX_TEX_W + xx];
+                                    int r8 = (c >> 16) & 0xFF;
+                                    int g8 = (c >> 8) & 0xFF;
+                                    int b8 = c & 0xFF;
+                                    r8 += ((0xDE - r8) * a) >> 8;
+                                    g8 += ((0xB2 - g8) * a) >> 8;
+                                    b8 += ((0x4C - b8) * a) >> 8;
+                                    px[yy * VOX_TEX_W + xx] =
+                                        (c & 0xFF000000u) |
+                                        ((uint32_t)r8 << 16) |
+                                        ((uint32_t)g8 << 8) | (uint32_t)b8;
+                                }
+                            }
+                        }
                     }
                     grid->height[ty][tx] = hcls;
                     continue;

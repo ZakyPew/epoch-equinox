@@ -207,3 +207,148 @@
 }
 .card.show .card-sheen::after { animation:sheen 1.5s ease-out .45s 1; }
 @keyframes sheen { to { left:130%; } }
+
+/* ---- speedrunning ---------------------------------------------------
+   A run timer, the split list, an item grid and an input display. All
+   four are off unless switched on -- most people streaming this are not
+   running it -- and all four live in the same gilded frame as the rest.
+
+   The timer is the game's own clock rather than one counted here: it is
+   what the file reads, it pauses when the game does, and reloading the
+   overlay mid-run cannot lose it. */
+.timer[hidden], .splits[hidden], .tracker[hidden], .inputs[hidden] {
+  display:none;
+}
+
+.timer {
+  background:var(--navy);
+  border:2px solid var(--gold-dim);
+  border-radius:7px;
+  padding:10px 18px 12px;
+  text-align:center;
+  position:relative;
+}
+.timer::before {
+  content:""; position:absolute; inset:3px;
+  border:1px solid var(--gold); border-radius:4px; opacity:.85;
+}
+.timer-label {
+  font-size:11px; letter-spacing:.22em; color:var(--gold);
+  text-transform:uppercase;
+}
+.timer-value {
+  font-size:52px; line-height:1.05; font-weight:600; color:var(--gold-lit);
+  font-variant-numeric:tabular-nums;
+  text-shadow:0 2px 10px rgba(0,0,0,.6);
+}
+/* The hundredths are a third the size: they move too fast to read and
+   would otherwise be the loudest thing on the canvas. */
+.timer-value small { font-size:.42em; opacity:.8; margin-left:.1em; }
+
+.splits {
+  background:var(--navy);
+  border:1px solid var(--gold-dim);
+  border-radius:6px;
+  padding:8px 12px;
+  display:flex; flex-direction:column; gap:1px;
+  overflow:hidden;
+}
+.split-row {
+  display:flex; align-items:baseline; gap:10px;
+  font-size:14px; color:var(--dim,#9FB4C6);
+  padding:3px 2px;
+}
+.split-row .nm { flex:1; white-space:nowrap; overflow:hidden;
+                 text-overflow:ellipsis; }
+.split-row .tm { font-variant-numeric:tabular-nums; letter-spacing:.02em; }
+.split-row.done { color:var(--ink,#F2F7FB); }
+.split-row.done .tm { color:var(--gold-lit); }
+/* The segment being run, so a glance finds your place. Named `current`
+   rather than `now`, which is already the ticker pill's class -- the two
+   collided and run-mode's rule hid the live segment entirely. */
+.split-row.current {
+  background:rgba(222,178,76,.14);
+  color:var(--gold-lit);
+  border-radius:4px;
+}
+.split-row.current .nm::before { content:"▸ "; color:var(--gold); }
+
+/* The item grid. Cells are labelled rather than drawn from the cart's
+   own art -- that art is the player's, not ours to ship, so ripping it
+   happens on their machine and drops in here later as an <img>. */
+.tracker {
+  background:var(--navy);
+  border:1px solid var(--gold-dim);
+  border-radius:6px;
+  padding:9px;
+  /* Capped rather than stretched: across a vertical canvas eight equal
+     columns make 100px cells, which is bigger than the art will ever be
+     and pushes the block past the caption-safe area. */
+  display:grid; gap:5px;
+  grid-template-columns:repeat(auto-fill, minmax(0, 64px));
+  justify-content:center;
+}
+.cell {
+  position:relative;
+  aspect-ratio:1;
+  display:grid; place-items:center;
+  border:1px solid rgba(222,178,76,.28);
+  border-radius:4px;
+  background:rgba(222,178,76,.05);
+  font-size:11px; letter-spacing:.02em; text-align:center;
+  color:rgba(159,180,198,.5);
+  line-height:1.05;
+  overflow:hidden;
+}
+.cell img { width:100%; height:100%; image-rendering:pixelated; }
+.cell.has {
+  color:var(--gold-lit);
+  border-color:var(--gold);
+  background:linear-gradient(180deg, rgba(222,178,76,.20), rgba(222,178,76,.07));
+  box-shadow:inset 0 0 10px rgba(222,178,76,.18);
+}
+.cell:not(.has) { opacity:.42; }
+.cell .tier {
+  position:absolute; right:2px; bottom:1px;
+  font-size:10px; font-weight:600; color:var(--gold);
+}
+
+/* With any of these on, the rail is a run layout and the dev-stream
+   furniture steps aside: the "now building" line and the standing
+   "last earned" plaque are for a build stream, and their space is worth
+   more to a split list. Without this the rail overflows and the bottom
+   block is silently clipped. */
+body.run-mode .now,
+body.run-mode .last { display:none !important; }
+
+/* Buttons held, in the Game Boy's own arrangement. */
+.inputs {
+  display:flex; align-items:center; justify-content:center; gap:18px;
+  background:var(--navy);
+  border:1px solid var(--gold-dim);
+  border-radius:6px;
+  padding:10px 14px;
+}
+.dpad { position:relative; width:46px; height:46px; }
+.dpad i {
+  position:absolute; background:rgba(159,180,198,.22);
+  border-radius:2px;
+}
+.dpad i.u { left:16px; top:0;    width:14px; height:16px; }
+.dpad i.d { left:16px; bottom:0; width:14px; height:16px; }
+.dpad i.l { left:0;    top:16px; width:16px; height:14px; }
+.dpad i.r { right:0;   top:16px; width:16px; height:14px; }
+.dpad i.on { background:var(--gold-lit); box-shadow:0 0 8px rgba(222,178,76,.8); }
+.face { display:flex; align-items:center; gap:9px; }
+.face b {
+  width:26px; height:26px; border-radius:50%;
+  display:grid; place-items:center;
+  background:rgba(159,180,198,.16); color:rgba(159,180,198,.55);
+  font-size:12px; font-weight:600;
+}
+.face b.on { background:var(--gold); color:#2A1E05; box-shadow:0 0 10px rgba(222,178,76,.75); }
+.face s {
+  width:26px; height:8px; border-radius:4px; text-decoration:none;
+  background:rgba(159,180,198,.16);
+}
+.face s.on { background:var(--gold); }

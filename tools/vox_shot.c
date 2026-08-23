@@ -14,8 +14,16 @@
  * VOX_SHOT_TURN (one chase-camera stick impulse on the first frame),
  * VOX_SHOT_HEIGHT (override chase eye height), VOX_SHOT_NOTREES (omit the
  * separate vegetation pass), VOX_SHOT_FULLSCALE (render off-frames at the
- * requested scale for timing), and VOX_DUMP_TREES (write the recovered
- * vegetation-art contact sheet).
+ * requested scale for timing), VOX_DUMP_TREES (write the recovered
+ * vegetation-art contact sheet), and VOX_SHOT_DUMP_COLL (print the raw
+ * wRoomCollisions bytes -- how we learned the attract demo never
+ * populates them, so headless probes of it always use the colour
+ * classifier).
+ *
+ * Caveat, learned the hard way: resuming a rewind state restores VRAM
+ * but not the banked WRAM the game lives in, so the room LOOKS right
+ * while w1Link reads zeros and scripted input does nothing. States are
+ * good for probing the renderer, not for continuing play.
  */
 #include "gbrt.h"
 #include "platform_sdl.h"
@@ -234,6 +242,20 @@ int main(int argc, char* argv[]) {
                 }
             } else {
                 fprintf(stderr, "frame %lu: scrape declined (LCD off?)\n", i);
+            }
+            if (getenv("VOX_SHOT_DUMP_COLL")) {
+                fprintf(stderr, "coll $CE00:");
+                for (int k = 0; k < 32; k++)
+                    fprintf(stderr, " %02X", ctx->wram[0x0E00 + k]);
+                fprintf(stderr, "\n");
+            }
+            {
+                int live = 0, sm = 0;
+                const char* why = "";
+                voxel_terrain_status(&live, &sm, &why);
+                fprintf(stderr, "frame %lu: terrain %s%s%s\n", i,
+                        live ? "LIVE" : "off",
+                        live ? "" : " -- ", live ? "" : why);
             }
             fprintf(stderr,
                     "frame %lu: scroll=%02X menu=%02X scy=%3u scx=%3u "

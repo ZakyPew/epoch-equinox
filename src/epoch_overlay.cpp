@@ -11,11 +11,17 @@ extern "C" {
 #include "imgui.h"
 
 extern "C" void epoch_rewind_hud_draw(void);
+#if EPOCH_HAVE_VOXEL
+extern "C" void voxel_edit_hud_draw(void);
+#endif
 extern "C" void epoch_achievements_hud_draw(void);
 extern "C" void epoch_secrets_hud_draw(void);
 
 static void draw_overlays(void) {
     epoch_rewind_hud_draw();
+#if EPOCH_HAVE_VOXEL
+    voxel_edit_hud_draw();
+#endif
     epoch_achievements_hud_draw();
     epoch_secrets_hud_draw();
     epoch_panel_draw();
