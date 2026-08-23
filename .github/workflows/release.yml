@@ -63,7 +63,7 @@ jobs:
       - name: Achievements, secrets, typist and camera checks
         run: |
           cd build
-          for t in achievements_test secrets_c_test typist_test chasecam_test cliff_test stream_test splits_test; do
+          for t in achievements_test secrets_c_test typist_test chasecam_test cliff_test stream_test splits_test voxedit_test; do
             cc -O2 -o $t ../tools/$t.c -I ../src \
                -I _deps/gb_recompiled-src/runtime/include \
                $(sdl2-config --cflags) libepoch_support.a _gbrt_build/libgbrt.a \

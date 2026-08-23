@@ -103,6 +103,8 @@ if(EPOCH_WITH_VOXEL)
         src/voxel/voxel_tiles.c
         src/voxel/voxel_oracle.c
         src/voxel/voxel_overrides.c
+        src/voxel/voxel_edit.c
+        src/voxel/voxel_edit_hud.cpp
         src/voxel/voxel_render.c
         src/voxel/voxel_world.c
         src/voxel/voxel_menu.cpp)

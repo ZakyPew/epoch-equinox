@@ -115,6 +115,14 @@ static void write_template(const char* path, bool is_seasons, int group,
     fprintf(stderr, "[VOXEL] wrote override template %s\n", path);
 }
 
+/* Drop the cache so the next lookup re-reads the file. The in-game
+ * editor calls this after writing: the poll compares mtimes, and two
+ * paints inside the same second would otherwise leave the second one
+ * invisible until the clock ticked over. */
+void vox_override_invalidate(void) {
+    g_cache.valid = false;
+}
+
 const uint8_t* vox_override_lookup(bool is_seasons, int group, int room,
                                    const uint8_t* collisions) {
     if (g_cache.valid && g_cache.is_seasons == is_seasons &&

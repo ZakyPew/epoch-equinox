@@ -115,6 +115,7 @@ button labels for Xbox, PlayStation, Switch Pro and Joy-Con.
 | `M` | Mute | — |
 | **`F2`** | **Achievements & Secrets panel** | — |
 | **`F3`** | **Cycle voxel mode** (off → 15° → 30° → 45° → chase cam) | — |
+| **`F4`** | **Sculpt room heights** (voxel modes; number keys paint) | — |
 | **`R`** *(hold)* | **Rewind** — step back through the last ~12 seconds | — |
 | **`F9`** | Jump back to the moment you entered this room | — |
 | **`C`** | Chase cam: swing behind Link (hold to keep following) | **R3** |
@@ -287,14 +288,21 @@ voxel/overrides/ages-0-6a.txt     # game, group, room (hex), next to the binary
 8 rows × 10 characters, one per 16×16 room cell: `.` keep, `_` flat,
 `w` water, `l` low, `m` mid, `h` high. Comments with `#`.
 
-Run with `VOXEL_EDIT=1` and every room you enter that has no override file
-gets a ready-to-edit template written for it — including the
-collision-derived heights as a comment, so you can see what you're
-overriding.
+**You can sculpt from inside the game.** Toggle *Sculpt room heights* in
+the Esc menu's voxel section (or press **F4** in a voxel mode): the cell in
+front of Link glows gold, and the number keys paint it — `1` flat, `2`
+water, `3` low, `4` mid, `5` high, `0` back to whatever collision says.
+Every press rewrites the room's override file for you, atomically, so what
+you sculpt is exactly what the file format above describes — hand edits and
+in-game edits are the same thing, and cells you authored by hand survive
+in-game painting.
 
-**Editing is live.** The file is polled a few times a second while you stand
-in the room, so saving in a text editor reshapes the terrain in front of you
-— no restart, no leaving the room.
+Prefer a text editor? **Editing is live either way.** The file is polled a
+few times a second while you stand in the room, so saving reshapes the
+terrain in front of you — no restart, no leaving the room. `VOXEL_EDIT=1`
+still writes a ready-to-edit template for any room without a file (with the
+collision-derived heights as a comment), and now also starts the player
+with sculpt mode armed.
 
 Colour-only vs the game's own collision data, same frame:
 
@@ -563,10 +571,10 @@ If any of this sounds fun, open an issue or just send a PR:
   chest is the first target), dungeon/large-room mapping, more compound
   structures, and eventually first-person mode. Plain C, one pass, no GPU
   code — the GLES side is already handled.
-- **Room sculpting** (no code!): run with `VOXEL_EDIT=1` and every room
-  you enter writes a ready-to-edit text template; heights are single
-  characters. A curated override pack for the whole overworld would ship
-  as a default.
+- **Room sculpting** (no code!): press F4 in a voxel mode and paint room
+  heights with the number keys — the player writes the override files for
+  you. A curated override pack for the whole overworld would ship as a
+  default.
 - **Mod API** (`src/mod_loader.c`): IPS/BPS/overlays work today; the next
   step is a scripting surface over the games' named WRAM symbols
   (`oracles-disasm` names hundreds — the voxel mode already reads a dozen
