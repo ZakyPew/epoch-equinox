@@ -35,7 +35,8 @@ USER_AGENT = "epoch-equinox-launcher"
 # archives contain empty versions of the first three; overwriting them with
 # those would be harmless today, but skipping them outright means a future
 # release that ships an example mod can never bury someone's own.
-PRESERVED_DIRS = {"roms", "mods", "covers", "saves", "screenshots"}
+PRESERVED_DIRS = {"roms", "mods", "covers", "saves", "save-backups",
+                  "screenshots"}
 # Saves and sculpted rooms sit loose beside the binary.
 PRESERVED_SUFFIXES = {".sav", ".srm", ".state", ".rtc", ".voxel"}
 
