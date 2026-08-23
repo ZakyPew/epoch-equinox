@@ -60,14 +60,17 @@ body/lid real depth, and sort the whole object against Link by one world-space
 footpoint. The workflow and captured-state debugging steps are in
 [`docs/VOXEL_CONTRIBUTING.md`](docs/VOXEL_CONTRIBUTING.md).
 
-### Item icons from the player's ROM — **M** *(parked, honestly)*
-The overlay item tracker names items and tiers in text; the game's own
-sprites would be better. Two dead ends so far, documented in the tree:
-`treasureDisplayData` chains four-plus hops to the wrong sprite, and the
-attract demo never populates the state a capture route needs. The
-remaining route is scripted file-select input, which is slow but not
-impossible. Never commits art — icons rip from the player's own ROM at
-runtime or not at all.
+### Item icons from the player's ROM — **shipped**
+`tools/rip_item_icons.py` boots each installed cart headlessly over the
+player's save, walks the menus by game state, equips every item in the
+bag to a button, and reads each icon out of the HUD's own OAM sprites —
+real palettes, real transparency, no sprite-pointer archaeology. The
+overlay tracker wears them (greyed until the run collects the item) and
+falls back to text for anything unripped. Passive treasures (flippers,
+suit, rings) live on a subscreen the ripper does not visit yet, and the
+Biggoron sword's two-handed icon comes out partial — both keep their
+labels. The icons are cartridge art: gitignored, never committed, never
+shipped.
 
 ---
 

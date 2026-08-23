@@ -575,6 +575,27 @@ alignment guide, and type the "now building" line. Everything it writes is
 a plain file you can still edit by hand — see
 [stream/README.md](stream/README.md).
 
+**Speedrunning:** the Stream page can also switch on a run timer (the
+file's own clock, to hundredths), a split list driven by auto-splits the
+player watches in the game's memory (`splits/`, and they push
+`startorsplit` to LiveSplit's TCP server if you tick that on), an item
+tracker, and an input display. See the
+[v0.6.0 notes](docs/release-notes-v0.6.0.md) for the full tour.
+
+**The tracker can wear the game's own item icons.** They rip from *your*
+ROM, on your machine — the tool boots your cart headlessly, walks the
+game's menus, equips each item and reads its icon out of the HUD's own
+sprites, transparent background and all:
+
+```sh
+python3 tools/rip_item_icons.py
+```
+
+Icons land in `stream/icons/items/` (gitignored — cartridge art never
+leaves your machine), and any cell without one keeps its text label.
+Everything that can sit on a button gets ripped; passive treasures
+(flippers, the mermaid suit, rings) stay text.
+
 ## Roadmap
 
 What's next, what it costs, and what blocks what: **[ROADMAP.md](ROADMAP.md)**.

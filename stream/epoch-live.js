@@ -273,6 +273,7 @@
       var have = hasItem(s.items, it.id);
       var tier = it.tier ? (s[it.tier] || 0) : 0;
       out += '<div class="cell' + (have ? ' has' : '') + '">' +
+             '<img class="ico" alt="" hidden>' +
              '<span class="lb"></span>' +
              (have && tier > 1 ? '<span class="tier">' + tier + '</span>' : '') +
              '</div>';
@@ -287,6 +288,22 @@
          then -- an empty cell should say what it is waiting for. */
       labels[j].textContent =
         (names && lvl > 0 && names[lvl - 1]) ? names[lvl - 1] : it2.s;
+    }
+    /* The game's own icons, if the player ripped them from their ROM
+       (tools/rip_item_icons.py). Cells start text-only and upgrade when
+       the file actually loads, so a missing icon never shows a broken
+       image -- same inverse pattern the plaque icon uses. Ids come from
+       our own table, so the path is safe by construction. */
+    var imgs = box.querySelectorAll('.ico');
+    for (var k = 0; k < imgs.length && k < list.length; k++) {
+      (function (img, id) {
+        var hex = (256 + id).toString(16).slice(-2);
+        img.onload = function () {
+          img.hidden = false;
+          img.parentNode.classList.add('has-icon');
+        };
+        img.setAttribute('src', 'icons/items/' + s.cart + '/' + hex + '.png');
+      })(imgs[k], list[k].id);
     }
   }
 

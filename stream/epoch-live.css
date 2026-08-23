@@ -301,6 +301,20 @@
   overflow:hidden;
 }
 .cell img { width:100%; height:100%; image-rendering:pixelated; }
+/* Cells with a ripped icon (tools/rip_item_icons.py): the game's own
+   art above a small label, greyed until the run collects it. Cells
+   whose icon file is missing drop the class and stay all-text. */
+.cell.has-icon { grid-template-rows:1fr auto; padding:2px; }
+/* The base img rule forces display and would defeat [hidden] -- the
+   same trap .medal-img[hidden] answers above. */
+.cell .ico[hidden] { display:none; }
+.cell.has-icon .ico {
+  width:60%; height:auto; align-self:center; justify-self:center;
+  image-rendering:pixelated;
+  filter:grayscale(1) opacity(.4);
+}
+.cell.has.has-icon .ico { filter:none; }
+.cell.has-icon .lb { font-size:8px; }
 .cell.has {
   color:var(--gold-lit);
   border-color:var(--gold);
