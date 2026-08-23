@@ -428,8 +428,10 @@ emulator writes — kept beside the binary under the cartridge's own name.
 Nothing on that page can lose a file: anything that replaces the save —
 an import, a restore — backs the old one up first into `save-backups/`,
 which self-updates leave untouched. The dialog also shows what is inside
-the save (each file slot's hero, linked/hero status and Game ID), read
-with the same parser the secret generator trusts.
+the save — each file slot's hero, linked/hero status, Game ID, and the
+run at a glance: essences, hearts, rings, deaths, playtime — read with
+the same parser the secret generator trusts, at the same addresses the
+live stream feed reads.
 
 ## Mods
 

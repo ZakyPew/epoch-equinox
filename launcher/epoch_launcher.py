@@ -1078,6 +1078,15 @@ class SavesDialog(QDialog):
                 lab.setStyleSheet("color: #a8b3bd; font-size: 12px; "
                                   "margin-left: 12px;")
                 rows.addWidget(lab)
+                stats = QLabel(
+                    f"{save.essences}/8 essences   ·   "
+                    f"{save.hearts} hearts   ·   "
+                    f"{oracle_secrets.ring_count(save)} rings   ·   "
+                    f"{save.deaths} deaths   ·   "
+                    f"{save.playtime} played")
+                stats.setStyleSheet("color: #6b7680; font-size: 11px; "
+                                    "margin-left: 24px;")
+                rows.addWidget(stats)
 
         backups = save_manager.list_backups(self.runner.root, self.game.id)
         if backups:

@@ -131,6 +131,27 @@ def main() -> int:
     check(sm.export_name("tlozooa").startswith("epoch-tlozooa-"),
           "with a default name that says what it is")
 
+    # -- the progress readout matches the documented endgame saves ------------
+    # tests/saves/README.md states these numbers; the offsets come from
+    # the same wram.s addresses the live stream feed reads.
+    import oracle_secrets
+    ages = oracle_secrets.read_save(AGES_SAV)[0]
+    seasons = oracle_secrets.read_save(SEASONS_SAV)[0]
+    check(ages.essences == 8 and seasons.essences == 8,
+          "essences read 8/8 on both endgame saves")
+    check(ages.hearts == 14 and seasons.hearts == 16,
+          "hearts read 14 and 16, matching the save docs")
+    check(oracle_secrets.ring_count(ages) == 28
+          and oracle_secrets.ring_count(seasons) == 64,
+          "ring counts match (28, and the full 64)")
+    check(ages.deaths == 0 and seasons.deaths == 0,
+          "both deathless, as documented")
+    check(ages.rupees_collected == 9106
+          and seasons.rupees_collected == 12865,
+          "lifetime rupees match to the rupee")
+    check(":" in ages.playtime and ages.playtime.startswith("16"),
+          "playtime renders as hours:minutes")
+
     # -- no ROM, no save: the error explains itself ---------------------------
     bare = Path(tempfile.mkdtemp(prefix="save_manager_bare_"))
     try:

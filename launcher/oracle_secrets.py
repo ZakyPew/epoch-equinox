@@ -224,6 +224,42 @@ class SaveFile:
     def is_hero(self) -> bool:
         return self.c6[0x13] != 0
 
+    # Progress, read at the same offsets the player's stream feed reads
+    # them live (src/epoch_stream.c, addresses from the disassembly's
+    # include/wram.s; the c6 block is WRAM $c6xx, so offset = addr-$c600).
+    # All of them verified against the real endgame saves in tests/saves.
+
+    @property
+    def essences(self) -> int:
+        """wEssencesObtained is a bitmask, at $c6bf (Ages) / $c6bb."""
+        off = 0xBF if self.game == "ages" else 0xBB
+        return bin(self.c6[off]).count("1")
+
+    @property
+    def hearts(self) -> int:
+        """wLinkMaxHealth counts quarter-hearts, at $c6ab / $c6a3."""
+        off = 0xAB if self.game == "ages" else 0xA3
+        return self.c6[off] // 4
+
+    @property
+    def deaths(self) -> int:
+        """wDeathCounter: two bytes of packed BCD, low byte first."""
+        lo, hi = self.c6[0x1E], self.c6[0x1F]
+        return ((hi >> 4) * 1000 + (hi & 0xF) * 100
+                + (lo >> 4) * 10 + (lo & 0xF))
+
+    @property
+    def rupees_collected(self) -> int:
+        """wTotalRupeesCollected, a little-endian word -- lifetime, not
+        the purse."""
+        return self.c6[0x27] | (self.c6[0x28] << 8)
+
+    @property
+    def playtime(self) -> str:
+        """wPlaytimeCounter counts frames at ~60 Hz; shown as h:mm."""
+        seconds = int.from_bytes(self.c6[0x22:0x26], "little") // 60
+        return f"{seconds // 3600}:{seconds // 60 % 60:02d}"
+
 
 def _decode_name(raw: bytes) -> str:
     """Names are stored in the game's text encoding, which keeps ASCII
