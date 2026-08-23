@@ -25,6 +25,10 @@ The player itself is done and distributable — everything below builds on it.
 | **Achievements** | Data-driven packs watched over WRAM, popped as Steam-style toasts over the window; moddable, one text file per pack |
 | **Auto-entered secrets** | The in-game panel walks the password grid and types any secret for you |
 | **Secret generator** | Every code your save can produce — game, ring, and all twenty NPC secrets — generated in the launcher with the game's own cipher |
+| **Stream overlays** | The player writes live game state to disk; OBS-ready layouts (bar, framed, vertical) read it over `file://`, configured from the launcher's Stream page, rendering-tested in CI in a real Chromium |
+| **Speedrun kit** | Auto-splits watched over WRAM drive LiveSplit's TCP server; optional run timer, split list, item tracker and input display on the overlays; routes verified against real finished saves |
+| **In-game sculpting** | F4 in any voxel mode: paint the cell in front of Link with the number keys, Backspace undoes per room; writes the same override files hands do |
+| **Saves** | Import a `.sav` from any emulator (validated by content), export copies, and a backup trail where every replacement is one click to undo |
 | **Quality of life** | 40 ms audio latency, instant boot past the splashes, display options with a live scale readout |
 
 ---
@@ -63,10 +67,14 @@ body/lid real depth, and sort the whole object against Link by one world-space
 footpoint. The workflow and captured-state debugging steps are in
 [`docs/VOXEL_CONTRIBUTING.md`](docs/VOXEL_CONTRIBUTING.md).
 
-### Save import / export — **S**
-The runner already keeps ordinary battery saves (`<title>.sav` beside the
-binary). Add launcher buttons to import a `.sav` from any emulator (with a
-backup of what it replaces) and export the current one.
+### Item icons from the player's ROM — **M** *(parked, honestly)*
+The overlay item tracker names items and tiers in text; the game's own
+sprites would be better. Two dead ends so far, documented in the tree:
+`treasureDisplayData` chains four-plus hops to the wrong sprite, and the
+attract demo never populates the state a capture route needs. The
+remaining route is scripted file-select input, which is slow but not
+impossible. Never commits art — icons rip from the player's own ROM at
+runtime or not at all.
 
 ---
 
@@ -125,8 +133,11 @@ once the codes are proven correct.
 ## How to help
 
 Every item above is open. The ones that need an eye rather than a compiler:
-**room sculpting** (a text file per room, no build step) and **dungeon saves**
-(park a save somewhere interesting, drop it in `tests/saves/`).
+**room sculpting** (now doable from inside the game — F4 and the number
+keys), **dungeon saves** (park a save somewhere interesting, drop it in
+`tests/saves/`), and **eyes on the sculpt HUD** — the gold brush tint and
+its HUD shipped in v0.6.0 verified headlessly but have never been seen in
+a live session; the first person to press F4 should say what looks off.
 
 See [Contributing](README.md#contributing--wed-love-more-hands) for the whole
 project, and the [voxel contributor guide](docs/VOXEL_CONTRIBUTING.md) for the
