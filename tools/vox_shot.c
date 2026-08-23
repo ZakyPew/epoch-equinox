@@ -24,6 +24,18 @@
  * but not the banked WRAM the game lives in, so the room LOOKS right
  * while w1Link reads zeros and scripted input does nothing. States are
  * good for probing the renderer, not for continuing play.
+ *
+ * The route into REAL gameplay is the front door: park a save beside
+ * the binary under the runner's name and script the file select. With
+ * tests/saves/ages-veran-tower.sav as "ZELDA NAYRUAZ8E.sav":
+ *
+ *   ./vox_shot roms/tlozooa.gbc 1600 4 out \
+ *       "650:S:10,1050:S:10,1180:A:10,1320:A:10,1460:A:10"
+ *
+ * is inside Veran's tower with live collisions, camera and input by
+ * frame ~1560 -- the setup that found the large-room fixes below.
+ * Combat makes later frames drift between runs (knockback timing), so
+ * calibrate against rooms where nothing is chasing you.
  */
 #include "gbrt.h"
 #include "platform_sdl.h"

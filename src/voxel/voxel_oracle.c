@@ -201,6 +201,18 @@ bool vox_oracle_read(GBContext* ctx, VoxOracleState* st) {
                                        VOX_ROOM_H);
     st->off_x = vox_oracle_page_offset(wram0(ctx, A_wScreenOffsetX),
                                        256 - VOX_ROOM_W);
+    /* That decoding is for rooms whose camera is parked at zero -- one
+     * screen, where the byte can only mean shake or page. A large
+     * scrolling room keeps its camera in hCameraY and uses wScreenOffset
+     * as BG-page bookkeeping relative to it (Veran's tower holds -48
+     * there at rest); treating that as displacement sampled terrain
+     * three rows off. Room space needs only the camera in those rooms --
+     * verified against Link's on-screen position: room y minus camera
+     * plus the HUD band lands exactly where the flat frame draws him. */
+    if (st->cam_x != 0 || st->cam_y != 0) {
+        st->off_x = 0;
+        st->off_y = 0;
+    }
     st->is_seasons = prof->is_seasons;
     st->active_group = wram0(ctx, prof->group_addr);
     st->active_room = wram0(ctx, prof->room_addr);

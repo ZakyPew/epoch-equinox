@@ -37,25 +37,18 @@ The player itself is done and distributable — everything below builds on it.
 
 Highest value per unit of work, and nothing here is blocked.
 
-### Dungeon terrain — **S** *(no longer blocked)*
-`tests/saves/` has two endgame files parked inside a dungeon, and
-`VOX_DUMP_ROOM=1` prints what the renderer works from. That evidence
-corrects an earlier guess made from a screenshot: **the collision data
-indoors is fine.** In Veran's tower the gate passes and the grid comes back
-as a clean room — walls `$0F` classified solid, floor `$00` flat, doorways
-where doorways are, `$FF` boundary fill down the unused column:
-
-```
-  0F 0F 0F 0F 0F 0F 00 00 00 0F 0F 0F 0F 0F 0F FF   |OOOOOO...OOOOOO.|
-  0F 00 00 00 00 00 00 00 00 00 00 00 00 00 0F FF   |O.............O.|
-```
-
-So this is a *rendering* job, not a classification one. Two things to chase:
-the room reads 15 columns wide against the overworld's 10, and Link's
-camera-space anchor sits at y=169 in a room the height field treats as 128
-tall — a large scrolling room, which the screen→room mapping was never
-exercised against. Link's sprite also comes out as an untextured slab in
-there (`docs/dungeon-chase.png`), which is a billboard problem, not terrain.
+### Dungeon terrain — **shipped, with a route for the rest**
+The collision data indoors was always fine; the rendering caught up.
+Large scrolling rooms (15 columns, a camera loose in `hCameraY`) now map
+screen to room correctly — `wScreenOffset` is page bookkeeping in those
+rooms, not displacement — sprites the game parks invisibly behind the HUD
+bar no longer billboard as phantom pillars on the horizon, and Link
+renders textured (`docs/dungeon-chase.png` is a current capture inside
+Veran's tower). The route that made it iterable is documented at the top
+of `tools/vox_shot.c`: script the file select over a parked test save and
+you are inside a dungeon with live state by frame ~1560, headless. What
+remains here is polish an eye will find faster than a probe: play a
+dungeon in chase cam and report what looks wrong.
 
 ### Dynamic props — **S**
 The opening-scene chest demonstrates why an object cannot be identified from
