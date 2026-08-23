@@ -35,3 +35,7 @@ shot_pylauncher.sh
 # Written by the player at runtime for the stream overlays.
 stream/live.js
 stream/live.js.tmp
+
+# Icons ripped from the player's own ROM (tools/rip_item_icons.py).
+# Cartridge art: never committed, never shipped.
+stream/icons/items/

@@ -183,8 +183,15 @@ def run(shots: Path | None) -> int:
                 page = browser.new_page(viewport={"width": w, "height": h})
                 errors: list[str] = []
                 page.on("pageerror", lambda e: errors.append(str(e)))
+                # A tracker cell probes for its ripped item icon and
+                # falls back to text when the file is absent -- absent
+                # is the shipped state (icons rip from the player's own
+                # ROM and are never committed), so those file-not-found
+                # console entries are the design working, not an error.
                 page.on("console",
-                        lambda m: errors.append(m.text) if m.type == "error" else None)
+                        lambda m: errors.append(m.text)
+                        if m.type == "error"
+                        and "ERR_FILE_NOT_FOUND" not in m.text else None)
                 page.goto((STREAM / name).as_uri())
                 page.wait_for_timeout(1400)
                 live.write_text(feed(2, pad=0b00010001), encoding="utf-8")
