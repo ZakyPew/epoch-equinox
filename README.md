@@ -407,6 +407,27 @@ into its memory, so if the game disagrees, the game wins. A file that has never 
 secret has no Game ID yet; its codes are accepted by any file, which is
 the game's own behaviour, and the dialog says so when it applies.
 
+## Saves
+
+Your progress is a plain battery save — the same `.sav` any Game Boy
+emulator writes — kept beside the binary under the cartridge's own name.
+**Saves** in the launcher menu manages it:
+
+- **Import** a save from anywhere: another emulator, another machine, a
+  downloaded 100% file. It is checked before it lands — a Seasons save
+  on the Ages page is refused by content, not by filename — and works
+  even before your first in-game save, since the file's name is derived
+  from the ROM the same way the player derives it.
+- **Export a copy** to take your file somewhere else.
+- **Back up now**, and browse the backup trail with one-click
+  **Restore**.
+
+Nothing on that page can lose a file: anything that replaces the save —
+an import, a restore — backs the old one up first into `save-backups/`,
+which self-updates leave untouched. The dialog also shows what is inside
+the save (each file slot's hero, linked/hero status and Game ID), read
+with the same parser the secret generator trusts.
+
 ## Mods
 
 Mods are applied to the extracted ROM *before* the cart boots, which is why the

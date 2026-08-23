@@ -25,6 +25,7 @@ import sys
 import tempfile
 import threading
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -101,6 +102,7 @@ from PySide6.QtWidgets import (
 )
 
 import oracle_secrets
+import save_manager
 import stream_config
 import updater
 from gamepad import GamepadBridge
@@ -426,7 +428,7 @@ def draw_seasons_motif(pr: QPainter, c: QPointF, r: float, col: QColor) -> None:
 # --------------------------------------------------------------------------
 
 MENU_ITEMS = [
-    "Start game", "Mods", "Achievements", "Secrets", "Install ROM",
+    "Start game", "Mods", "Achievements", "Secrets", "Saves", "Install ROM",
     "Stream", "Updates", "Exit",
 ]
 
@@ -965,6 +967,230 @@ class SecretsDialog(QDialog):
 
 
 # --------------------------------------------------------------------------
+# saves dialog
+# --------------------------------------------------------------------------
+
+
+def open_in_file_manager(d: Path) -> None:
+    """Open a folder in the system file manager, creating it first so the
+    window that appears is a usable drop target rather than an error."""
+    d.mkdir(parents=True, exist_ok=True)
+    if os.name == "nt":
+        os.startfile(str(d))  # noqa: S606 - opening our own folder
+    elif sys.platform == "darwin":
+        subprocess.Popen(["open", str(d)])
+    else:
+        subprocess.Popen(["xdg-open", str(d)])
+
+
+class SavesDialog(QDialog):
+    """Import, export and back up this game's battery save.
+
+    The rule the whole dialog obeys: nothing here loses a file. Anything
+    that replaces the save -- an import, a restore -- backs the old one
+    up first, and the backups are listed right below with their own
+    Restore buttons, so every step is one click to undo.
+    """
+
+    def __init__(self, runner: Runner, game: Game, parent=None):
+        super().__init__(parent)
+        self.runner = runner
+        self.game = game
+        self.setWindowTitle(f"Saves - {game.title}")
+        self.setMinimumSize(560, 460)
+        self.setStyleSheet(DIALOG_STYLE)
+
+        layout = QVBoxLayout(self)
+        self.scroll = QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setStyleSheet("QScrollArea { border: 0; }")
+        layout.addWidget(self.scroll, 1)
+
+        note = QLabel(
+            "Anything that replaces the save backs the old one up first "
+            "(save-backups/, next to the game). Swap saves while the game "
+            "is closed — it only reads the file at launch and overwrites "
+            "it when you save in game."
+        )
+        note.setWordWrap(True)
+        note.setStyleSheet("color: #8b97a2; font-size: 11px;")
+        layout.addWidget(note)
+
+        row = QHBoxLayout()
+        imp = QPushButton("Import Save…")
+        imp.clicked.connect(self.import_save)
+        exp = QPushButton("Export a Copy…")
+        exp.clicked.connect(self.export_save)
+        back = QPushButton("Back Up Now")
+        back.clicked.connect(self.backup_now)
+        folder = QPushButton("Open Save Folder")
+        folder.clicked.connect(
+            lambda: open_in_file_manager(self.runner.root))
+        for b in (imp, exp, back, folder):
+            row.addWidget(b)
+        row.addStretch(1)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        buttons.rejected.connect(self.reject)
+        row.addWidget(buttons)
+        layout.addLayout(row)
+
+        self.rebuild()
+
+    # -- state ------------------------------------------------------------
+
+    def save_path(self) -> Path | None:
+        return save_manager.current_save(
+            self.runner.root, self.game.id, self.game.rom_path)
+
+    def rebuild(self) -> None:
+        inner = QWidget()
+        rows = QVBoxLayout(inner)
+
+        sav = self.save_path()
+        if sav is None:
+            head = QLabel(
+                "No save file yet. Play once and save in game, or import "
+                "one below — a save from any emulator works, it is the "
+                "same battery file."
+            )
+            head.setWordWrap(True)
+            rows.addWidget(head)
+        else:
+            st = sav.stat()
+            when = datetime.fromtimestamp(st.st_mtime).strftime(
+                "%Y-%m-%d %H:%M")
+            head = QLabel(f"<b>{sav.name}</b>   ·   {st.st_size:,} bytes"
+                          f"   ·   saved {when}")
+            head.setTextFormat(Qt.TextFormat.RichText)
+            rows.addWidget(head)
+            for save in oracle_secrets.read_save(sav):
+                badges = []
+                if save.is_hero:
+                    badges.append("hero's game")
+                elif save.is_linked:
+                    badges.append("linked game")
+                if save.game_id:
+                    badges.append(f"Game ID {save.game_id:04X}")
+                text = f"File {save.slot + 1}:  {save.hero_name}"
+                if badges:
+                    text += "   ·   " + "   ·   ".join(badges)
+                lab = QLabel(text)
+                lab.setStyleSheet("color: #a8b3bd; font-size: 12px; "
+                                  "margin-left: 12px;")
+                rows.addWidget(lab)
+
+        backups = save_manager.list_backups(self.runner.root, self.game.id)
+        if backups:
+            head = QLabel("Backups")
+            head.setStyleSheet("font-size: 13px; font-weight: bold; "
+                               "color: #d0aa55; margin-top: 12px;")
+            rows.addWidget(head)
+        for bak in backups[:20]:
+            row = QHBoxLayout()
+            lab = QLabel(f"{bak.name}   ·   {bak.stat().st_size:,} bytes")
+            lab.setStyleSheet("color: #a8b3bd; font-size: 12px;")
+            row.addWidget(lab)
+            row.addStretch(1)
+            btn = QPushButton("Restore")
+            btn.setStyleSheet("padding: 4px 12px; font-size: 11px;")
+            btn.clicked.connect(
+                lambda _=False, b=bak: self.restore(b))
+            row.addWidget(btn)
+            rows.addLayout(row)
+        if len(backups) > 20:
+            more = QLabel(f"…and {len(backups) - 20} older, in the folder.")
+            more.setStyleSheet("color: #6b7680; font-size: 11px;")
+            rows.addWidget(more)
+
+        rows.addStretch(1)
+        self.scroll.setWidget(inner)
+
+    # -- operations -------------------------------------------------------
+
+    def import_save(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self, f"Import a {self.game.title} save", "",
+            "Battery saves (*.sav *.srm);;All files (*)")
+        if not path:
+            return
+        source = Path(path)
+        try:
+            verdict = save_manager.check_import(source, self.game.id)
+        except save_manager.SaveError as exc:
+            QMessageBox.warning(self, "Not imported", str(exc))
+            return
+        if verdict.empty:
+            answer = QMessageBox.question(
+                self, "No files inside",
+                f"{source.name} has no recognizable file slots — it may "
+                "be a fresh save, or not an Oracle save at all. Import "
+                "it anyway?")
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+        elif self.save_path() is not None:
+            names = ", ".join(
+                s.hero_name for s in verdict.slots) or "no one"
+            answer = QMessageBox.question(
+                self, "Replace the current save?",
+                f"{source.name} carries: {names}.\n\nYour current save "
+                "is backed up first, so this is one click to undo.")
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+        try:
+            save_manager.import_save(
+                self.runner.root, self.game.id, self.game.rom_path, source)
+        except (save_manager.SaveError, OSError) as exc:
+            QMessageBox.warning(self, "Not imported", str(exc))
+            return
+        self.rebuild()
+
+    def export_save(self) -> None:
+        sav = self.save_path()
+        if sav is None:
+            QMessageBox.information(
+                self, "Nothing to export", "There is no save file yet.")
+            return
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export a copy of the save",
+            save_manager.export_name(self.game.id),
+            "Battery saves (*.sav);;All files (*)")
+        if not path:
+            return
+        try:
+            save_manager.export_save(sav, Path(path))
+        except OSError as exc:
+            QMessageBox.warning(self, "Could not export", str(exc))
+
+    def backup_now(self) -> None:
+        sav = self.save_path()
+        if sav is None:
+            QMessageBox.information(
+                self, "Nothing to back up", "There is no save file yet.")
+            return
+        try:
+            save_manager.backup(self.runner.root, self.game.id, sav)
+        except OSError as exc:
+            QMessageBox.warning(self, "Could not back up", str(exc))
+            return
+        self.rebuild()
+
+    def restore(self, bak: Path) -> None:
+        answer = QMessageBox.question(
+            self, "Restore this backup?",
+            f"{bak.name} becomes the game's save. What it replaces is "
+            "backed up first.")
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            save_manager.restore(
+                self.runner.root, self.game.id, self.game.rom_path, bak)
+        except (save_manager.SaveError, OSError) as exc:
+            QMessageBox.warning(self, "Not restored", str(exc))
+            return
+        self.rebuild()
+
+
+# --------------------------------------------------------------------------
 # achievements dialog
 # --------------------------------------------------------------------------
 
@@ -1170,16 +1396,7 @@ class ModsDialog(QDialog):
         self.rebuild()
 
     def open_mods_folder(self) -> None:
-        """Open mods/ in the system file manager, creating it first so the
-        window that appears is the right drop target rather than an error."""
-        d = self.runner.mods_dir
-        d.mkdir(parents=True, exist_ok=True)
-        if os.name == "nt":
-            os.startfile(str(d))  # noqa: S606 - opening our own folder
-        elif sys.platform == "darwin":
-            subprocess.Popen(["open", str(d)])
-        else:
-            subprocess.Popen(["xdg-open", str(d)])
+        open_in_file_manager(self.runner.mods_dir)
 
     def rebuild(self) -> None:
         """(Re)scan mods/ and rebuild the list. Wired to Refresh so 'drop
@@ -1919,6 +2136,8 @@ class MainWindow(QWidget):
             AchievementsDialog(self.runner, game, self).exec()
         elif item == "Secrets":
             SecretsDialog(self.runner, game, self).exec()
+        elif item == "Saves":
+            SavesDialog(self.runner, game, self).exec()
         elif item == "Mods":
             if game.playable:
                 ModsDialog(self.runner, game, self).exec()

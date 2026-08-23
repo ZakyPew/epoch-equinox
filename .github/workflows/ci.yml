@@ -73,6 +73,12 @@ jobs:
       - name: Stream settings round trips
         run: python3 tools/stream_config_test.py
 
+      # Save import/export replaces the one file a player cannot get
+      # back, so its backup trail is proven against the real endgame
+      # saves in tests/saves before any UI sits on top of it.
+      - name: Save import/export round trips
+        run: python3 tools/save_manager_test.py
+
       # The overlays are the part of this whose failures an audience
       # sees, and they were the part with no automated check -- a panel
       # that never hid itself shipped that way. Chromium loads them over
