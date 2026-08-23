@@ -136,6 +136,8 @@ int  vox_edit_pulse(void);   /* tint blend, /256 */
 char vox_edit_cell(void);
 bool vox_edit_room(bool* is_seasons, int* group, int* room);
 bool vox_edit_paint(char code);
+bool vox_edit_undo(void);        /* newest paint in the tracked room */
+int  vox_edit_undo_count(void);  /* undoable paints in the tracked room */
 
 /* One 16x16 vegetation object for the chase camera. The live tile art is
  * kept verbatim. Full trees split into canopy/trunk geometry and low

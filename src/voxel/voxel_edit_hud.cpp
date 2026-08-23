@@ -30,7 +30,7 @@ extern "C" void voxel_edit_hud_draw(void) {
     const Uint8* keys = SDL_GetKeyboardState(NULL);
     if (!keys) return;
 
-    static bool p_f4, p_1, p_2, p_3, p_4, p_5, p_0;
+    static bool p_f4, p_1, p_2, p_3, p_4, p_5, p_0, p_bksp;
 
     /* Sculpting is a voxel-mode tool; in flat mode F4 does nothing
      * rather than arming an invisible editor. */
@@ -60,6 +60,14 @@ extern "C" void voxel_edit_hud_draw(void) {
             }
             toast_frames = 90;
         }
+    }
+    if (edge(keys, SDL_SCANCODE_BACKSPACE, &p_bksp)) {
+        if (vox_edit_undo()) {
+            snprintf(toast, sizeof(toast), "undid last paint");
+        } else {
+            snprintf(toast, sizeof(toast), "nothing to undo in this room");
+        }
+        toast_frames = 90;
     }
 
     bool is_seasons; int group, room;
@@ -99,7 +107,15 @@ extern "C" void voxel_edit_hud_draw(void) {
         } else {
             ImGui::TextDisabled("walk into a room to start");
         }
-        ImGui::TextDisabled("1 flat  2 water  3 low  4 mid  5 high  0 keep");
+        int undoable = vox_edit_undo_count();
+        if (undoable > 0) {
+            ImGui::TextDisabled(
+                "1 flat  2 water  3 low  4 mid  5 high  0 keep  "
+                "Bksp undo (%d)", undoable);
+        } else {
+            ImGui::TextDisabled(
+                "1 flat  2 water  3 low  4 mid  5 high  0 keep");
+        }
         if (toast_frames > 0) {
             toast_frames--;
             ImGui::TextColored(ImVec4(0.56f, 0.84f, 0.66f, 1.0f),

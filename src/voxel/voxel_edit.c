@@ -225,16 +225,73 @@ static bool ve_write(void) {
     return true;
 }
 
+/* Undo: every paint that changed something remembers what it replaced.
+ * Popping is per room -- ve_write regenerates the collision reference
+ * comment from the room being tracked, so writing a file for a room you
+ * are no longer standing in would stamp it with the wrong room's
+ * collisions. Edits made elsewhere stay on the stack; walk back to that
+ * room and they are undoable again. */
+#define VE_UNDO_MAX 128
+static struct ve_edit {
+    bool is_seasons;
+    int  group, room;
+    int  col, row;
+    char prev;
+} g_undo[VE_UNDO_MAX];
+static int g_undo_n = 0;
+
+static bool ve_edit_here(const struct ve_edit* e) {
+    return e->is_seasons == g_cur.is_seasons &&
+           e->group == g_cur.group && e->room == g_cur.room;
+}
+
+int vox_edit_undo_count(void) {
+    if (!g_on || !g_cur.valid) return 0;
+    int n = 0;
+    for (int i = 0; i < g_undo_n; i++) {
+        if (ve_edit_here(&g_undo[i])) n++;
+    }
+    return n;
+}
+
+bool vox_edit_undo(void) {
+    if (!g_on || !g_cur.valid || !g_grid_room_valid) return false;
+    for (int i = g_undo_n - 1; i >= 0; i--) {
+        if (!ve_edit_here(&g_undo[i])) continue;
+        struct ve_edit e = g_undo[i];
+        memmove(&g_undo[i], &g_undo[i + 1],
+                (size_t)(g_undo_n - i - 1) * sizeof(g_undo[0]));
+        g_undo_n--;
+        g_grid[e.row][e.col] = e.prev;
+        if (!ve_write()) return false;
+        vox_override_invalidate();
+        return true;
+    }
+    return false;                        /* nothing painted here yet */
+}
+
 bool vox_edit_paint(char code) {
     if (!g_on || !g_cur.valid || !g_grid_room_valid) return false;
     if (!strchr("._wlmh", code)) return false;
     if (g_grid[g_cur.row][g_cur.col] == code) return true;  /* nothing to do */
+    char prev = g_grid[g_cur.row][g_cur.col];
     g_grid[g_cur.row][g_cur.col] = code;
     if (!ve_write()) {
         fprintf(stderr, "[VOXEL] cannot write override for room %d-%02x\n",
                 g_cur.group, g_cur.room);
         return false;
     }
+    if (g_undo_n == VE_UNDO_MAX) {       /* forget the oldest, keep painting */
+        memmove(g_undo, g_undo + 1, sizeof(g_undo) - sizeof(g_undo[0]));
+        g_undo_n--;
+    }
+    g_undo[g_undo_n].is_seasons = g_cur.is_seasons;
+    g_undo[g_undo_n].group = g_cur.group;
+    g_undo[g_undo_n].room = g_cur.room;
+    g_undo[g_undo_n].col = g_cur.col;
+    g_undo[g_undo_n].row = g_cur.row;
+    g_undo[g_undo_n].prev = prev;
+    g_undo_n++;
     /* mtime has one-second granularity; two paints in the same second
      * must not leave the second invisible until the clock ticks. */
     vox_override_invalidate();

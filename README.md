@@ -115,7 +115,7 @@ button labels for Xbox, PlayStation, Switch Pro and Joy-Con.
 | `M` | Mute | — |
 | **`F2`** | **Achievements & Secrets panel** | — |
 | **`F3`** | **Cycle voxel mode** (off → 15° → 30° → 45° → chase cam) | — |
-| **`F4`** | **Sculpt room heights** (voxel modes; number keys paint) | — |
+| **`F4`** | **Sculpt room heights** (voxel modes; number keys paint, `Bksp` undoes) | — |
 | **`R`** *(hold)* | **Rewind** — step back through the last ~12 seconds | — |
 | **`F9`** | Jump back to the moment you entered this room | — |
 | **`C`** | Chase cam: swing behind Link (hold to keep following) | **R3** |
@@ -292,10 +292,13 @@ voxel/overrides/ages-0-6a.txt     # game, group, room (hex), next to the binary
 the Esc menu's voxel section (or press **F4** in a voxel mode): the cell in
 front of Link glows gold, and the number keys paint it — `1` flat, `2`
 water, `3` low, `4` mid, `5` high, `0` back to whatever collision says.
+**Backspace** undoes your paints in the room you are standing in, newest
+first — paints made in other rooms wait on the stack until you walk back.
 Every press rewrites the room's override file for you, atomically, so what
 you sculpt is exactly what the file format above describes — hand edits and
 in-game edits are the same thing, and cells you authored by hand survive
-in-game painting.
+in-game painting (undo puts back exactly what each paint replaced,
+including hand-authored values).
 
 Prefer a text editor? **Editing is live either way.** The file is polled a
 few times a second while you stand in the room, so saving reshapes the

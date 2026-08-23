@@ -149,6 +149,41 @@ int main(void) {
               "alongside the new paint");
     }
 
+    /* -- undo walks the paint trail backwards, per room --------------------- *
+     * The sections above left a trail: in room 6a, mid onto (5,3), high
+     * onto (4,4), then keep back onto (5,3); in room 1b, water onto a
+     * hand-authored 'l' cell. Undo must pop each room's own edits,
+     * newest first, and leave the other room's alone. */
+    {
+        /* Still standing in room 1b, where one paint happened. */
+        vox_edit_track(false, 0, 0x1b, 4, 0, 1, collisions);
+        CHECK(vox_edit_undo_count() == 1, "room 1b has one undoable paint");
+        CHECK(vox_edit_undo(), "and undoing it succeeds");
+        const uint8_t* ov = vox_override_lookup(false, 0, 0x1b, collisions);
+        CHECK(ov && ov[0 * 10 + 5] == VOX_H_LOW,
+              "the hand-authored value it painted over comes back");
+        CHECK(!vox_edit_undo(),
+              "a second undo here is refused: room 6a's edits are not ours");
+
+        /* Back to room 6a: its three paints unwind newest-first. */
+        stand(4, 3, 1);
+        CHECK(vox_edit_undo_count() == 3, "room 6a still holds its three");
+        CHECK(vox_edit_undo(), "undo one");
+        ov = vox_override_lookup(false, 0, 0x6a, collisions);
+        CHECK(ov && ov[3 * 10 + 5] == VOX_H_MID,
+              "the keep-erase reverts: mid is back");
+        CHECK(vox_edit_undo(), "undo two");
+        ov = vox_override_lookup(false, 0, 0x6a, collisions);
+        CHECK(ov && ov[4 * 10 + 4] == 0xFF,
+              "the high paint reverts to keep");
+        CHECK(vox_edit_undo(), "undo three");
+        ov = vox_override_lookup(false, 0, 0x6a, collisions);
+        CHECK(ov && ov[3 * 10 + 5] == 0xFF,
+              "the first paint reverts too: the room is untouched again");
+        CHECK(!vox_edit_undo() && vox_edit_undo_count() == 0,
+              "and the trail is empty");
+    }
+
     /* -- the pulse stays in its band, and off means off again --------------- */
     {
         for (int i = 0; i < 130; i++) {
@@ -163,6 +198,7 @@ int main(void) {
         vox_edit_set_enabled(false);
         CHECK(!vox_edit_cursor(NULL, NULL), "disabling clears the brush");
         CHECK(!vox_edit_paint('m'), "and painting is refused again");
+        CHECK(!vox_edit_undo(), "and so is undo");
     }
 
     if (failures) { printf("%d check(s) FAILED\n", failures); return 1; }
