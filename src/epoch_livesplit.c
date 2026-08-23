@@ -7,6 +7,9 @@
 #ifdef _WIN32
 #include <winsock2.h>
 #include <ws2tcpip.h>
+#ifdef _MSC_VER
+#pragma comment(lib, "ws2_32.lib")
+#endif
 typedef SOCKET es_sock;
 #define ES_INVALID INVALID_SOCKET
 #define es_close closesocket
@@ -83,6 +86,11 @@ static void es_begin(void) {
     /* Splits are tiny and latency matters more than packing them. */
     int one = 1;
     setsockopt(s, IPPROTO_TCP, TCP_NODELAY, (const char*)&one, sizeof(one));
+#ifdef SO_NOSIGPIPE
+    /* macOS has no MSG_NOSIGNAL; without this, LiveSplit closing while
+     * we write would SIGPIPE the whole player. */
+    setsockopt(s, SOL_SOCKET, SO_NOSIGPIPE, (const char*)&one, sizeof(one));
+#endif
 
     struct sockaddr_in addr;
     memset(&addr, 0, sizeof(addr));
@@ -142,8 +150,8 @@ static void es_send(const char* cmd) {
     int sent = send(g_sock, line, n, 0);
 #else
     /* No SIGPIPE: LiveSplit closing while we write must not kill the
-     * player. MSG_NOSIGNAL where it exists, SO_NOSIGPIPE is set on the
-     * platforms that want that instead. */
+     * player. MSG_NOSIGNAL where it exists; es_begin set SO_NOSIGPIPE
+     * on the socket for the platforms that want that instead. */
 #ifdef MSG_NOSIGNAL
     int sent = (int)send(g_sock, line, (size_t)n, MSG_NOSIGNAL);
 #else
