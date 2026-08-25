@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Voxel contributor guide
+    url: https://github.com/ZakyPew/epoch-equinox/blob/main/docs/VOXEL_CONTRIBUTING.md
+    about: Read the renderer workflow, debug flags, and asset safety rules.
+  - name: Contributor starter tasks
+    url: https://github.com/ZakyPew/epoch-equinox/blob/main/docs/CONTRIBUTOR_STARTER_TASKS.md
+    about: Pick a small scoped task with clear acceptance criteria.

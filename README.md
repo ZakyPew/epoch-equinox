@@ -553,9 +553,7 @@ the patch chain, and every runtime modification is a reviewable patch file
 in `patches/`. `src/` and `launcher/` are the project's own code.
 
 If you are joining specifically to improve the 3D mode, start with the
-**[voxel contributor guide](docs/VOXEL_CONTRIBUTING.md)**. It maps the render
-pipeline, gives the fast screenshot/test loop, and explains how to distinguish
-terrain, background objects and OAM sprites before writing geometry.
+**[CONTRIBUTING.md](CONTRIBUTING.md)** and the **[voxel contributor starter tasks](docs/CONTRIBUTOR_STARTER_TASKS.md)**. They point to focused work that can be reviewed independently. The **[voxel contributor guide](docs/VOXEL_CONTRIBUTING.md)** maps the render pipeline, gives the fast screenshot/test loop, and explains how to distinguish terrain, background objects and OAM sprites before writing geometry.
 
 If any of this sounds fun, open an issue or just send a PR:
 
