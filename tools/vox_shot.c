@@ -36,6 +36,21 @@
  * frame ~1560 -- the setup that found the large-room fixes below.
  * Combat makes later frames drift between runs (knockback timing), so
  * calibrate against rooms where nothing is chasing you.
+ *
+ * A NEW GAME is reachable too (for the scripted opening scenes, which
+ * no save can revisit). With any save staged that has a free slot 2:
+ *
+ *   "650:S:10,1050:S:10,1160:D:8,1220:A:10,1620:A:10,1950:A:8,
+ *    2010:S:10,2500:A:10,2900:D:8,2960:A:10,4050:A:10"
+ *
+ * walks file select -> NEW GAME -> name entry (types "A", Start jumps
+ * to OK, A confirms) -> picks the new file -> message speed, and hands
+ * over control in the opening forest around frame ~6560 after the
+ * intro text (mash A every ~400 frames through it). Story scenes from
+ * there advance on more A presses and U-walks; they run on the game's
+ * script, so they stay frame-stable until the first free-roaming
+ * enemies. NOTE: the route writes a real file into slot 2 of the
+ * staged save -- stage a copy, never a player's own file.
  */
 #include "gbrt.h"
 #include "platform_sdl.h"
