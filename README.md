@@ -39,6 +39,20 @@ third-person chase camera that follows Link through the world in perspective.
   <img src="docs/chase-cam.png" alt="Chase camera: three perspective views" width="900">
 </p>
 
+## What's inside
+
+| | |
+|---|---|
+| **Player** | Both carts native from one binary; savestates, rewind (~12 s), shader presets, SGB borders, controller remapping, 40 ms audio |
+| **Voxel mode** | Tilted dioramas and a third-person chase camera built from the game's own collision data, at 3× internal resolution — dungeons included, with distance fog and live-tunable look (`voxel/tuning.ini`) |
+| **Sculpting** | Press F4 and paint room heights in-game (Backspace undoes); the same plain text files hand editors use |
+| **Launcher** | Cover art, ROM install, IPS/BPS mods, controller navigation, self-update that never touches your saves |
+| **Achievements** | Data-driven packs watched over the game's memory, Steam-style toasts, custom icons, a browser in launcher and Esc menu |
+| **Secrets** | Every code your save can produce, generated with the game's own cipher — and the panel can type them into the grid for you |
+| **Saves** | Import from any emulator (validated by content), export, and a backup trail where every replacement is one click to undo — each slot's essences, hearts, rings, deaths and playtime at a glance |
+| **Streaming** | OBS overlays fed live by the player: framed layouts with a real hole for the game, achievement cards, and a Stream page in the launcher to configure it all |
+| **Speedrunning** | Auto-splits that drive LiveSplit, run timer, split list, input display, and an item tracker that can wear icons ripped from your own ROM |
+
 ## Quick start
 
 **Easiest: grab a build from [Releases](../../releases)** (or the latest
