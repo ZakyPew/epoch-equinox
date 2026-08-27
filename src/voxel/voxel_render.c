@@ -98,6 +98,8 @@ static const VoxCam VOX_CAMS[VOXEL_MODE_COUNT] = {
     .cliff_unify = 1.0f,                    \
     .fog_start    = 70.0f,                  \
     .fog_max      = 150.0f,                 \
+    .bevel        = 0.55f,                  \
+    .dof          = 0.55f,                  \
 }
 
 static VoxelTuning g_tune = VOX_TUNE_INIT;
@@ -152,6 +154,7 @@ void voxel_tuning_save(void) {
             g_tune.chase_hpx, g_tune.chase_follow,
             g_tune.chase_recenter, g_tune.cliff_unify, g_tune.fog_start,
             g_tune.fog_max);
+    fprintf(f, "bevel=%.3f\ndof=%.3f\n", g_tune.bevel, g_tune.dof);
     fclose(f);
     fprintf(stderr, "[VOXEL] tuning saved to %s\n", TUNE_PATH);
 }
@@ -181,6 +184,8 @@ void voxel_tuning_load(void) {
         else if (!strcmp(key, "cliff_unify")) g_tune.cliff_unify = val;
         else if (!strcmp(key, "fog_start"))    g_tune.fog_start    = val;
         else if (!strcmp(key, "fog_max"))      g_tune.fog_max      = val;
+        else if (!strcmp(key, "bevel"))        g_tune.bevel        = val;
+        else if (!strcmp(key, "dof"))          g_tune.dof          = val;
     }
     fclose(f);
     fprintf(stderr, "[VOXEL] tuning loaded from %s\n", TUNE_PATH);
@@ -226,6 +231,94 @@ static inline uint32_t shade(uint32_t c, int mul /* 0..~272 */) {
     if (g > 255) g = 255;
     if (b > 255) b = 255;
     return 0xFF000000u | (b << 16) | (g << 8) | r;
+}
+
+/* The pixel-cube bevel: treat every source pixel as a tiny block by
+ * lighting its top-left edge and shading its bottom-right one, from the
+ * fractional position of a sample inside its texel. This is what turns
+ * smooth extruded terrain into the built-from-cubes look -- the art's
+ * own colours still do all the drawing, the edges only modulate them. */
+static inline uint32_t bevel_px(uint32_t c, float u, float v) {
+    if (g_tune.bevel <= 0.01f) return c;
+    float fu = u - (float)(int)u;
+    float fv = v - (float)(int)v;
+    const float e = 0.30f;
+    int k = (int)(g_tune.bevel * 44.0f);
+    if (fu > 1.0f - e || fv > 1.0f - e) return shade(c, 256 - k);
+    if (fu < e || fv < e) return shade(c, 256 + (k * 3) / 4);
+    return c;
+}
+
+/* Tilt-shift depth of field: a separable blur whose radius grows with
+ * distance from a focus row, zero inside the focus band. This is the
+ * diorama-photo look -- the world is sharp where the subject stands and
+ * melts a little at the frame's edges. Runs on the world band only; the
+ * HUD and dialog are composited after and stay crisp. */
+static uint32_t s_dof_tmp[GB_FRAMEBUFFER_SIZE * VOX_MAX_SCALE * VOX_MAX_SCALE];
+
+static inline int dof_radius(int Y, int focus, int OH, int S) {
+    float t = (float)(Y - focus) / ((float)OH * 0.40f);
+    if (t < 0.0f) t = -t;
+    t -= 0.28f;                       /* the sharp band around the focus */
+    if (t <= 0.0f) return 0;
+    float r = t * t * g_tune.dof * 6.0f * (float)S;
+    int ri = (int)r;
+    int rmax = 3 * S;
+    return ri > rmax ? rmax : ri;
+}
+
+static void vox_tilt_shift(uint32_t* out, int OW, int OH, int S,
+                           int top, int focus) {
+    if (g_tune.dof <= 0.01f) return;
+    /* Horizontal pass into the temp buffer, sliding-window box sum. */
+    for (int Y = top; Y < OH; Y++) {
+        int r = dof_radius(Y, focus, OH, S);
+        uint32_t* dst = &s_dof_tmp[Y * OW];
+        const uint32_t* src = &out[Y * OW];
+        if (r == 0) {
+            memcpy(dst, src, (size_t)OW * sizeof(uint32_t));
+            continue;
+        }
+        int n = 2 * r + 1;
+        unsigned sr = 0, sg = 0, sb = 0;
+        for (int X = -r; X <= r; X++) {
+            uint32_t c = src[X < 0 ? 0 : X];
+            sr += c & 0xFF; sg += (c >> 8) & 0xFF; sb += (c >> 16) & 0xFF;
+        }
+        for (int X = 0; X < OW; X++) {
+            dst[X] = 0xFF000000u | ((sb / (unsigned)n) << 16)
+                     | ((sg / (unsigned)n) << 8) | (sr / (unsigned)n);
+            uint32_t add = src[X + r + 1 >= OW ? OW - 1 : X + r + 1];
+            uint32_t del = src[X - r < 0 ? 0 : X - r];
+            sr += (add & 0xFF) - (del & 0xFF);
+            sg += ((add >> 8) & 0xFF) - ((del >> 8) & 0xFF);
+            sb += ((add >> 16) & 0xFF) - ((del >> 16) & 0xFF);
+        }
+    }
+    /* Vertical pass back into the frame; the radius varies per row, so a
+     * plain windowed sum per pixel keeps it exact. */
+    for (int Y = top; Y < OH; Y++) {
+        int r = dof_radius(Y, focus, OH, S);
+        uint32_t* dst = &out[Y * OW];
+        const uint32_t* t0 = &s_dof_tmp[Y * OW];
+        if (r == 0) {
+            memcpy(dst, t0, (size_t)OW * sizeof(uint32_t));
+            continue;
+        }
+        for (int X = 0; X < OW; X++) {
+            unsigned sr = 0, sg = 0, sb = 0;
+            for (int dy = -r; dy <= r; dy++) {
+                int YY = Y + dy;
+                if (YY < top) YY = top;
+                if (YY >= OH) YY = OH - 1;
+                uint32_t c = s_dof_tmp[YY * OW + X];
+                sr += c & 0xFF; sg += (c >> 8) & 0xFF; sb += (c >> 16) & 0xFF;
+            }
+            unsigned n = (unsigned)(2 * r + 1);
+            dst[X] = 0xFF000000u | ((sb / n) << 16) | ((sg / n) << 8)
+                     | (sr / n);
+        }
+    }
 }
 
 /* While the chase camera renders, tree cells drop out of the heightfield:
@@ -1357,6 +1450,30 @@ static void render_chase(GBContext* ctx, const VoxTileGrid* grid,
     const uint32_t fog = (grid->sky != VOX_SKY_NONE)
         ? VOX_SKIES[grid->sky].horizon : 0xFF2C2620u;
 
+    /* A treeline on the horizon: where the ground plane runs out into
+     * fog, a painted silhouette of distant forest sits under the sky
+     * instead of a bare seam. Its colour is the fog's own, darkened --
+     * the same palette the environment is already lit by -- and its
+     * ridge undulates so it reads as woods, not a ruler line. */
+    if (grid->sky != VOX_SKY_NONE) {
+        /* Forest green, hazed toward the sky's own horizon colour so the
+         * woods sit IN the atmosphere rather than pasted over it. */
+        uint32_t wood = lerp_color(0xFF1E3D20u, fog, 88);
+        uint32_t wood2 = lerp_color(0xFF2E5629u, fog, 150);
+        for (int X = 0; X < OW; X++) {
+            float fx2 = (float)X / (float)S;
+            int hgt = (int)((6.5f + 2.8f * sinf(fx2 * 0.093f)
+                             + 1.9f * sinf(fx2 * 0.031f + 1.7f)
+                             + 1.1f * sinf(fx2 * 0.21f + 4.2f)) * (float)S);
+            int y0 = horizon - hgt;
+            if (y0 < 0) y0 = 0;
+            for (int Y = y0; Y < horizon + 3 * S && Y < OH; Y++) {
+                /* Two ranks: a lighter far band behind the dark ridge. */
+                out[Y * OW + X] = (Y < y0 + 2 * S) ? wood2 : wood;
+            }
+        }
+    }
+
     for (int X = 0; X < OW; X++) {
         float ndc = ((float)X - (float)OW * 0.5f) / focal;
         float rx = fxv + rxv * ndc;
@@ -1419,8 +1536,33 @@ static void render_chase(GBContext* ctx, const VoxTileGrid* grid,
                 if (h < 0.0f) {
                     c = shade(c, 190);
                     c = (c & 0xFFFFFF00u) | 0x00000050u;
+                } else if (inside || remembered) {
+                    /* Real terrain gets the cube treatment; the border
+                     * clamp's stretched fade would bevel into stripes. */
+                    c = bevel_px(c, remembered ? wx2 : sx2,
+                                 remembered ? wy2 : sy2);
                 }
-                if (!inside && !remembered) c = lerp_color(c, fog, 96);
+                if (!inside && !remembered) {
+                    /* Nobody has walked there: the border cell repeats,
+                     * which used to smear its columns to the horizon as
+                     * visible streaks. Sink it into the fog with
+                     * distance instead, so unexplored ground reads as
+                     * haze the treeline sits on. */
+                    float outd2 = 0.0f;
+                    if (wx2 < 0.0f) outd2 = -wx2;
+                    else if (wx2 > (float)(GB_SCREEN_WIDTH - 1))
+                        outd2 = wx2 - (float)(GB_SCREEN_WIDTH - 1);
+                    if (wy2 < (float)world_top) {
+                        float t3 = (float)world_top - wy2;
+                        if (t3 > outd2) outd2 = t3;
+                    } else if (wy2 > (float)(GB_SCREEN_HEIGHT - 1)) {
+                        float t3 = wy2 - (float)(GB_SCREEN_HEIGHT - 1);
+                        if (t3 > outd2) outd2 = t3;
+                    }
+                    int t4 = 96 + (int)(outd2 * 5.0f);
+                    if (t4 > 256) t4 = 256;
+                    c = lerp_color(c, fog, t4);
+                }
                 int t = (int)((d - g_tune.fog_start) * 256.0f /
                               (FAR - g_tune.fog_start));
                 if (t < 0) t = 0;
@@ -1455,6 +1597,8 @@ static void render_chase(GBContext* ctx, const VoxTileGrid* grid,
                          * orientation shade is the only invented colour on
                          * a riser; no masonry, trunk or seam pattern replaces
                          * what the cart actually drew. */
+                        wc = bevel_px(wc, remembered ? wx2 : sx2,
+                                      (float)(yy - top) / (float)S);
                         wc = lerp_color(shade(wc, yy < top + rim ? 246 : 226),
                                         fog, t2);
                         out[yy * OW + X] = wc;
@@ -1758,6 +1902,11 @@ static void render_chase(GBContext* ctx, const VoxTileGrid* grid,
             }
         }
     }
+
+    /* The diorama-photo finish: focus on the band Link stands in, melt
+     * the sky and the near foreground a little. The HUD and any dialog
+     * are composited after this and stay crisp. */
+    vox_tilt_shift(out, OW, OH, S, 0, (int)((float)OH * 0.62f));
 }
 
 /* ------------------------------------------------------------------ */
@@ -1895,6 +2044,7 @@ void vox_render(GBContext* ctx, const VoxTileGrid* grid,
                                 - h * lift) * fS + 0.5f);
                 const int tex_col = (int)(wx + (float)grid->fine_x);
                 uint32_t tex = grid->tex[tex_row * VOX_TEX_W + tex_col];
+                if (h >= 0.0f) tex = bevel_px(tex, wx, wy);
 
                 if (h < 0.0f) {
                     /* Water: tint toward deep blue so sunk cells read as
@@ -2036,6 +2186,12 @@ void vox_render(GBContext* ctx, const VoxTileGrid* grid,
             }
         }
     }
+
+    /* The tilted diorama gets the same photo finish as the chase view:
+     * sharp through the middle of the scene, melting toward the top and
+     * bottom edges. HUD and dialog composite after, staying crisp. */
+    vox_tilt_shift(out, OW, OH, S, world_top * S,
+                   (world_top * S + OH) / 2);
 
 compose_overlays:
     /* A dialog box floats flat over the frozen diorama, exactly as the
