@@ -249,6 +249,15 @@ static inline uint32_t bevel_px(uint32_t c, float u, float v) {
     return c;
 }
 
+/* Cube shading for object faces (trees, tufts, structures): orientation
+ * sets the base light, and a faint checker across the face's pixel grid
+ * makes each 1px quad read as its own block rather than wallpaper. */
+static inline int cube_face_shade(int base, int u, int v) {
+    if (g_tune.bevel <= 0.01f) return base;
+    int k = (int)(g_tune.bevel * 20.0f);
+    return base + (((u + v) & 1) ? -k : k / 3);
+}
+
 /* Tilt-shift depth of field: a separable blur whose radius grows with
  * distance from a focus row, zero inside the focus band. This is the
  * diorama-photo look -- the world is sharp where the subject stands and
@@ -923,7 +932,8 @@ static void draw_voxel_tree(const VoxTree* t, int object_sx, int object_sy,
                                           x1, trunk_south, z0,
                                           x1, trunk_south, z1,
                                           x0, trunk_south, z1,
-                                          c, 256, camx, camy, fxv, fyv,
+                                          c, cube_face_shade(246, u, tz),
+                                          camx, camy, fxv, fyv,
                                           rxv, ryv, focal, eye_z, horizon,
                                           fog, OW, OH, out);
                 if (see_north)
@@ -931,7 +941,8 @@ static void draw_voxel_tree(const VoxTree* t, int object_sx, int object_sy,
                                           x0, trunk_north, z0,
                                           x0, trunk_north, z1,
                                           x1, trunk_north, z1,
-                                          c, 256, camx, camy, fxv, fyv,
+                                          c, cube_face_shade(214, u, tz),
+                                          camx, camy, fxv, fyv,
                                           rxv, ryv, focal, eye_z, horizon,
                                           fog, OW, OH, out);
                 float y0 = trunk_north + (float)u, y1 = y0 + 1.0f;
@@ -940,7 +951,8 @@ static void draw_voxel_tree(const VoxTree* t, int object_sx, int object_sy,
                                           (float)trunk_left, y1, z0,
                                           (float)trunk_left, y1, z1,
                                           (float)trunk_left, y0, z1,
-                                          c, 256, camx, camy, fxv, fyv,
+                                          c, cube_face_shade(228, u, tz),
+                                          camx, camy, fxv, fyv,
                                           rxv, ryv, focal, eye_z, horizon,
                                           fog, OW, OH, out);
                 if (see_east)
@@ -948,7 +960,8 @@ static void draw_voxel_tree(const VoxTree* t, int object_sx, int object_sy,
                                           (float)(trunk_left + TRUNK_W), y0, z0,
                                           (float)(trunk_left + TRUNK_W), y0, z1,
                                           (float)(trunk_left + TRUNK_W), y1, z1,
-                                          c, 256, camx, camy, fxv, fyv,
+                                          c, cube_face_shade(228, u, tz),
+                                          camx, camy, fxv, fyv,
                                           rxv, ryv, focal, eye_z, horizon,
                                           fog, OW, OH, out);
             }
@@ -969,7 +982,9 @@ static void draw_voxel_tree(const VoxTree* t, int object_sx, int object_sy,
                                       x1, y0, canopy_top,
                                       x1, y1, canopy_top,
                                       x0, y1, canopy_top,
-                                      t->tex[at], 256, camx, camy, fxv, fyv,
+                                      t->tex[at],
+                                      cube_face_shade(264, px, py),
+                                      camx, camy, fxv, fyv,
                                       rxv, ryv, focal, eye_z, horizon,
                                       fog, OW, OH, out);
             }
@@ -991,7 +1006,9 @@ static void draw_voxel_tree(const VoxTree* t, int object_sx, int object_sy,
                                           x0 + 1.0f, (float)object_sy + 16.0f, z0,
                                           x0 + 1.0f, (float)object_sy + 16.0f, z1,
                                           x0, (float)object_sy + 16.0f, z1,
-                                          t->tex[at], 256, camx, camy,
+                                          t->tex[at],
+                                          cube_face_shade(242, u, tz),
+                                          camx, camy,
                                           fxv, fyv, rxv, ryv, focal, eye_z,
                                           horizon, fog, OW, OH, out);
                 }
@@ -1009,7 +1026,9 @@ static void draw_voxel_tree(const VoxTree* t, int object_sx, int object_sy,
                                           x0, (float)object_sy, z0,
                                           x0, (float)object_sy, z1,
                                           x0 + 1.0f, (float)object_sy, z1,
-                                          t->tex[at], 256, camx, camy,
+                                          t->tex[at],
+                                          cube_face_shade(212, u, tz),
+                                          camx, camy,
                                           fxv, fyv, rxv, ryv, focal, eye_z,
                                           horizon, fog, OW, OH, out);
                 }
@@ -1027,7 +1046,9 @@ static void draw_voxel_tree(const VoxTree* t, int object_sx, int object_sy,
                                           (float)object_sx, y0 + 1.0f, z0,
                                           (float)object_sx, y0 + 1.0f, z1,
                                           (float)object_sx, y0, z1,
-                                          t->tex[at], 256, camx, camy,
+                                          t->tex[at],
+                                          cube_face_shade(226, u, tz),
+                                          camx, camy,
                                           fxv, fyv, rxv, ryv, focal, eye_z,
                                           horizon, fog, OW, OH, out);
                 }
@@ -1045,7 +1066,9 @@ static void draw_voxel_tree(const VoxTree* t, int object_sx, int object_sy,
                                           (float)object_sx + 16.0f, y0, z0,
                                           (float)object_sx + 16.0f, y0, z1,
                                           (float)object_sx + 16.0f, y0 + 1.0f, z1,
-                                          t->tex[at], 256, camx, camy,
+                                          t->tex[at],
+                                          cube_face_shade(226, u, tz),
+                                          camx, camy,
                                           fxv, fyv, rxv, ryv, focal, eye_z,
                                           horizon, fog, OW, OH, out);
                 }
@@ -1072,11 +1095,13 @@ static void draw_voxel_tree(const VoxTree* t, int object_sx, int object_sy,
             /* Original artwork, untouched except for distance fog. */
             draw_chase_color_quad(x0, south, z0, x1, south, z0,
                                   x1, south, z1, x0, south, z1,
-                                  c, 256, camx, camy, fxv, fyv, rxv, ryv,
+                                  c, cube_face_shade(256, px, py),
+                                  camx, camy, fxv, fyv, rxv, ryv,
                                   focal, eye_z, horizon, fog, OW, OH, out);
             draw_chase_color_quad(x1, north, z0, x0, north, z0,
                                   x0, north, z1, x1, north, z1,
-                                  c, 224, camx, camy, fxv, fyv, rxv, ryv,
+                                  c, cube_face_shade(224, px, py),
+                                  camx, camy, fxv, fyv, rxv, ryv,
                                   focal, eye_z, horizon, fog, OW, OH, out);
 
             bool left  = px == 0  || !t->solid[at - 1];
