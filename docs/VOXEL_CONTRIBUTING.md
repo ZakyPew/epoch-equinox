@@ -78,7 +78,16 @@ IDs. Prefer named game state plus pixel/collision evidence over a global
 
 ## Fast visual loop
 
-`tools/vox_shot.c` boots a ROM headlessly and writes paired flat/voxel PPMs:
+`tools/vox_shot.c` boots a ROM headlessly and writes paired flat/voxel PPMs.
+It can reach **real gameplay**, not just savestates: park a test save
+beside the binary under the runner's name and script the file select —
+the exact recipe, frame numbers included, is in the file's header
+comment. (A savestate resumed via `VOX_SHOT_STATE` restores VRAM but not
+banked WRAM, so it is good for probing the renderer and useless for
+continuing play; the front-door route has live collisions, camera and
+input.) For navigation that must not drift between runs, steal the
+state-driven pattern from `tools/icon_rip.c` instead of trusting frame
+numbers.
 
 ```powershell
 $env:VOX_SHOT_STATE = "build\Release\interesting.state1"

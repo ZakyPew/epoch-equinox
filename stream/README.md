@@ -179,6 +179,7 @@ underneath shows through and nothing looks broken.
 | `epoch-live.css` | the live panel, plaque and unlock card, shared by all four |
 | `epoch-live.js` | reads `now.js` and `live.js`, fills the markup |
 | `icons/` | the achievement icons as PNG, mirrored from `achievements/icons` |
+| `icons/items/` | item-tracker icons ripped from *your* ROM (gitignored; see below) |
 | `now.js` | your one-line status |
 | `config.js` | the camera and guide switches |
 | `live.js` | written by the player; not in the repo |
@@ -193,6 +194,28 @@ out of step with the originals.
 
 An achievement with no icon — one from a mod, say — falls back to a drawn
 medal rather than a broken image, so nothing on screen ever looks faulty.
+
+## Item icons, ripped from your own ROM
+
+The tracker's cells are text labels until you give them the game's own
+item art:
+
+```sh
+python3 tools/rip_item_icons.py
+```
+
+The ripper boots each installed cart headlessly over your save, walks the
+game's menus, equips every item in the bag and reads its icon out of the
+HUD's own sprites — real palettes, transparent background. Icons land in
+`stream/icons/items/<cart>/<id>.png` and each tracker cell upgrades only
+when its file actually loads; a cell you have no icon for keeps its
+label, greyed until the run collects the item either way.
+
+That folder is **gitignored on purpose**: unlike the achievement icons
+below it, these are the cartridge's art, ripped from your ROM for your
+stream. They stay on your machine — never commit them, never ship them.
+Passive treasures (flippers, the mermaid suit, rings) have no equippable
+icon and keep their labels.
 
 ## Notes
 

@@ -50,6 +50,17 @@ you are inside a dungeon with live state by frame ~1560, headless. What
 remains here is polish an eye will find faster than a probe: play a
 dungeon in chase cam and report what looks wrong.
 
+### Atmosphere pass: fog and shaders — **S** *(asked for in Discussions)*
+Some of this exists and is under-known: the chase camera already draws
+distance fog (`fog_start` / `fog_max`, live-tunable from the Esc menu's
+sliders and saved to `voxel/tuning.ini`), and the player carries the
+runtime's shader presets for the flat view. The asks worth building on
+top: fog that takes its **colour from the environment** (the renderer
+already keeps game-state skies — dusk, dungeon dark, Subrosia — and the
+fog should drink from the same palette), a touch of height/ground fog in
+the dioramas, and making the existing knobs discoverable instead of
+buried. Small, visual, and very shareable — a good first renderer task.
+
 ### Dynamic props — **S**
 The opening-scene chest demonstrates why an object cannot be identified from
 the finished overworld map alone. Normal open/closed chest metatiles are BG
