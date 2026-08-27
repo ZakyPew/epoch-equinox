@@ -56,22 +56,21 @@ Dungeon rooms use a different render job and a 15-column layout, so
 this route should make camera, height, and billboard regressions
 visible without manual searching.
 
-Most of the pieces exist: `tests/saves/ages-veran-tower.sav` loads
-inside a dungeon, the file-select script in `tools/vox_shot.c`'s header
-reaches live play headlessly, and `VOX_DUMP_ROOM=1` prints the room the
-renderer is actually working from. What's missing is one command (a
-small script is fine) that runs the route and *names the room it
-expects*. Beware combat rooms: knockback timing drifts between runs, so
-calibrate where nothing is chasing you.
+**This one is done** — it lives at `tools/dungeon_shot.py`:
 
-**Done when:**
+```sh
+python3 tools/dungeon_shot.py
+```
 
-- A new contributor can run the route from the documentation alone.
-- It produces a stable flat reference and voxel capture.
-- The capture shows the camera position, room edges, and at least one
-  object that can expose depth ordering.
-- Failure output points to the route or state that failed instead of
-  silently producing an unrelated screenshot.
+stages the endgame save, boots the Ages ROM headlessly, scripts the
+file select, verifies it is really standing in Veran's tower (group 04
+room F3, terrain live — a broken route says exactly what it got
+instead), and writes stable `dungeon-{flat,45,chase}` captures. The
+player's own save is backed up and restored around the run. Use it as
+the before/after harness for any dungeon-rendering change, and as the
+template for routes to other scenes. Beware combat rooms if you extend
+it: knockback timing drifts between runs, so calibrate where nothing is
+chasing you.
 
 ## 3. Sculpt one named overworld room-height override
 
