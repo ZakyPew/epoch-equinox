@@ -1562,10 +1562,19 @@ static void render_chase(GBContext* ctx, const VoxTileGrid* grid,
                     c = shade(c, 190);
                     c = (c & 0xFFFFFF00u) | 0x00000050u;
                 } else if (inside || remembered) {
-                    /* Real terrain gets the cube treatment; the border
-                     * clamp's stretched fade would bevel into stripes. */
-                    c = bevel_px(c, remembered ? wx2 : sx2,
-                                 remembered ? wy2 : sy2);
+                    /* The cube treatment, chase edition. Sub-texel edge
+                     * bevels alias into a dot grid at ray-step
+                     * granularity (seen live on a big window), so the
+                     * perspective ground shades whole blocks instead --
+                     * a per-texel checker that cannot moire -- and lets
+                     * it fade before the fog takes over. */
+                    if (g_tune.bevel > 0.01f && d < g_tune.fog_start) {
+                        int k = (int)(g_tune.bevel * 24.0f
+                                      * (1.0f - d / g_tune.fog_start));
+                        int bx = (int)(remembered ? wx2 : sx2);
+                        int by = (int)(remembered ? wy2 : sy2);
+                        c = shade(c, 256 + (((bx + by) & 1) ? -k : k / 2));
+                    }
                 }
                 if (!inside && !remembered) {
                     /* Nobody has walked there: the border cell repeats,
@@ -1622,8 +1631,15 @@ static void render_chase(GBContext* ctx, const VoxTileGrid* grid,
                          * orientation shade is the only invented colour on
                          * a riser; no masonry, trunk or seam pattern replaces
                          * what the cart actually drew. */
-                        wc = bevel_px(wc, remembered ? wx2 : sx2,
-                                      (float)(yy - top) / (float)S);
+                        /* Same block-not-edge rule for riser faces: one
+                         * checker cell per texel column and art row. */
+                        if (g_tune.bevel > 0.01f && d < g_tune.fog_start) {
+                            int k = (int)(g_tune.bevel * 24.0f
+                                          * (1.0f - d / g_tune.fog_start));
+                            int bx = (int)(remembered ? wx2 : sx2);
+                            wc = shade(wc, 256 + (((bx + art) & 1)
+                                                  ? -k : k / 2));
+                        }
                         wc = lerp_color(shade(wc, yy < top + rim ? 246 : 226),
                                         fog, t2);
                         out[yy * OW + X] = wc;

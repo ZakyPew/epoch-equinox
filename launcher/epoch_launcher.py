@@ -110,7 +110,7 @@ from gamepad import GamepadBridge
 # The version this build was released as. The updater compares it against
 # the repository's release tags, so it has to match the tag it ships under
 # -- the release workflow refuses to publish a tag that disagrees with it.
-APP_VERSION = "0.6.2"
+APP_VERSION = "0.6.3"
 
 # The diagonal that splits the two panels. x is a fraction of the window
 # width; the seam runs from (TOP, 0) down to (BOTTOM, height).
