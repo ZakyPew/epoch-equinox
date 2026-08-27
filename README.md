@@ -276,6 +276,7 @@ the sliders reshape the world under the menu as you drag them:
 |---|---|
 | **Shape** | height of grass, bushes and trees; water depth; foliage footprint; tilt height |
 | **Chase camera** | distance, height, field of view, vertical scale, fog start and strength |
+| **Diorama finish** | pixel cubes (every pixel a tiny lit block) and tilt-shift blur (a diorama-photo focus band); either slider to zero turns it off |
 
 `chase_follow` in `voxel/tuning.ini` is how fast the camera swings behind
 Link, per frame: `0.05` ships, higher snaps harder, and `0` pins the camera

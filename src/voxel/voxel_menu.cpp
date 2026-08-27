@@ -90,6 +90,12 @@ extern "C" void voxel_menu_draw(void) {
                         "trailing again. Click the right stick (or C) to\n"
                         "swing behind Link now -- hold it to keep it there.");
     ImGui::Spacing();
+    ImGui::TextDisabled("Diorama finish");
+    ImGui::SliderFloat("Pixel cubes", &t->bevel, 0.0f, 1.0f, "%.2f");
+    ImGui::SliderFloat("Tilt-shift blur", &t->dof, 0.0f, 1.0f, "%.2f");
+    ImGui::TextDisabled("Every pixel a tiny block, and a diorama-photo\n"
+                        "focus band. Zero either slider to turn it off.");
+    ImGui::Spacing();
     ImGui::TextDisabled("Room sculpting");
     {
         bool editing = vox_edit_enabled();

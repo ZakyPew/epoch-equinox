@@ -76,6 +76,8 @@ typedef struct {
     float cliff_unify;    /* 1 = one height per connected solid mass */
     float fog_start;      /* distance where distance fog begins */
     float fog_max;        /* strongest fog blend, 0-256 */
+    float bevel;          /* pixel-cube edge shading, 0 = smooth */
+    float dof;            /* tilt-shift blur strength, 0 = off */
 } VoxelTuning;
 
 /** The live tuning block. Safe to mutate; the renderer reads it per frame. */
