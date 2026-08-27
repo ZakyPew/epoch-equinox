@@ -35,6 +35,14 @@ ground footpoint. `vox_decode_sprite_row` already decodes any OAM entry
 with its true CGB palette and transparency — build on it rather than
 re-deriving tile decoding.
 
+Reaching the scene headlessly is already solved: the new-game input
+script in `tools/vox_shot.c`'s header hands over control in the opening
+forest around frame ~6560, and the story beats from there advance on A
+presses and U-walks, frame-stable because the game's own script drives
+them. `VOX_DUMP_SPRITES=1` prints the OAM entries per captured frame —
+walk the route forward until the chest pair appears, and confirm the
+`$60/$62` ids against a second chest before keying on them.
+
 **Done when:**
 
 - The two OAM pieces are detected and rendered as one chest object.
