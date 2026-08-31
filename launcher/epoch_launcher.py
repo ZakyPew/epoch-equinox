@@ -110,7 +110,7 @@ from gamepad import GamepadBridge
 # The version this build was released as. The updater compares it against
 # the repository's release tags, so it has to match the tag it ships under
 # -- the release workflow refuses to publish a tag that disagrees with it.
-APP_VERSION = "0.6.3"
+APP_VERSION = "0.7.0"
 
 # The diagonal that splits the two panels. x is a fraction of the window
 # width; the seam runs from (TOP, 0) down to (BOTTOM, height).
@@ -428,9 +428,12 @@ def draw_seasons_motif(pr: QPainter, c: QPointF, r: float, col: QColor) -> None:
 # --------------------------------------------------------------------------
 
 MENU_ITEMS = [
-    "Start game", "Mods", "Achievements", "Secrets", "Saves", "Install ROM",
-    "Stream", "Updates", "Exit",
+    "Start game", "Continue Legend", "Mods", "Achievements", "Secrets",
+    "Saves", "Install ROM", "Stream", "Updates", "Exit",
 ]
+
+# The two halves of the legend. Continuing one means linking the other.
+GAME_PAIR = {"tlozooa": "tlozoos", "tlozoos": "tlozooa"}
 
 
 class LauncherView(QWidget):
@@ -2147,12 +2150,69 @@ class MainWindow(QWidget):
             SecretsDialog(self.runner, game, self).exec()
         elif item == "Saves":
             SavesDialog(self.runner, game, self).exec()
+        elif item == "Continue Legend":
+            self.continue_legend(game)
         elif item == "Mods":
             if game.playable:
                 ModsDialog(self.runner, game, self).exec()
         elif item == "Start game":
             if game.playable:
                 self.start_game(game)
+
+    def continue_legend(self, game: Game) -> None:
+        """The seamless linked game: take this game's transfer secret and
+        hand it to the other cart, which enters it by itself.
+
+        Writes states/handoff.txt -- the queue the player checks at boot
+        -- then starts the other game. Everything after that is the
+        in-game machine: file select, SECRETS, the typist, and a linked
+        file standing in a room. One real button press cancels it."""
+        other_id = GAME_PAIR.get(game.id)
+        other = next((g for g in self.view.games if g.id == other_id), None)
+        if other is None or not other.playable:
+            QMessageBox.information(
+                self, "The other half is missing",
+                "Continuing the legend needs the other game's ROM "
+                "installed — it starts a linked game there.")
+            return
+        sav = oracle_secrets.find_saves(self.runner.root).get(game.id)
+        saves = oracle_secrets.read_save(sav) if sav else []
+        if not saves:
+            QMessageBox.information(
+                self, "No saved legend yet",
+                f"There is no {game.title} save to continue from. "
+                "Finish (or at least start) a quest here first.")
+            return
+        # A hero's file first, a linked file second, file 1 otherwise --
+        # the file most likely to be the finished quest.
+        source = sorted(saves, key=lambda s: (not s.is_hero,
+                                              not s.is_linked, s.slot))[0]
+        tgt = oracle_secrets.find_saves(self.runner.root).get(other_id)
+        used = {s.slot for s in oracle_secrets.read_save(tgt)} if tgt else set()
+        free = next((i for i in range(3) if i not in used), None)
+        if free is None:
+            QMessageBox.information(
+                self, "No room in the other game",
+                f"All three {other.title} files are in use. Erase or "
+                "export one first (the Saves page can back it up).")
+            return
+        answer = QMessageBox.question(
+            self, "Continue the legend?",
+            f"{other.title} will start and enter {source.hero_name}'s "
+            f"transfer secret by itself — file select, code entry, all "
+            f"of it — leaving a linked game in file {free + 1}.\n\n"
+            "Touch nothing while it types. Pressing any button hands "
+            "control back to you and stops the machine.")
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        symbols = oracle_secrets.game_secret(source)
+        states = self.runner.root / "states"
+        states.mkdir(exist_ok=True)
+        (states / "handoff.txt").write_text(
+            f"to={other_id}\nslot={free}\nname={source.hero_name}\n"
+            "symbols=" + "".join(f"{v:02x}" for v in symbols) + "\n",
+            encoding="utf-8")
+        self.start_game(other)
 
     def install_rom(self, game: Game) -> None:
         path, _ = QFileDialog.getOpenFileName(

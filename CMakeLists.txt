@@ -93,6 +93,7 @@ set(EPOCH_SUPPORT_SOURCES
     src/epoch_stream.c
     src/epoch_splits.c
     src/epoch_livesplit.c
+    src/epoch_handoff.c
     src/epoch_secrets.c
     src/epoch_secrets_menu.cpp
     src/epoch_panel.cpp

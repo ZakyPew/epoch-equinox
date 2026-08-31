@@ -41,6 +41,7 @@ extern "C" {
 #include "epoch_splits.h"
 #include "epoch_stream.h"
 #include "epoch_secrets.h"
+#include "epoch_handoff.h"
 #include "epoch_panel.h"
 #include "epoch_overlay.h"
 #if EPOCH_HAVE_VOXEL
@@ -295,6 +296,7 @@ static int run_game(const EpochGame* game, unsigned long long frame_limit) {
 
     gb_platform_register_context(ctx);
     gb_platform_set_game_id(ctx, game->id);   /* saves, prefs, cheats key */
+    epoch_handoff_arm(game->id);   /* Continue the Legend, if queued */
     gb_platform_set_title(game->title);
 
     gb_context_load_rom(ctx, rom, rom_size);
@@ -351,6 +353,8 @@ static int run_game(const EpochGame* game, unsigned long long frame_limit) {
              * the frame the cart runs; the runtime rebuilds the joypad
              * globals from the keyboard on every poll. */
             epoch_panel_tick(ctx);
+            /* Before the typist: the handoff queues its work. */
+            epoch_handoff_tick(ctx, game->id);
             epoch_secrets_tick(ctx, game->id);
             if (smooth && !ctx->frame_done && slice_cycles >= slice_cycles_budget) {
                 if (ctx->lcd_off_active || !(ctx->io[0x40] & 0x80)) {
