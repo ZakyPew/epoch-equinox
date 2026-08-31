@@ -1,0 +1,32 @@
+diff --git a/runtime/include/platform_sdl.h b/runtime/include/platform_sdl.h
+--- a/runtime/include/platform_sdl.h
++++ b/runtime/include/platform_sdl.h
+@@ -175,6 +175,14 @@
+ void gb_platform_set_input_script(const char* script);
+ 
+ /**
++ * @brief Host-requested max speed, same lever as the player's toggle.
++ *
++ * Automation that drives menus (the linked-game handoff) turns this on
++ * so nobody watches splash screens in real time, and off when done.
++ */
++void gb_platform_set_turbo(bool on);
++
++/**
+  * @brief Record live keyboard/controller input to a replayable script file
+  */
+ void gb_platform_set_input_record_file(const char* path);
+diff --git a/runtime/src/platform_sdl.cpp b/runtime/src/platform_sdl.cpp
+--- a/runtime/src/platform_sdl.cpp
++++ b/runtime/src/platform_sdl.cpp
+@@ -396,6 +396,10 @@
+ static int g_binding_capture_slot = 0;
+ static bool g_fast_forward_active = false;
+ static bool g_max_speed_mode = false;
++
++void gb_platform_set_turbo(bool on) {
++    g_max_speed_mode = on;
++}
+ static const char* g_input_action_names[GB_INPUT_ACTION_COUNT] = {
+     "Right",
+     "Left",

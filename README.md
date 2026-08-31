@@ -437,7 +437,9 @@ you finished) starts the other game, and the player enters the secret
 game's own cursor around the symbol grid — the same typist as the Esc
 menu, reading where the cursor is from the game's memory and never
 writing into it — accepts, and stops only when your linked game is
-standing in a room.
+standing in a room. The whole drive runs at max speed — splash screens,
+title, file select all fast-forward — and normal speed returns the
+instant the machine finishes.
 
 Touch nothing while it types: any real button press cancels the machine
 and hands the game to you. Full slots or a missing ROM are told to you

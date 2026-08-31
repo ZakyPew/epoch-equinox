@@ -62,6 +62,7 @@ const char* epoch_handoff_message(void) { return g.message; }
 static void ho_fail(const char* why) {
     LOG("stopped: %s (state %d)", why, (int)g.state);
     snprintf(g.message, sizeof(g.message), "Handoff stopped: %s", why);
+    gb_platform_set_turbo(false);
     g.armed = false;
     g.state = HO_OFF;
 }
@@ -105,9 +106,13 @@ void epoch_handoff_arm(const char* game_id) {
     }
     g.armed = true;
     ho_enter(HO_BOOT);
+    /* Nobody should watch splash screens in real time: run the emulator
+     * flat out while the machine drives. Normal speed comes back the
+     * instant it finishes, fails, or the player touches anything. */
+    gb_platform_set_turbo(true);
     snprintf(g.message, sizeof(g.message),
              "Continuing the legend: linking %s's game...", g.name);
-    LOG("armed: slot %d, 20 symbols, hero %s", g.slot, g.name);
+    LOG("armed: slot %d, 20 symbols, hero %s -- turbo on", g.slot, g.name);
 }
 
 /* One paced tap: press for 2 frames, release for 8 so the menu's own
@@ -233,6 +238,7 @@ void epoch_handoff_tick(GBContext* ctx, const char* game_id) {
             snprintf(g.message, sizeof(g.message),
                      "The legend continues -- linked game ready.");
             LOG("linked game is standing in a room");
+            gb_platform_set_turbo(false);
             g.armed = false;
             ho_enter(HO_DONE);
             break;
