@@ -49,6 +49,7 @@ third-person chase camera that follows Link through the world in perspective.
 | **Launcher** | Cover art, ROM install, IPS/BPS mods, controller navigation, self-update that never touches your saves |
 | **Achievements** | Data-driven packs watched over the game's memory, Steam-style toasts, custom icons, a browser in launcher and Esc menu |
 | **Secrets** | Every code your save can produce, generated with the game's own cipher — and the panel can type them into the grid for you |
+| **Continue Legend** | Finish one game, click once: the other game starts, enters your transfer secret by itself, and hands you the linked quest to the true ending |
 | **Saves** | Import from any emulator (validated by content), export, and a backup trail where every replacement is one click to undo — each slot's essences, hearts, rings, deaths and playtime at a glance |
 | **Streaming** | OBS overlays fed live by the player: framed layouts with a real hole for the game, achievement cards, and a Stream page in the launcher to configure it all |
 | **Speedrunning** | Auto-splits that drive LiveSplit, run timer, split list, input display, and an item tracker that can wear icons ripped from your own ROM |
@@ -424,6 +425,24 @@ by reading the game's own cursor position each frame rather than writing
 into its memory, so if the game disagrees, the game wins. A file that has never used a
 secret has no Game ID yet; its codes are accepted by any file, which is
 the game's own behaviour, and the dialog says so when it applies.
+
+## Continue the Legend
+
+The Oracles are halves of one story: finish either game and Farore
+speaks a twenty-symbol secret; enter it in the other cart and the
+**linked quest** begins — the only road to the true ending. This player
+closes that seam. **Continue Legend** in the launcher menu (on the game
+you finished) starts the other game, and the player enters the secret
+*itself*: it walks the file select to SECRETS on a free file, drives the
+game's own cursor around the symbol grid — the same typist as the Esc
+menu, reading where the cursor is from the game's memory and never
+writing into it — accepts, and stops only when your linked game is
+standing in a room.
+
+Touch nothing while it types: any real button press cancels the machine
+and hands the game to you. Full slots or a missing ROM are told to you
+up front. The whole handoff is one plain file (`states/handoff.txt`)
+the player consumes on success.
 
 ## Saves
 
