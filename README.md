@@ -436,15 +436,21 @@ you finished) starts the other game, and the player enters the secret
 *itself*: it walks the file select to SECRETS on a free file, drives the
 game's own cursor around the symbol grid — the same typist as the Esc
 menu, reading where the cursor is from the game's memory and never
-writing into it — accepts, and stops only when your linked game is
-standing in a room. The whole drive runs at max speed — splash screens,
-title, file select all fast-forward — and normal speed returns the
-instant the machine finishes.
+writing into it — accepts, steers the file select back to the file the
+cart just made, pages through the linked prologue, and stops only when
+your linked game is standing in a room. The whole drive runs at max
+speed — splash screens, title, file select, prologue all fast-forward —
+and normal speed returns the instant the machine finishes. A strip in
+the top-right corner says what it is doing, then the verdict.
 
 Touch nothing while it types: any real button press cancels the machine
-and hands the game to you. Full slots or a missing ROM are told to you
-up front. The whole handoff is one plain file (`states/handoff.txt`)
-the player consumes on success.
+and hands the game to you (a key still held from the launcher's dialog
+does not count). Full slots or a missing ROM are told to you up front;
+if the slot turns out to hold a game after all, the machine notices the
+moment that game starts and stops with your own file on screen. The
+whole handoff is one plain file (`states/handoff.txt`) the player
+consumes the moment it reads it — one shot, whatever happens, so a
+stopped handoff never lies in wait for a later launch.
 
 ## Saves
 
