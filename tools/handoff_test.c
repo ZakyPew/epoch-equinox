@@ -4,15 +4,26 @@
  * OTHER cart by itself: boot, walk the file select to SECRETS, type
  * the code with the same typist the Esc menu uses, accept, and hand
  * over a linked game. This test does the whole journey against the
- * real carts: encode a game secret from the finished Ages save in
- * tests/saves, stage it as a handoff for Seasons, run the machine,
- * and assert the cart itself agrees -- wFileIsLinkedGame set, room
- * live, a linked file where there was none.
+ * real carts: encode a game secret from a finished save in
+ * tests/saves, stage it as a handoff for the other cart, run the
+ * machine, and assert the cart itself agrees -- the linked (or hero)
+ * flag set, the hero's name carried across, a room live.
+ *
+ * Scenarios, chosen by environment:
+ *   HANDOFF_TO=tlozoos|tlozooa  which cart receives (default tlozoos)
+ *   HANDOFF_SLOT=0..2           the file to link into (default 1)
+ *   HANDOFF_FRESH=1             no save at all on the receiving side
+ *   HANDOFF_EXPECT=link|stop|takeover
+ *       link      a linked game standing in a room (default)
+ *       stop      the slot is really occupied: the machine must notice
+ *                 the game that started instead and stop at once
+ *       takeover  a key still held from the launcher is ignored, a
+ *                 fresh press later stops the machine
  *
  * HANDOFF_PROBE=1 turns it into a state dumper instead: boots and
  * mashes toward the file select printing wFileSelect.mode/mode2,
- * textInputMode, cursorPos and scroll -- how the state values the
- * machine keys on were learned in the first place.
+ * textInputMode, cursorPos, scroll and the frame's cycle count --
+ * how the state values the machine keys on were learned.
  *
  * Build like the other probes:
  *   cc -O2 -o handoff_test ../tools/handoff_test.c -I ../src \
@@ -20,8 +31,9 @@
  *      $(sdl2-config --cflags) libepoch_support.a _gbrt_build/libgbrt.a \
  *      $(sdl2-config --libs) -lGL -lcurl -lm -lstdc++
  *
- * Run from a directory holding roms/ and the staged saves (the test
- * stages its own copies; it never touches a player's file).
+ * Run from a directory holding roms/. The receiving cart's save is
+ * parked and restored around the run; a player's file is never the
+ * canvas.
  */
 #include "gbrt.h"
 #include "platform_sdl.h"
@@ -68,9 +80,27 @@ static void step(GBContext* ctx) {
     }
 }
 
+static bool read_file(const char* path, uint8_t* buf, size_t n) {
+    FILE* f = fopen(path, "rb");
+    if (!f) return false;
+    size_t got = fread(buf, 1, n, f);
+    fclose(f);
+    return got == n;
+}
+
+static bool write_file(const char* path, const uint8_t* buf, size_t n) {
+    FILE* f = fopen(path, "wb");
+    if (!f) return false;
+    size_t put = fwrite(buf, 1, n, f);
+    fclose(f);
+    return put == n;
+}
+
 int main(void) {
     if (getenv("HANDOFF_PROBE")) {
-        GBContext* ctx = boot("roms/tlozoos.gbc");
+        const char* pto = getenv("HANDOFF_TO") ? getenv("HANDOFF_TO") : "tlozoos";
+        GBContext* ctx = boot(strcmp(pto, "tlozooa") == 0 ? "roms/tlozooa.gbc"
+                                                         : "roms/tlozoos.gbc");
         gb_platform_set_input_script(
             "650:S:10,1050:S:10,1150:D:8,1210:A:10,1400:D:8,1460:A:10");
         for (unsigned long i = 0; i <= 2200; i++) {
@@ -78,13 +108,32 @@ int main(void) {
             if (i % 30 == 0 || (i > 1100 && i % 10 == 0)) {
                 fprintf(stderr,
                         "[probe] f=%lu mode=%02x mode2=%02x tim=%02x "
-                        "cur=%02x scroll=%02x\n",
+                        "cur=%02x scroll=%02x cycles=%u key1=%02x\n",
                         i, rd(ctx, 0xCBB3), rd(ctx, 0xCBB4),
-                        rd(ctx, 0xCBB7), rd(ctx, 0xCBBC), rd(ctx, 0xCD00));
+                        rd(ctx, 0xCBB7), rd(ctx, 0xCBBC), rd(ctx, 0xCD00),
+                        ctx->frame_cycles, ctx->io[0x4D]);
             }
         }
         return 0;
     }
+
+    /* ---- the scenario ------------------------------------------------ */
+    const char* to = getenv("HANDOFF_TO") ? getenv("HANDOFF_TO") : "tlozoos";
+    const bool to_seasons = strcmp(to, "tlozoos") == 0;
+    const int slot = getenv("HANDOFF_SLOT") ? atoi(getenv("HANDOFF_SLOT")) : 1;
+    const bool fresh = getenv("HANDOFF_FRESH") != NULL;
+    const char* expect = getenv("HANDOFF_EXPECT") ? getenv("HANDOFF_EXPECT")
+                                                  : "link";
+    const char* rom      = to_seasons ? "roms/tlozoos.gbc" : "roms/tlozooa.gbc";
+    const char* src_path = to_seasons ? "../tests/saves/ages-veran-tower.sav"
+                                      : "../tests/saves/seasons-room-of-rites.sav";
+    const char* tgt_path = to_seasons ? "../tests/saves/seasons-room-of-rites.sav"
+                                      : "../tests/saves/ages-veran-tower.sav";
+    const char* tgt_sav  = to_seasons ? "ZELDA DIN.sav" : "ZELDA NAYRUAZ8E.sav";
+    char parked[64];
+    snprintf(parked, sizeof(parked), "%s.handoff-test-parked", tgt_sav);
+    fprintf(stderr, "[handoff-test] to=%s slot=%d fresh=%d expect=%s\n",
+            to, slot, fresh, expect);
 
     int failures = 0;
 #define CHECK(cond, name)                                            \
@@ -93,84 +142,135 @@ int main(void) {
         else { printf("FAIL %s\n", name); failures++; }              \
     } while (0)
 
-    /* The transfer secret, from the real endgame Ages save -- read
-     * straight from tests/saves, nothing staged for the source side. */
-    FILE* f = fopen("../tests/saves/ages-veran-tower.sav", "rb");
-    CHECK(f != NULL, "the Ages test save is readable");
-    if (!f) return 1;
+    /* The transfer secret, from the finished save on the sending side
+     * -- read straight from tests/saves, nothing staged for it. */
     uint8_t sav[0x2000];
-    if (fread(sav, 1, sizeof(sav), f) != sizeof(sav)) {
-        fclose(f);
-        printf("FAIL short save\n");
-        return 1;
-    }
-    fclose(f);
-
-    /* The cart will WRITE the linked file into the Seasons save beside
-     * this binary: park whatever is there and stage the test copy, so
-     * a player's real file is never the canvas. */
-    remove("ZELDA DIN.sav.handoff-test-parked");
-    rename("ZELDA DIN.sav", "ZELDA DIN.sav.handoff-test-parked");
-    {
-        FILE* src = fopen("../tests/saves/seasons-room-of-rites.sav", "rb");
-        FILE* dst = fopen("ZELDA DIN.sav", "wb");
-        CHECK(src && dst, "the Seasons test save stages");
-        if (src && dst) {
-            uint8_t buf[0x2000];
-            size_t got = fread(buf, 1, sizeof(buf), src);
-            fwrite(buf, 1, got, dst);
-        }
-        if (src) fclose(src);
-        if (dst) fclose(dst);
-    }
+    CHECK(read_file(src_path, sav, sizeof(sav)), "the sending save is readable");
+    if (failures) return 1;
     /* Slot 0's c6 block sits at file offset 0x010 + 0x50. */
+    const uint8_t* src_c6 = sav + 0x010 + 0x50;
     uint8_t cells[ES_MAX_SYMBOLS];
-    int n = es_encode(sav + 0x010 + 0x50, ES_TYPE_GAME, 0, cells);
+    int n = es_encode(src_c6, ES_TYPE_GAME, 0, cells);
     CHECK(n == 20, "the game secret encodes to 20 symbols");
+
+    /* The cart will WRITE the linked file into the receiving save
+     * beside this binary: park whatever is there, then stage the test
+     * copy -- or nothing at all, for a cart that has never been saved. */
+    remove(parked);
+    rename(tgt_sav, parked);
+    if (!fresh) {
+        uint8_t buf[0x2000];
+        bool ok = read_file(tgt_path, buf, sizeof(buf)) &&
+                  write_file(tgt_sav, buf, sizeof(buf));
+        CHECK(ok, "the receiving save stages");
+    } else {
+        CHECK(fopen(tgt_sav, "rb") == NULL, "the receiving side has no save");
+    }
 
     /* Stage the handoff the launcher would write. */
     remove("states/handoff.txt");
 #ifdef _WIN32
-    system("mkdir states 2>nul");
+    if (system("mkdir states 2>nul")) {}
 #else
-    system("mkdir -p states");
+    if (system("mkdir -p states")) {}
 #endif
     FILE* h = fopen("states/handoff.txt", "w");
-    fprintf(h, "to=tlozoos\nslot=1\nname=Link\nsymbols=");
+    fprintf(h, "to=%s\nslot=%d\nname=Link\nsymbols=", to, slot);
     for (int i = 0; i < n; i++) fprintf(h, "%02x", cells[i]);
     fprintf(h, "\n");
     fclose(h);
 
-    GBContext* ctx = boot("roms/tlozoos.gbc");
-    epoch_handoff_arm("tlozoos");
+    GBContext* ctx = boot(rom);
+    epoch_handoff_arm(to);
     CHECK(epoch_handoff_active(), "the handoff arms from the file");
+    CHECK(fopen("states/handoff.txt", "r") == NULL,
+          "the handoff file is consumed the moment it is read");
 
-    bool linked = false, in_game = false;
+    const bool takeover = strcmp(expect, "takeover") == 0;
+    bool in_game = false, linked = false, hero = false, name_ok = false;
+    bool still_armed_past_held_key = false;
+    unsigned live_gid = 0xFFFF, live_playtime = 0xFFFFFFFFu;
+    /* The secret carries the sending file's Game ID; the file the cart
+     * creates from it inherits that ID, and the staged neighbour file
+     * has a different one -- so the loaded file's ID says whether the
+     * NEW file started, not merely some file. Playtime backs it up:
+     * a file born seconds ago has none. */
+    const unsigned src_gid = src_c6[0x00] | ((src_c6[0x01] & 0x7F) << 8);
     unsigned long frame = 0;
     for (; frame < 30000; frame++) {
         step(ctx);
-        epoch_handoff_tick(ctx, "tlozoos");
-        epoch_secrets_tick(ctx, "tlozoos");
+        if (takeover) {
+            /* A key held down since before the cart booted -- the one
+             * that confirmed the launcher's dialog -- and one real
+             * press much later. */
+            if (frame < 300) g_joypad_buttons = (uint8_t)~0x08;   /* Start */
+            if (frame == 400) still_armed_past_held_key = epoch_handoff_active();
+            if (frame == 1300) g_joypad_buttons = (uint8_t)~0x01; /* A */
+        }
+        epoch_handoff_tick(ctx, to);
+        epoch_secrets_tick(ctx, to);
+        if (getenv("HANDOFF_TRACE") && frame >= 1100 && frame % 10 == 0) {
+            int done = 0, total = 0;
+            epoch_secrets_status(&done, &total, NULL);
+            fprintf(stderr,
+                    "[trace] f=%lu mode=%02x mode2=%02x tim=%02x cur=%02x "
+                    "scroll=%02x typed=%d/%d msg=%s\n",
+                    frame, rd(ctx, 0xCBB3), rd(ctx, 0xCBB4), rd(ctx, 0xCBB7),
+                    rd(ctx, 0xCBBC), rd(ctx, 0xCD00), done, total,
+                    epoch_handoff_message());
+        }
         if (!epoch_handoff_active()) {
             /* Machine finished or aborted; give the game a moment and
              * read the verdict. */
             for (int j = 0; j < 120; j++) step(ctx);
             in_game = rd(ctx, 0xCD00) == 0x01;
             linked = rd(ctx, 0xC612) != 0;   /* wFileIsLinkedGame */
+            hero   = rd(ctx, 0xC613) != 0;   /* wFileIsHeroGame   */
+            name_ok = memcmp(&ctx->wram[0xC602 - 0xC000], src_c6 + 0x02, 6) == 0;
+            live_gid = rd(ctx, 0xC600) | ((rd(ctx, 0xC601) & 0x7F) << 8);
+            live_playtime = rd(ctx, 0xC622) | (rd(ctx, 0xC623) << 8) |
+                            (rd(ctx, 0xC624) << 16) | ((unsigned)rd(ctx, 0xC625) << 24);
             break;
         }
     }
-    fprintf(stderr, "[handoff] finished at frame %lu: %s\n", frame,
-            epoch_handoff_message());
+    const char* message = epoch_handoff_message();
+    fprintf(stderr, "[handoff] finished at frame %lu (outcome %d): %s\n",
+            frame, epoch_handoff_outcome(), message ? message : "(silent)");
     CHECK(!epoch_handoff_active(), "the machine came to rest");
-    CHECK(in_game, "a room is live when it rests");
-    CHECK(linked, "and the cart itself says the file is LINKED");
-    CHECK(fopen("states/handoff.txt", "r") == NULL,
-          "the handoff file is consumed on success");
+    CHECK(message != NULL, "and left a verdict on screen");
 
-    /* Put the parked Seasons save back, whatever happened. */
-    remove("ZELDA DIN.sav");
-    rename("ZELDA DIN.sav.handoff-test-parked", "ZELDA DIN.sav");
+    if (strcmp(expect, "link") == 0) {
+        CHECK(epoch_handoff_outcome() == 1, "it reports success");
+        CHECK(in_game, "a room is live when it rests");
+        CHECK(linked || hero, "and the cart itself says the file is LINKED");
+        fprintf(stderr, "[handoff] cart flags: linked=%d hero=%d gid=%04x "
+                        "(sender %04x) playtime=%u frames\n",
+                linked, hero, live_gid, src_gid, live_playtime);
+        CHECK(name_ok, "the hero's name crossed over intact");
+        CHECK(live_gid == src_gid, "the file that started carries the sender's Game ID");
+        CHECK(live_playtime < 60u * 60u * 5u, "and it is brand new, not a neighbour");
+    } else if (strcmp(expect, "stop") == 0) {
+        CHECK(epoch_handoff_outcome() == -1, "it reports that it stopped");
+        CHECK(message && strstr(message, "not empty") != NULL,
+              "because the file was not empty");
+        CHECK(in_game, "leaving the player's own game on screen");
+        CHECK(frame < 2000, "and it noticed within seconds");
+    } else if (takeover) {
+        CHECK(still_armed_past_held_key,
+              "a key held since the launcher does not count as a takeover");
+        CHECK(epoch_handoff_outcome() == -1, "a real press later stops it");
+        CHECK(message && strstr(message, "took over") != NULL,
+              "and says so");
+        CHECK(frame >= 1300 && frame < 1310, "on that very frame");
+    }
+
+    /* The verdict lingers, then goes away by itself. */
+    for (int j = 0; j < 400; j++) { step(ctx); epoch_handoff_tick(ctx, to); }
+    CHECK(epoch_handoff_message() == NULL, "the verdict clears after a while");
+
+    /* Put the parked receiving save back, whatever happened. */
+    remove(tgt_sav);
+    rename(parked, tgt_sav);
 
     if (failures) { printf("%d check(s) FAILED\n", failures); return 1; }
     printf("all checks passed\n");

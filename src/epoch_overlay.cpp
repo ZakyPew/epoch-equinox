@@ -16,6 +16,7 @@ extern "C" void voxel_edit_hud_draw(void);
 #endif
 extern "C" void epoch_achievements_hud_draw(void);
 extern "C" void epoch_secrets_hud_draw(void);
+extern "C" void epoch_handoff_hud_draw(void);
 
 static void draw_overlays(void) {
     epoch_rewind_hud_draw();
@@ -24,6 +25,7 @@ static void draw_overlays(void) {
 #endif
     epoch_achievements_hud_draw();
     epoch_secrets_hud_draw();
+    epoch_handoff_hud_draw();
     epoch_panel_draw();
 }
 

@@ -29,7 +29,11 @@
 /* Active-low, like the runtime's joypad globals. */
 #define BTN_A    0x01
 #define BTN_ST   0x08
+#define DPAD_U   0x04
 #define DPAD_D   0x08
+
+/* How long the verdict stays on screen after the machine stops. */
+#define VERDICT_FRAMES 360
 
 typedef enum {
     HO_OFF = 0,
@@ -38,31 +42,49 @@ typedef enum {
     HO_SUB,         /* NEW GAME / SECRETS / GAME LINK: down once, A    */
     HO_GRID,        /* wait for the secret grid, hand off to the typist */
     HO_TYPING,      /* the typist is driving                           */
-    HO_ACCEPT,      /* Start to accept, then A through what follows    */
+    HO_ACCEPT,      /* Start to accept, A through the confirmations    */
+    HO_RESELECT,    /* back at the file select: cursor to the new file */
+    HO_START,       /* A on it, wait for a room                        */
     HO_DONE,
 } HoState;
 
 static struct {
-    bool    armed;
-    HoState state;
-    uint8_t cells[ES_MAX_SYMBOLS];
-    int     count;
-    int     slot;
-    char    name[8];
-    char    message[96];
-    int     frame;          /* frames in the current state */
-    int     presses;        /* taps issued in the current state */
-    int     hold, gap;
-    uint8_t hold_dpad, hold_buttons;
+    bool     armed;
+    HoState  state;
+    uint8_t  cells[ES_MAX_SYMBOLS];
+    int      count;
+    int      slot;
+    char     name[8];
+    char     message[96];
+    int      outcome;        /* 0 driving, 1 linked, -1 stopped */
+    int      verdict_ttl;    /* frames the verdict stays visible */
+    bool     saw_idle;       /* real input has been all-released once */
+    uint64_t last_frame;     /* guest frame the machine last advanced on */
+    int      frame;          /* frames in the current state */
+    int      presses;        /* taps issued in the current state */
+    int      steady;         /* consecutive frames a screen has held */
+    int      hold, gap;
+    uint8_t  hold_dpad, hold_buttons;
 } g;
 
 bool epoch_handoff_active(void) { return g.armed; }
-const char* epoch_handoff_message(void) { return g.message; }
+int  epoch_handoff_outcome(void) { return g.outcome; }
+
+const char* epoch_handoff_message(void) {
+    return (g.armed || g.verdict_ttl > 0) ? g.message : NULL;
+}
+
+static void say(const char* text) {
+    snprintf(g.message, sizeof(g.message), "%s", text);
+}
 
 static void ho_fail(const char* why) {
     LOG("stopped: %s (state %d)", why, (int)g.state);
-    snprintf(g.message, sizeof(g.message), "Handoff stopped: %s", why);
+    snprintf(g.message, sizeof(g.message),
+             "%s. Use Continue Legend again to retry.", why);
     gb_platform_set_turbo(false);
+    g.outcome = -1;
+    g.verdict_ttl = VERDICT_FRAMES;
     g.armed = false;
     g.state = HO_OFF;
 }
@@ -71,6 +93,7 @@ static void ho_enter(HoState s) {
     g.state = s;
     g.frame = 0;
     g.presses = 0;
+    g.steady = 0;
 }
 
 void epoch_handoff_arm(const char* game_id) {
@@ -94,6 +117,13 @@ void epoch_handoff_arm(const char* game_id) {
     }
     fclose(f);
     if (strcmp(to, game_id) != 0) return;    /* someone else's handoff */
+
+    /* One shot, whatever happens next. A handoff that stops halfway --
+     * the player took over, a menu was not where it should be -- must
+     * not lie in wait and drive the cart again on some later launch.
+     * The launcher's Continue Legend is one click to try again. */
+    remove(HANDOFF_PATH);
+
     if (g.count != 20 || g.slot < 0 || g.slot > 2) {
         LOG("malformed %s ignored", HANDOFF_PATH);
         return;
@@ -105,13 +135,13 @@ void epoch_handoff_arm(const char* game_id) {
         return;
     }
     g.armed = true;
+    g.last_frame = UINT64_MAX;
     ho_enter(HO_BOOT);
     /* Nobody should watch splash screens in real time: run the emulator
      * flat out while the machine drives. Normal speed comes back the
      * instant it finishes, fails, or the player touches anything. */
     gb_platform_set_turbo(true);
-    snprintf(g.message, sizeof(g.message),
-             "Continuing the legend: linking %s's game...", g.name);
+    snprintf(g.message, sizeof(g.message), "Waking the cart for %s...", g.name);
     LOG("armed: slot %d, 20 symbols, hero %s -- turbo on", g.slot, g.name);
 }
 
@@ -130,16 +160,35 @@ static uint8_t rd(GBContext* ctx, uint16_t addr) {
 
 void epoch_handoff_tick(GBContext* ctx, const char* game_id) {
     (void)game_id;
+    if (g.verdict_ttl > 0 && !g.armed) g.verdict_ttl--;
     if (!g.armed || !ctx || !ctx->wram) return;
 
     /* Hands beat automation: a real press on the pad or keyboard while
      * the machine drives is the player taking over. The globals are
      * rebuilt from real input every poll, so at this point they carry
-     * only the player's own buttons. */
+     * only the player's own buttons. One exception: a key still held
+     * from confirming the launcher's dialog is not a takeover -- the
+     * player has to let go once before a press means anything. */
     if (g_joypad_dpad != 0xFF || g_joypad_buttons != 0xFF) {
-        ho_fail("player took over");
+        if (g.saw_idle) {
+            ho_fail("You took over; the handoff stopped");
+            return;
+        }
+    } else {
+        g.saw_idle = true;
+    }
+
+    /* The runner may poll (and so tick) more than once per guest frame
+     * when it slices long frames. Injection has to be re-applied on
+     * every poll, but the machine itself counts guest frames. */
+    if (ctx->completed_frames == g.last_frame) {
+        if (g.hold > 0) {
+            g_joypad_dpad = g.hold_dpad;
+            g_joypad_buttons = g.hold_buttons;
+        }
         return;
     }
+    g.last_frame = ctx->completed_frames;
 
     if (g.hold > 0) {
         g_joypad_dpad = g.hold_dpad;
@@ -151,12 +200,24 @@ void epoch_handoff_tick(GBContext* ctx, const char* game_id) {
 
     g.frame++;
     if (g.frame > 3600) {                     /* a minute stuck: stop */
-        ho_fail("state never advanced");
+        ho_fail("The cart stopped answering");
         return;
     }
 
-    const uint8_t mode2 = rd(ctx, A_fs_mode2);
-    const uint8_t tim   = rd(ctx, A_fs_tim);
+    const uint8_t mode   = rd(ctx, A_fs_mode);
+    const uint8_t mode2  = rd(ctx, A_fs_mode2);
+    const uint8_t tim    = rd(ctx, A_fs_tim);
+    const uint8_t cursor = rd(ctx, A_cursor);
+    const uint8_t scroll = rd(ctx, A_scroll);
+
+    /* Nothing before START should ever be standing in a room. If a
+     * room goes live early, the slot the launcher called free held a
+     * game after all and the cart just loaded it -- stop at once, with
+     * the player's own file on screen and turbo off. */
+    if (g.state >= HO_PICK && g.state < HO_START && scroll == 0x01) {
+        ho_fail("That file was not empty -- a game started instead");
+        return;
+    }
 
     switch (g.state) {
     case HO_BOOT:
@@ -167,7 +228,12 @@ void epoch_handoff_tick(GBContext* ctx, const char* game_id) {
          * Start twice, then the file select is up. */
         if (g.frame == 650 || g.frame == 1050)
             tap(0xFF, (uint8_t)~BTN_ST);
-        if (g.frame >= 1150) ho_enter(HO_PICK);
+        if (g.frame >= 1150) {
+            char text[64];
+            snprintf(text, sizeof(text), "Opening file %d...", g.slot + 1);
+            say(text);
+            ho_enter(HO_PICK);
+        }
         break;
     case HO_PICK:
         /* Down to the free slot, A to enter it. Generous spacing so a
@@ -181,6 +247,7 @@ void epoch_handoff_tick(GBContext* ctx, const char* game_id) {
                 g.presses++;
                 tap(0xFF, (uint8_t)~BTN_A);
             } else {
+                say("Choosing SECRETS...");
                 ho_enter(HO_SUB);
             }
         }
@@ -206,47 +273,92 @@ void epoch_handoff_tick(GBContext* ctx, const char* game_id) {
             if (++g.presses >= 10) {
                 if (epoch_secrets_type(g.cells, g.count)) {
                     LOG("typist engaged");
+                    say("Typing the transfer secret...");
                     ho_enter(HO_TYPING);
                 } else {
-                    ho_fail("typist was busy");
+                    ho_fail("The typist was already busy");
                 }
             }
         } else {
             g.presses = 0;
         }
-        if (g.frame > 900) ho_fail("no secret grid appeared");
+        if (g.frame > 900) ho_fail("No secret grid appeared");
         break;
     case HO_TYPING:
         if (!epoch_secrets_busy()) {
             int done, total;
             epoch_secrets_status(&done, &total, NULL);
             if (done < total) {
-                ho_fail("typing was interrupted");
+                ho_fail("Typing was interrupted");
             } else {
+                say("Accepting the secret...");
                 ho_enter(HO_ACCEPT);
             }
         }
         break;
     case HO_ACCEPT:
-        /* Start submits the code, then the game walks its own script:
-         * the decoded-name confirmation, the message-speed prompt, the
-         * fade into the linked opening. A through all of it until a
-         * room is live -- wScrollMode is one of the few bytes here that
-         * means what it says. */
-        if (rd(ctx, A_scroll) == 0x01) {
-            remove(HANDOFF_PATH);
+        /* Start submits the code, then the game walks its own script
+         * -- the decoded-name confirmation and what follows -- and
+         * lands back on the FILE SELECT with the new file written and
+         * the cursor on file 1, not on the file it just made. A through
+         * the confirmations, but no further: the file select is where
+         * the cursor has to be steered, or the next A opens whatever
+         * file 1 holds (traced in tools/handoff_test.c). */
+        if ((g.frame % 50) == 0) {
+            if (g.presses++ == 0) tap(0xFF, (uint8_t)~BTN_ST);
+            else if (g.presses < 20) tap(0xFF, (uint8_t)~BTN_A);
+            else ho_fail("The cart did not accept the secret");
+            break;
+        }
+        if (g.presses > 1 && mode == 0x01 && mode2 == 0x01) {
+            if (++g.steady >= 10) {
+                LOG("secret accepted; back at the file select");
+                say("Opening the linked file...");
+                ho_enter(HO_RESELECT);
+            }
+        } else {
+            g.steady = 0;
+        }
+        break;
+    case HO_RESELECT:
+        /* The file cursor reads back from the same byte the typist
+         * steers by. Step toward the slot until it agrees, then A. */
+        if (mode != 0x01) { ho_fail("The file select went away"); break; }
+        if (g.frame < 30) break;
+        if ((g.frame % 30) != 0) break;
+        if (cursor == g.slot) {
+            tap(0xFF, (uint8_t)~BTN_A);
+            ho_enter(HO_START);
+        } else if (cursor < 3) {
+            tap(cursor < g.slot ? (uint8_t)~DPAD_D : (uint8_t)~DPAD_U, 0xFF);
+            if (++g.presses > 8) ho_fail("The file cursor would not move");
+        } else {
+            ho_fail("The file cursor is somewhere unexpected");
+        }
+        break;
+    case HO_START:
+        /* A brand-new linked file opens on the game's own prologue --
+         * text to page through before Link is standing anywhere. A
+         * every so often turns those pages; wScrollMode is one of the
+         * few bytes here that means what it says, and 1 is a room. The
+         * NEW GAME submenu appearing right after the press means the
+         * slot is still empty -- the cart kept nothing. */
+        if (mode == 0x05 && g.frame < 120) {
+            ho_fail("The cart did not keep the linked file");
+            break;
+        }
+        if ((g.frame % 50) == 0 && g.frame > 0) tap(0xFF, (uint8_t)~BTN_A);
+        if (g.frame > 3000) { ho_fail("The linked file never started"); break; }
+        if (scroll == 0x01) {
             snprintf(g.message, sizeof(g.message),
-                     "The legend continues -- linked game ready.");
+                     "%s's legend continues -- linked game ready.", g.name);
             LOG("linked game is standing in a room");
             gb_platform_set_turbo(false);
+            g.outcome = 1;
+            g.verdict_ttl = VERDICT_FRAMES;
             g.armed = false;
             ho_enter(HO_DONE);
             break;
-        }
-        if ((g.frame % 50) == 0) {
-            if (g.presses++ == 0) tap(0xFF, (uint8_t)~BTN_ST);
-            else if (g.presses < 60) tap(0xFF, (uint8_t)~BTN_A);
-            else ho_fail("the cart did not accept the secret");
         }
         break;
     case HO_OFF:
