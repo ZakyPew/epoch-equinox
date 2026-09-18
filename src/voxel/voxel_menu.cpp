@@ -107,8 +107,15 @@ extern "C" void voxel_menu_draw(void) {
                             "Writes voxel/overrides/, live -- no restart.");
     }
 
+    ImGui::Spacing();
+    ImGui::TextDisabled("Atmosphere");
     ImGui::SliderFloat("Fog begins", &t->fog_start, 0.0f, 200.0f, "%.0f");
     ImGui::SliderFloat("Fog strength", &t->fog_max, 0.0f, 256.0f, "%.0f");
+    ImGui::SliderFloat("Ground mist", &t->mist, 0.0f, 1.0f, "%.2f");
+    ImGui::TextDisabled("Fog wears the sky's own colour outdoors and the\n"
+                        "room's own palette indoors; mist pools over water\n"
+                        "and low ground in the distance. Both live in every\n"
+                        "voxel mode.");
 
     ImGui::Spacing();
     if (ImGui::Button("Save tuning")) {

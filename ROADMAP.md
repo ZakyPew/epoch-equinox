@@ -50,16 +50,21 @@ you are inside a dungeon with live state by frame ~1560, headless. What
 remains here is polish an eye will find faster than a probe: play a
 dungeon in chase cam and report what looks wrong.
 
-### Atmosphere pass: fog and shaders — **S** *(asked for in Discussions)*
-Some of this exists and is under-known: the chase camera already draws
-distance fog (`fog_start` / `fog_max`, live-tunable from the Esc menu's
-sliders and saved to `voxel/tuning.ini`), and the player carries the
-runtime's shader presets for the flat view. The asks worth building on
-top: fog that takes its **colour from the environment** (the renderer
-already keeps game-state skies — dusk, dungeon dark, Subrosia — and the
-fog should drink from the same palette), a touch of height/ground fog in
-the dioramas, and making the existing knobs discoverable instead of
-buried. Small, visual, and very shareable — a good first renderer task.
+### Atmosphere pass: fog and shaders — **shipped** *(asked for in Discussions)*
+Fog now takes its colour from wherever you stand: the sky's own horizon
+outdoors, and indoors — where there was only ever a fixed grey — the
+room's own palette, averaged from the tiles on screen and sunk toward
+dark, so a blue-stone dungeon hazes blue-black and a lava cave ember.
+Ground mist pools over water and low ground in the distance, in the
+chase camera and the dioramas alike, starting behind the ground Link
+stands on. All of it lives in the Esc menu's new **Atmosphere** section
+(fog begins, fog strength, ground mist) and in `voxel/tuning.ini`. It is
+also the first renderer work with a test that needs no cartridge:
+`tools/vox_synth.c` builds a meadow, a crypt and a forge by hand and
+checks the haze takes each one's colour — CI runs it. Still open here:
+the runtime's shader presets for the flat view are on by request only,
+and a dusk/dawn tint keyed to the games' own clocks would be the next
+slice.
 
 ### Dynamic props — **S**
 The opening-scene chest demonstrates why an object cannot be identified from

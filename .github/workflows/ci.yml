@@ -25,7 +25,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y ninja-build libsdl2-dev libcurl4-openssl-dev
+          sudo apt-get install -y ninja-build libsdl2-dev libcurl4-openssl-dev libgl1-mesa-dev
 
       # The whole build -- no ROM involved anywhere, which is the point.
       - name: Build
@@ -39,6 +39,18 @@ jobs:
           ./build/epoch --list-games
           ./build/epoch --games-json | python3 -m json.tool > /dev/null
           echo "player builds and answers"
+
+      # The one renderer check that needs no cartridge: hand-built scenes
+      # through the real vox_render, with the atmosphere measured in
+      # numbers (mist lifts the lake, fog takes the room's own colour).
+      - name: Render synthetic scenes
+        run: |
+          cc -O2 -o build/vox_synth tools/vox_synth.c -I src \
+             -I build/_deps/gb_recompiled-src/runtime/include \
+             $(sdl2-config --cflags) build/libepoch_support.a \
+             build/_gbrt_build/libgbrt.a $(sdl2-config --libs) \
+             -lGL -lcurl -lm -lstdc++
+          SDL_VIDEODRIVER=offscreen ./build/vox_synth build/synth
 
   launcher:
     name: Check the launcher
