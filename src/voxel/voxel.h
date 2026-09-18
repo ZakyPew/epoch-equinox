@@ -78,6 +78,7 @@ typedef struct {
     float fog_max;        /* strongest fog blend, 0-256 */
     float bevel;          /* pixel-cube edge shading, 0 = smooth */
     float dof;            /* tilt-shift blur strength, 0 = off */
+    float mist;           /* ground mist pooling over low ground, 0 = off */
 } VoxelTuning;
 
 /** The live tuning block. Safe to mutate; the renderer reads it per frame. */

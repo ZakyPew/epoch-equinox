@@ -276,8 +276,14 @@ the sliders reshape the world under the menu as you drag them:
 | | |
 |---|---|
 | **Shape** | height of grass, bushes and trees; water depth; foliage footprint; tilt height |
-| **Chase camera** | distance, height, field of view, vertical scale, fog start and strength |
+| **Chase camera** | distance, height, field of view, vertical scale |
+| **Atmosphere** | fog start and strength, and ground mist that pools over water and low ground in the distance; fog wears the sky's own colour outdoors and the room's own palette indoors, so a blue-stone dungeon hazes blue and a lava cave ember |
 | **Diorama finish** | pixel cubes (every pixel a tiny lit block) and tilt-shift blur (a diorama-photo focus band); either slider to zero turns it off |
+
+<p align="center">
+  <img src="docs/atmosphere.png" width="646" alt="Four chase-camera renders of hand-built scenes: a meadow with mist off and on, then a blue-stone crypt and a red-brick forge whose distance fog takes each room's own colour"><br>
+  <em>Synthetic scenes from <code>tools/vox_synth.c</code> (no cartridge involved): ground mist off and on over a lake, and the same crypt geometry hazing blue where the forge hazes red — fog takes the room's own palette</em>
+</p>
 
 `chase_follow` in `voxel/tuning.ini` is how fast the camera swings behind
 Link, per frame: `0.05` ships, higher snaps harder, and `0` pins the camera

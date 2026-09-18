@@ -100,6 +100,7 @@ static const VoxCam VOX_CAMS[VOXEL_MODE_COUNT] = {
     .fog_max      = 150.0f,                 \
     .bevel        = 0.55f,                  \
     .dof          = 0.55f,                  \
+    .mist         = 0.45f,                  \
 }
 
 static VoxelTuning g_tune = VOX_TUNE_INIT;
@@ -154,7 +155,8 @@ void voxel_tuning_save(void) {
             g_tune.chase_hpx, g_tune.chase_follow,
             g_tune.chase_recenter, g_tune.cliff_unify, g_tune.fog_start,
             g_tune.fog_max);
-    fprintf(f, "bevel=%.3f\ndof=%.3f\n", g_tune.bevel, g_tune.dof);
+    fprintf(f, "bevel=%.3f\ndof=%.3f\nmist=%.3f\n",
+            g_tune.bevel, g_tune.dof, g_tune.mist);
     fclose(f);
     fprintf(stderr, "[VOXEL] tuning saved to %s\n", TUNE_PATH);
 }
@@ -186,6 +188,7 @@ void voxel_tuning_load(void) {
         else if (!strcmp(key, "fog_max"))      g_tune.fog_max      = val;
         else if (!strcmp(key, "bevel"))        g_tune.bevel        = val;
         else if (!strcmp(key, "dof"))          g_tune.dof          = val;
+        else if (!strcmp(key, "mist"))         g_tune.mist         = val;
     }
     fclose(f);
     fprintf(stderr, "[VOXEL] tuning loaded from %s\n", TUNE_PATH);
@@ -462,6 +465,75 @@ static void vox_paint_sky(int kind, uint32_t* out, int S) {
             out[Y * OW + X] = d ? lerp_color(base, p->cloud, d * 2) : base;
         }
     }
+}
+
+/* ------------------------------------------------------------------ */
+/* atmosphere                                                          */
+/* ------------------------------------------------------------------ */
+
+/* Ground below this many height units sits in the mist: water and the
+ * floor fully, grass-height decor half, anything MID or taller clear. */
+#define VOX_MIST_TOP 2.0f
+
+typedef struct { uint32_t fog, mist; } VoxAtmosphere;
+
+/* Distance fog and ground mist take their colour from wherever the
+ * player is standing. Under a sky that is the sky's own horizon (so the
+ * far ground dissolves INTO the backdrop instead of against it), with
+ * mist a shade toward the clouds. Indoors there is no sky to borrow
+ * from, so the room's own palette answers instead: average the tiles
+ * on screen and sink the result toward dark. A blue-stone dungeon hazes
+ * blue-black, a lava cave ember, a wooden house warm -- and a fixed
+ * grey never sits over any of them. Cheap: ~1400 samples a frame. */
+static VoxAtmosphere vox_atmosphere(const VoxTileGrid* grid) {
+    VoxAtmosphere a;
+    if (grid->sky != VOX_SKY_NONE) {
+        const VoxSkyPalette* p = &VOX_SKIES[grid->sky];
+        a.fog = p->horizon;
+        a.mist = lerp_color(p->horizon, p->cloud, 112);
+        return a;
+    }
+    uint32_t r = 0, g = 0, b = 0, n = 0;
+    for (int y = grid->hud_rows + grid->fine_y; y < VOX_TEX_H; y += 4) {
+        for (int x = 0; x < VOX_TEX_W; x += 4) {
+            uint32_t c = grid->tex[y * VOX_TEX_W + x];
+            r += (c >> 16) & 0xFF;
+            g += (c >> 8) & 0xFF;
+            b += c & 0xFF;
+            n++;
+        }
+    }
+    if (n == 0) {
+        a.fog = 0xFF2C2620u;
+        a.mist = a.fog;
+        return a;
+    }
+    uint32_t avg = 0xFF000000u | ((r / n) << 16) | ((g / n) << 8) | (b / n);
+    a.fog = lerp_color(0xFF0E0A10u, avg, 104);
+    a.mist = lerp_color(a.fog, avg, 96);
+    return a;
+}
+
+/* The backdrop where there is no sky: the old quiet dark fade, now
+ * tinted by the same palette the fog wears, so the two meet instead of
+ * a grey gradient sitting behind a blue haze. */
+static inline uint32_t vox_dark_backdrop(int Y, int OH, uint32_t fog) {
+    int l = 26 + (Y * 20) / OH;
+    uint32_t c = 0xFF000000u
+                 | ((uint32_t)(l - 8 > 0 ? l - 8 : 0) << 16)
+                 | ((uint32_t)l << 8) | (uint32_t)(l + 6);
+    return lerp_color(c, fog, 110);
+}
+
+/* How much mist lies on a sample: full over water and floor, thinning
+ * with height, and only ever in the middle and far distance so the
+ * ground Link stands on stays crisp. 0..256 for lerp_color. */
+static inline int vox_mist_amount(float h, float dist01) {
+    if (g_tune.mist <= 0.01f || h >= VOX_MIST_TOP) return 0;
+    float low = h < 0.0f ? 1.0f : 1.0f - h / VOX_MIST_TOP;
+    if (dist01 < 0.0f) dist01 = 0.0f;
+    if (dist01 > 1.0f) dist01 = 1.0f;
+    return (int)(g_tune.mist * low * dist01 * 176.0f);
 }
 
 /* ------------------------------------------------------------------ */
@@ -1416,14 +1488,12 @@ static void render_chase(GBContext* ctx, const VoxTileGrid* grid,
     prepare_chase_ground(grid);
 
     /* Sky first; the ground overwrites what it owns. */
+    const VoxAtmosphere atm = vox_atmosphere(grid);
     if (grid->sky != VOX_SKY_NONE) {
         vox_paint_sky(grid->sky, out, S);
     } else {
         for (int Y = 0; Y < OH; Y++) {
-            int l = 26 + (Y * 20) / OH;
-            uint32_t c = 0xFF000000u
-                         | ((uint32_t)(l - 8 > 0 ? l - 8 : 0) << 16)
-                         | ((uint32_t)l << 8) | (uint32_t)(l + 6);
+            uint32_t c = vox_dark_backdrop(Y, OH, atm.fog);
             for (int X = 0; X < OW; X++) out[Y * OW + X] = c;
         }
     }
@@ -1472,8 +1542,7 @@ static void render_chase(GBContext* ctx, const VoxTileGrid* grid,
 
     const float focal = (float)OW * g_tune.chase_fov;
     const int horizon = (int)((float)OH * 0.36f);
-    const uint32_t fog = (grid->sky != VOX_SKY_NONE)
-        ? VOX_SKIES[grid->sky].horizon : 0xFF2C2620u;
+    const uint32_t fog = atm.fog;
 
     /* A treeline on the horizon: where the ground plane runs out into
      * fog, a painted silhouette of distant forest sits under the sky
@@ -1596,6 +1665,15 @@ static void render_chase(GBContext* ctx, const VoxTileGrid* grid,
                     int t4 = 96 + (int)(outd2 * 5.0f);
                     if (t4 > 256) t4 = 256;
                     c = lerp_color(c, fog, t4);
+                }
+                /* Ground mist: it lies over water and low ground beyond
+                 * the ground Link stands on -- the camera sits chase_back
+                 * behind him, so the ramp starts a step past that -- and
+                 * thickens toward the far plane, under the distance fog. */
+                {
+                    const float near = g_tune.chase_back + 8.0f;
+                    int m = vox_mist_amount(h, (d - near) / (FAR - near));
+                    if (m) c = lerp_color(c, atm.mist, m);
                 }
                 int t = (int)((d - g_tune.fog_start) * 256.0f /
                               (FAR - g_tune.fog_start));
@@ -2010,15 +2088,14 @@ void vox_render(GBContext* ctx, const VoxTileGrid* grid,
     y_off += headroom * 0.55f;
 
     /* Backdrop. Outdoors on the Oracles carts this is a sky that follows
-     * the game's own state; anywhere else it stays the quiet dark fade. */
+     * the game's own state; anywhere else it stays the quiet dark fade,
+     * tinted by the room's own palette like the haze over it. */
+    const VoxAtmosphere atm = vox_atmosphere(grid);
     if (grid->sky != VOX_SKY_NONE) {
         vox_paint_sky(grid->sky, out, S);
     } else {
         for (int Y = 0; Y < OH; Y++) {
-            int l = 26 + (Y / S) * 20 / GB_SCREEN_HEIGHT;
-            uint32_t c = 0xFF000000u
-                         | ((uint32_t)(l - 8 > 0 ? l - 8 : 0) << 16)
-                         | ((uint32_t)l << 8) | (uint32_t)(l + 6);
+            uint32_t c = vox_dark_backdrop(Y / S, GB_SCREEN_HEIGHT, atm.fog);
             for (int X = 0; X < OW; X++) out[Y * OW + X] = c;
         }
     }
@@ -2133,7 +2210,18 @@ void vox_render(GBContext* ctx, const VoxTileGrid* grid,
 
                 if (sy >= world_top * S && sy < OH) {
                     /* Slight top-light on raised ground helps height pop. */
-                    out[sy * OW + X] = (h > 0.0f) ? shade(tex, 272) : tex;
+                    uint32_t top = (h > 0.0f) ? shade(tex, 272) : tex;
+                    /* Ground mist in the diorama: the far rows (top of
+                     * the world band) are the deep end; the floor and
+                     * water there sit under a thin veil that clears
+                     * toward Link's foreground and off anything tall. */
+                    {
+                        float far01 = 1.0f - (wy - (float)world_top)
+                                             / (float)world_h;
+                        int m = vox_mist_amount(h, 0.15f + 0.85f * far01);
+                        if (m) top = lerp_color(top, atm.mist, m * 3 / 4);
+                    }
+                    out[sy * OW + X] = top;
                 }
                 prev_sy[X] = sy;
             }

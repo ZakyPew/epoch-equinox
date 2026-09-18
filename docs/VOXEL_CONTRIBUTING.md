@@ -89,6 +89,16 @@ input.) For navigation that must not drift between runs, steal the
 state-driven pattern from `tools/icon_rip.c` instead of trusting frame
 numbers.
 
+**Without a ROM at all:** `tools/vox_synth.c` builds a `VoxTileGrid` by
+hand — a meadow with a lake under a spring sky, a blue-stone crypt, a
+red-brick forge — and pushes it through `vox_render` in the chase camera
+and the 45° diorama, writing PPMs and checking the atmosphere in numbers
+(mist lifts the lake and leaves Link's ground alone; indoor fog takes the
+room's colour). CI runs it on every push, so it is the place to add a
+check for any renderer change that can be judged on synthetic geometry.
+Build it with the same command as `vox_shot`; it takes one argument, the
+output prefix.
+
 ```powershell
 $env:VOX_SHOT_STATE = "build\Release\interesting.state1"
 $env:VOX_DUMP_ROOM = "1"
