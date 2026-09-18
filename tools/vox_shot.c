@@ -181,6 +181,12 @@ int main(int argc, char* argv[]) {
     }
     static uint32_t out[GB_FRAMEBUFFER_SIZE * 16];
 
+    /* The player's own knobs (voxel/tuning.ini, written by the Esc menu)
+     * apply here too, so a frame from this probe matches a frame from the
+     * game -- and an A/B of a slider is one file edit away. The env
+     * overrides below win over the file. */
+    voxel_tuning_load();
+
     {
         const char* height = getenv("VOX_SHOT_HEIGHT");
         if (height && *height) voxel_tuning()->chase_height = (float)atof(height);
