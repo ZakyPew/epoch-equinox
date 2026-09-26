@@ -106,6 +106,7 @@ import save_manager
 import stream_config
 import updater
 from gamepad import GamepadBridge
+from godot_backend import GodotBackend, discover_godot_backend
 
 # The version this build was released as. The updater compares it against
 # the repository's release tags, so it has to match the tag it ships under
@@ -183,9 +184,28 @@ class Game:
 class Runner:
     """Everything that talks to the game binary or its data directories."""
 
-    def __init__(self, exe: Path):
+    def __init__(
+        self,
+        exe: Path,
+        godot_backend: Path | None = None,
+        godot_mods_dir: Path | None = None,
+    ):
         self.exe = exe.resolve()
         self.root = self.exe.parent
+        discovery = discover_godot_backend(
+            self.root,
+            explicit=godot_backend,
+            mods_override=godot_mods_dir,
+        )
+        self.godot_backend: GodotBackend | None = discovery.backend
+        for diagnostic in discovery.diagnostics:
+            print(f"[launcher] ooa-godot: {diagnostic}", file=sys.stderr)
+        if self.godot_backend is not None:
+            print(
+                f"[launcher] ooa-godot: {self.godot_backend.executable}; "
+                f"mods: {self.godot_backend.mods_directory}",
+                file=sys.stderr,
+            )
 
     def query_games(self) -> list[Game]:
         out = subprocess.run(
@@ -273,6 +293,21 @@ class Runner:
     def run_log(self) -> Path:
         return self.root / "epoch-run.log"
 
+    @property
+    def godot_run_log(self) -> Path:
+        return self.root / "ooa-godot-run.log"
+
+    def native_available(self, game: Game) -> bool:
+        return game.id == "tlozooa" and self.godot_backend is not None
+
+    @property
+    def godot_mods_dir(self) -> Path | None:
+        return (
+            self.godot_backend.mods_directory
+            if self.godot_backend is not None
+            else None
+        )
+
     @staticmethod
     def _game_env() -> dict:
         """Environment for the game process. The gamepad bridge points SDL
@@ -294,15 +329,37 @@ class Runner:
         # anyway. The log also turns "the game just didn't start" into a
         # readable error -- start_game checks for an early exit and shows
         # the tail of this file.
-        log = open(self.run_log, "w", encoding="utf-8", errors="replace")
+        return self._launch_logged(
+            [str(self.exe), "--game", game.id],
+            self.root,
+            self.run_log,
+        )
+
+    def launch_native(self, game: Game) -> subprocess.Popen:
+        if not self.native_available(game) or self.godot_backend is None:
+            raise RuntimeError("The ooa-godot backend is not available for this game.")
+        self.godot_backend.mods_directory.mkdir(parents=True, exist_ok=True)
+        return self._launch_logged(
+            self.godot_backend.command(),
+            self.godot_backend.working_directory,
+            self.godot_run_log,
+        )
+
+    def _launch_logged(
+        self,
+        command: list[str],
+        working_directory: Path,
+        log_path: Path,
+    ) -> subprocess.Popen:
+        log = open(log_path, "w", encoding="utf-8", errors="replace")
         kwargs = {}
         if os.name == "nt":
             # Don't flash a console window behind the game.
             kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
         try:
             return subprocess.Popen(
-                [str(self.exe), "--game", game.id],
-                cwd=self.root,
+                command,
+                cwd=working_directory,
                 env=self._game_env(),
                 stdin=subprocess.DEVNULL,
                 stdout=log,
@@ -428,8 +485,9 @@ def draw_seasons_motif(pr: QPainter, c: QPointF, r: float, col: QColor) -> None:
 # --------------------------------------------------------------------------
 
 MENU_ITEMS = [
-    "Start game", "Continue Legend", "Mods", "Achievements", "Secrets",
-    "Saves", "Install ROM", "Stream", "Updates", "Exit",
+    "Start game", "Start native Ages", "Native mods", "Continue Legend",
+    "Mods", "Achievements", "Secrets", "Saves", "Install ROM", "Stream",
+    "Updates", "Exit",
 ]
 
 # The two halves of the legend. Continuing one means linking the other.
@@ -766,6 +824,8 @@ class LauncherView(QWidget):
             self._menu_rects.append(rect)
 
             disabled = item in ("Start game", "Mods") and not game.playable
+            if item in ("Start native Ages", "Native mods"):
+                disabled = not self.runner.native_available(game)
             if disabled:
                 col = QColor(150, 150, 155, 90)
             elif i == self.menu_index:
@@ -2155,9 +2215,18 @@ class MainWindow(QWidget):
         elif item == "Mods":
             if game.playable:
                 ModsDialog(self.runner, game, self).exec()
+        elif item == "Native mods":
+            if self.runner.native_available(game):
+                mods = self.runner.godot_mods_dir
+                if mods is not None:
+                    mods.mkdir(parents=True, exist_ok=True)
+                    open_in_file_manager(mods)
         elif item == "Start game":
             if game.playable:
                 self.start_game(game)
+        elif item == "Start native Ages":
+            if self.runner.native_available(game):
+                self.start_native_game(game)
 
     def continue_legend(self, game: Game) -> None:
         """The seamless linked game: take this game's transfer secret and
@@ -2235,6 +2304,22 @@ class MainWindow(QWidget):
         except OSError as exc:
             QMessageBox.warning(self, "Could not start the game", str(exc))
             return
+        self.game_log = self.runner.run_log
+        self.game_process_name = self.runner.exe.name
+        self._watch_game_process()
+
+    def start_native_game(self, game: Game) -> None:
+        try:
+            self.game_proc = self.runner.launch_native(game)
+        except (OSError, RuntimeError) as exc:
+            QMessageBox.warning(self, "Could not start native Ages", str(exc))
+            return
+        backend = self.runner.godot_backend
+        self.game_log = self.runner.godot_run_log
+        self.game_process_name = backend.executable.name if backend else "ooa-godot"
+        self._watch_game_process()
+
+    def _watch_game_process(self) -> None:
         # Stay hidden for as long as the game owns the screen. The old
         # behaviour -- reappear on a fixed 1.5s timer -- put the launcher
         # window on top of the running game, which read as a glitch.
@@ -2260,8 +2345,9 @@ class MainWindow(QWidget):
             # The runner never took (or lost) the screen -- surface what it
             # said instead of silently reappearing.
             tail = ""
+            log_path = getattr(self, "game_log", self.runner.run_log)
             try:
-                text = self.runner.run_log.read_text(
+                text = log_path.read_text(
                     encoding="utf-8", errors="replace"
                 ).strip()
                 tail = "\n".join(text.splitlines()[-15:])
@@ -2270,9 +2356,10 @@ class MainWindow(QWidget):
             QMessageBox.critical(
                 self,
                 "The game exited",
-                f"{self.runner.exe.name} exited with code {rc}.\n\n"
+                f"{getattr(self, 'game_process_name', self.runner.exe.name)} "
+                f"exited with code {rc}.\n\n"
                 f"{tail or '(no output captured)'}\n\n"
-                f"Full log: {self.runner.run_log}",
+                f"Full log: {log_path}",
             )
 
 
@@ -2294,6 +2381,18 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Epoch & Equinox launcher")
     parser.add_argument(
         "--runner", type=Path, default=None, help="path to the oracles game binary"
+    )
+    parser.add_argument(
+        "--godot-backend",
+        type=Path,
+        default=None,
+        help="ooa-godot executable, project directory, or backend descriptor directory",
+    )
+    parser.add_argument(
+        "--godot-mods-dir",
+        type=Path,
+        default=None,
+        help="mod directory passed to the ooa-godot backend",
     )
     parser.add_argument("--smoke-test", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
@@ -2327,7 +2426,7 @@ def main() -> int:
         box.exec()
         return 1
 
-    runner = Runner(runner_path)
+    runner = Runner(runner_path, args.godot_backend, args.godot_mods_dir)
     if args.smoke_test:
         runner.query_games()
         return 0

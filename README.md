@@ -179,6 +179,52 @@ The launcher handles this for you, but the binary stands alone:
 ./build/epoch --game tlozooa --voxel 2
 ```
 
+### Optional native Ages backend
+
+The launcher can also discover and start a separate
+[`ooa-godot`](https://github.com/SHOEGAZEssb/ooa-godot) installation for
+Oracle of Ages. The projects remain separate: **Start game** uses Epoch's ROM
+backend, while **Start native Ages** launches Godot and passes its own mod
+directory through `--mods-dir=`.
+
+The zero-configuration layout is:
+
+```text
+epoch-equinox/
+├── epoch.exe
+└── backends/
+    └── ooa-godot/
+        ├── oracle-of-ages.exe
+        └── mods/
+```
+
+An exported executable named `oracle-of-ages`, `Oracle of Ages`, or
+`ooa-godot` is detected there. A development checkout containing
+`project.godot` is also detected when Godot is on `PATH` or `GODOT4` points to
+the editor. Use launcher options for another layout:
+
+```powershell
+python launcher/epoch_launcher.py `
+  --godot-backend 'D:\Games\ooa-godot' `
+  --godot-mods-dir 'D:\Games\ooa-godot-mods'
+```
+
+For packaged or unusual installations, place `backend.json` in the detected
+directory:
+
+```json
+{
+  "executable": "Godot_v4.7.1-stable_mono_win64.exe",
+  "project": "checkout",
+  "mods_dir": "mods",
+  "arguments": []
+}
+```
+
+Paths in that file are relative to the descriptor. `project` is optional for
+an exported game. The **Native mods** launcher item opens the exact directory
+passed to ooa-godot.
+
 ## Voxel mode
 
 **Off by default — press `F3`.** The game plays exactly as it always did until
