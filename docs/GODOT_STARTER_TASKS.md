@@ -34,6 +34,9 @@ contribution guide](GODOT_BACKEND_CONTRIBUTING.md). Preserve upstream
 attribution. This permission does not grant rights to Nintendo content or
 provide a blanket license for third-party reuse outside this project.
 
+For modding work, start from the checked-in [synthetic priority demo](../backends/ooa-godot/docs/modding.md#run-the-synthetic-priority-example)
+and its automated test rather than using ROM-derived example assets.
+
 ### Reproduce one player-animation discrepancy
 
 **Difficulty:** beginner-friendly investigation; small code fix only if the
@@ -68,22 +71,6 @@ re-entry where that slice needs it.
 arithmetic, collision, and RNG behavior; its expected result is independently
 derived from the ROM/disassembly; `dotnet build` has no warnings/errors; and
 the complete Godot validation suite passes.
-
-### Native mod support: add a safe example overlay
-
-**Difficulty:** beginner to intermediate; no gameplay or ROM changes.
-
-Extend [the modding guide](../backends/ooa-godot/docs/modding.md) with a tiny
-example mod that demonstrates one supported complete table or image override,
-priority, disabled fallback, and how to run vanilla with `--no-mods`. Use
-synthetic/original example data only; do not copy Nintendo assets into the
-example. Keep the example outside `assets/oracle/` and the clean-ROM import
-manifest.
-
-**Done when:** a contributor can create the example under an external mods
-directory, see which mod won from startup diagnostics, and return to vanilla by
-disabling the mod or passing `--no-mods`; the documented commands and manifest
-match the existing resolver/tests.
 
 ## Where to work and how to submit
 
