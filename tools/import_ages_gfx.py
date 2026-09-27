@@ -10,16 +10,16 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import shutil
 import struct
 from pathlib import Path
 
 
-TILESETS = (
-    "gfx_tileset_overworld_standard.png",
-    "gfx_tileset_overworld_present.png",
-    "gfx_tileset_overworld_past.png",
-)
+ROOM_GROUP = 0
+ROOM_ID = 0
+ROOM_WIDTH = 10
+ROOM_HEIGHT = 8
 
 
 def png_dimensions(path: Path) -> tuple[int, int]:
@@ -30,18 +30,51 @@ def png_dimensions(path: Path) -> tuple[int, int]:
     return struct.unpack(">II", header[16:24])
 
 
+def read_tileset_record(tilesets_source: Path, tileset_id: int) -> list[str]:
+    lines = tilesets_source.read_text(encoding="utf-8").splitlines()
+    marker = f"; 0x{tileset_id:02x}"
+    start = next((i for i, line in enumerate(lines) if line.strip().lower() == marker), None)
+    if start is None:
+        raise ValueError(f"Could not find tileset record {tileset_id:02x} in {tilesets_source}")
+    rows: list[str] = []
+    for line in lines[start + 1 :]:
+        if re.match(r"\s*;\s*0x[0-9a-f]{2}\s*$", line, re.IGNORECASE):
+            break
+        match = re.match(r"\s*\.db\s+(.+?)\s*$", line, re.IGNORECASE)
+        if match:
+            rows.append(match.group(1))
+            if len(rows) == 5:
+                break
+    if len(rows) != 5:
+        raise ValueError(f"Tileset record {tileset_id:02x} is incomplete in {tilesets_source}")
+    return rows
+
+
+def resolve_graphics_header(header_source: Path, symbol: str, unique: bool) -> list[dict[str, object]]:
+    macro = "m_UniqueGfxHeaderStart" if unique else "m_GfxHeaderStart"
+    lines = header_source.read_text(encoding="utf-8").splitlines()
+    start = next((i for i, line in enumerate(lines) if macro in line and symbol in line), None)
+    if start is None:
+        raise ValueError(f"Could not find graphics header {symbol} in {header_source}")
+    graphics: list[dict[str, object]] = []
+    for line in lines[start + 1 :]:
+        if "m_GfxHeaderEnd" in line:
+            break
+        match = re.search(r"\bm_GfxHeader\s+([A-Za-z0-9_]+)\s*,\s*\$([0-9a-f]{4})\b", line, re.IGNORECASE)
+        if match:
+            address = int(match.group(2), 16) & 0xFFFE
+            if 0x8800 <= address < 0x9800 and (address - 0x8800) % 16 == 0:
+                graphics.append({"file": match.group(1) + ".png", "start_tile": (address - 0x8800) // 16})
+    if not graphics:
+        raise ValueError(f"Graphics header {symbol} has no PNG assets in {header_source}")
+    return graphics
+
+
 def import_tilesets(disasm_root: Path, output_dir: Path) -> dict[str, object]:
     source_dir = disasm_root / "gfx_compressible" / "ages"
+    data_dir = disasm_root / "data" / "ages"
     images: list[dict[str, object]] = []
     output_dir.mkdir(parents=True, exist_ok=True)
-    for filename in TILESETS:
-        source = source_dir / filename
-        if not source.is_file():
-            raise FileNotFoundError(f"Required decoded Ages graphics are missing: {source}")
-        width, height = png_dimensions(source)
-        destination = output_dir / filename
-        shutil.copyfile(source, destination)
-        images.append({"file": filename, "width": width, "height": height})
     room = disasm_root / "rooms" / "ages" / "small" / "room0000.bin"
     assignments = disasm_root / "rooms" / "ages" / "group0Tilesets.bin"
     if not room.is_file() or not assignments.is_file():
@@ -50,11 +83,37 @@ def import_tilesets(disasm_root: Path, output_dir: Path) -> dict[str, object]:
     assignment_data = assignments.read_bytes()
     if not assignment_data:
         raise ValueError(f"Room group 0 tileset assignment table is empty: {assignments}")
-    tileset_id = assignment_data[0]
-    if len(room_data) != 80:
+    if len(room_data) != ROOM_WIDTH * ROOM_HEIGHT:
         raise ValueError(f"Expected an 80-byte 10x8 room layout: {room}")
-    mappings = disasm_root / "tileset_layouts" / "ages" / f"tilesetMappings{tileset_id:02x}.bin"
-    collisions = disasm_root / "tileset_layouts" / "ages" / f"tilesetCollisions{tileset_id:02x}.bin"
+    tileset_id = assignment_data[ROOM_ID]
+    record = read_tileset_record(data_dir / "tilesets.s", tileset_id)
+    layout_numbers = re.findall(r"\$([0-9a-f]{2})", record[4], re.IGNORECASE)
+    if len(layout_numbers) != 3:
+        raise ValueError(f"Could not decode tileset {tileset_id:02x} mapping/layout indices")
+    layout_id = int(layout_numbers[0], 16)
+    graphics = resolve_graphics_header(data_dir / "gfxHeaders.s", record[2], unique=False)
+    graphics += resolve_graphics_header(data_dir / "uniqueGfxHeaders.s", record[1], unique=True)
+    covered_tiles: set[int] = set()
+    for entry in graphics:
+        filename = str(entry["file"])
+        source = source_dir / filename
+        if not source.is_file():
+            raise FileNotFoundError(f"Required decoded Ages graphics are missing: {source}")
+        width, height = png_dimensions(source)
+        if width != 128 or height % 8 != 0:
+            raise ValueError(f"Expected an 8x8-aligned 128px-wide VRAM sheet: {source} ({width}x{height})")
+        start_tile = int(entry["start_tile"])
+        tile_count = (width // 8) * (height // 8)
+        if start_tile % 16 != 0 or start_tile + tile_count > 256:
+            raise ValueError(f"Graphics header places {filename} outside the BG tile index atlas")
+        destination = output_dir / filename
+        shutil.copyfile(source, destination)
+        images.append({"file": filename, "width": width, "height": height, "start_tile": start_tile})
+        covered_tiles.update(range(start_tile, start_tile + tile_count))
+    if len(covered_tiles) != 256:
+        raise ValueError(f"Graphics for tileset {tileset_id:02x} fill only {len(covered_tiles)} of 256 BG tile slots")
+    mappings = disasm_root / "tileset_layouts" / "ages" / f"tilesetMappings{layout_id:02x}.bin"
+    collisions = disasm_root / "tileset_layouts" / "ages" / f"tilesetCollisions{layout_id:02x}.bin"
     for source, expected_size in ((mappings, 2048), (collisions, 256)):
         if not source.is_file() or source.stat().st_size != expected_size:
             raise ValueError(f"Missing or malformed tileset {tileset_id:02x} table: {source}")
@@ -62,9 +121,9 @@ def import_tilesets(disasm_root: Path, output_dir: Path) -> dict[str, object]:
     shutil.copyfile(room, output_dir / "room0000.bin")
     manifest: dict[str, object] = {
         "format": 1,
-        "source": "local oracles-disasm gfx_compressible/ages",
+        "source": "local oracles-disasm decoded Ages graphics and layout tables",
         "images": images,
-        "room": {"group": 0, "id": 0, "tileset": tileset_id, "width": 10, "height": 8},
+        "room": {"group": ROOM_GROUP, "id": ROOM_ID, "tileset": tileset_id, "layout": layout_id, "width": ROOM_WIDTH, "height": ROOM_HEIGHT},
     }
     (output_dir / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     return manifest
@@ -81,7 +140,8 @@ def main() -> int:
     )
     args = parser.parse_args()
     manifest = import_tilesets(args.disasm_root.resolve(), args.output_dir.resolve())
-    print(f"Imported {len(manifest['images'])} decoded Ages tilesets to {args.output_dir.resolve()}")
+    room = manifest["room"]
+    print(f"Imported Ages room {room['group']:02x}{room['id']:02x} (tileset {room['tileset']:02x}, layout {room['layout']:02x}) to {args.output_dir.resolve()}")
     for image in manifest["images"]:
         print(f"  {image['file']}: {image['width']}x{image['height']}")
     return 0

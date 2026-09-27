@@ -6,9 +6,11 @@ back to a fixed 160x144 programmer-art room with deterministic movement,
 wall/water collision, and a small saveable chest interaction.
 
 When local imported assets are present, the lab instead loads room `0000`
-(10x8 metatiles), applies its tileset-08 tile mappings and collision table, and
-draws the room from the decoded overworld graphics. The player remains a simple
-debug marker; the initial render uses the source sheets' grayscale palette.
+(10x8 metatiles), reads tileset 08's layout index from the disassembly,
+applies that tile mapping/collision table, and draws the room from the exact
+present-era VRAM graphics sequence (common overworld sheets plus Talus Peaks
+unique sheets). The player remains a simple debug marker; the initial render
+uses the source sheets' grayscale palette.
 
 The prototype is deliberately hidden from the normal launcher menu. To show the
 developer-only “Start native Ages” action, run Epoch's launcher with
@@ -32,8 +34,9 @@ Run its headless regression:
 ## Local graphics import
 
 With a local `oracles-disasm` checkout (built from a clean supported ROM),
-import the decoded overworld graphics, room 0000 layout, and its tileset-08
-mapping/collision tables into the Git-ignored `imported/` directory:
+import the graphics and tables required by room 0000 into the Git-ignored
+`imported/` directory. Graphics and layout IDs are resolved from the
+disassembly's `tilesets.s` and graphics-header tables:
 
 ```powershell
 python ..\..\tools\import_ages_gfx.py --disasm-root C:\path\to\oracles-disasm

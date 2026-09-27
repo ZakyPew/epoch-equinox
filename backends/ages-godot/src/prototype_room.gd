@@ -115,28 +115,46 @@ func _draw() -> void:
 
 func _load_local_tileset() -> void:
 	var atlas := Image.create(128, 128, false, Image.FORMAT_RGBA8)
-	var y_offset := 0
-	for sheet in ["standard", "present", "past"]:
-		var path := "res://imported/gfx_tileset_overworld_%s.png" % sheet
+	var manifest_path := "res://imported/manifest.json"
+	if not FileAccess.file_exists(manifest_path):
+		return
+	var manifest: Variant = JSON.parse_string(FileAccess.get_file_as_string(manifest_path))
+	if not manifest is Dictionary or not manifest.get("images", []) is Array:
+		push_warning("Local Ages asset manifest is malformed")
+		return
+	var covered_tiles := PackedByteArray()
+	covered_tiles.resize(256)
+	for graphics in manifest["images"]:
+		if not graphics is Dictionary:
+			continue
+		var path := "res://imported/%s" % str(graphics.get("file", ""))
 		if not FileAccess.file_exists(path):
+			push_warning("A graphics sheet listed in the local manifest is missing: %s" % path)
 			return
 		var image := Image.load_from_file(ProjectSettings.globalize_path(path))
-		if image == null or image.is_empty() or image.get_width() != 128 or image.get_height() % 8 != 0:
+		var start_tile := int(graphics.get("start_tile", -1))
+		if image == null or image.is_empty() or image.get_width() != 128 or image.get_height() % 8 != 0 or start_tile < 0 or start_tile % 16 != 0:
 			push_warning("Invalid local overworld graphics sheet: %s" % path)
 			return
 		image.convert(Image.FORMAT_RGBA8)
-		atlas.blit_rect(image, Rect2i(Vector2i.ZERO, image.get_size()), Vector2i(0, y_offset))
-		y_offset += image.get_height()
-	if y_offset != 128:
-		push_warning("Expected 256 8x8 tiles across imported Ages sheets; found %d pixels" % y_offset)
+		var start_y := (start_tile >> 4) * 8
+		var end_y := start_y + image.get_height()
+		if end_y > 128:
+			push_warning("Graphics sheet extends past the Game Boy BG tile address range: %s" % path)
+			return
+		atlas.blit_rect(image, Rect2i(Vector2i.ZERO, image.get_size()), Vector2i(0, start_y))
+		for index in range(start_tile, start_tile + (image.get_width() >> 3) * (image.get_height() >> 3)):
+			covered_tiles[index] = 1
+	if covered_tiles.count(1) != 256:
+		push_warning("Imported graphics do not cover all 256 BG tile slots")
 		return
 	_atlas_texture = ImageTexture.create_from_image(atlas)
 
 
 func _load_local_room() -> void:
 	var room_path := "res://imported/room0000.bin"
-	var mappings_path := "res://imported/tilesetMappings08.bin"
-	var collisions_path := "res://imported/tilesetCollisions08.bin"
+	var mappings_path := "res://imported/tilesetMappings06.bin"
+	var collisions_path := "res://imported/tilesetCollisions06.bin"
 	if _atlas_texture == null or not FileAccess.file_exists(room_path) or not FileAccess.file_exists(mappings_path) or not FileAccess.file_exists(collisions_path):
 		return
 	_room_layout = FileAccess.get_file_as_bytes(room_path)
@@ -156,10 +174,10 @@ func _draw_imported_room() -> void:
 			var metatile_id := int(_room_layout[y * IMPORTED_ROOM_WIDTH + x])
 			for quadrant in range(4):
 				var mapping_index := metatile_id * 4 + quadrant
-				var tile_id := int(_room_mappings[mapping_index])
+				var tile_id := _vram_tile_index(int(_room_mappings[mapping_index]))
 				var attribute := int(_room_mappings[1024 + mapping_index])
-				var source := Vector2i((tile_id % 16) * 8, (tile_id / 16) * 8)
-				var destination := Vector2i(x * 16 + (quadrant % 2) * 8, y * 16 + (quadrant / 2) * 8)
+				var source := Vector2i((tile_id % 16) * 8, (tile_id >> 4) * 8)
+				var destination := Vector2i(x * 16 + (quadrant % 2) * 8, y * 16 + (quadrant >> 1) * 8)
 				var flip_x := (attribute & 0x20) != 0
 				var flip_y := (attribute & 0x40) != 0
 				if flip_x or flip_y:
@@ -170,6 +188,12 @@ func _draw_imported_room() -> void:
 					draw_set_transform(Vector2.ZERO)
 				else:
 					draw_texture_rect_region(_atlas_texture, Rect2(destination, Vector2(8, 8)), Rect2(source, Vector2(8, 8)))
+
+
+func _vram_tile_index(gameboy_tile_id: int) -> int:
+	# Oracle room tile IDs use Game Boy's signed BG addressing: $80 maps to
+	# $8800 (atlas slot 0), while $00 maps to $9000 (atlas slot 128).
+	return gameboy_tile_id ^ 0x80
 
 
 func _draw_imported_player() -> void:
@@ -308,6 +332,8 @@ func _add_key_action(action: StringName, keycodes: Array[int]) -> void:
 
 func _run_smoke_test() -> void:
 	var errors: Array[String] = []
+	if _vram_tile_index(0x80) != 0 or _vram_tile_index(0x00) != 128:
+		errors.append("Game Boy signed BG tile IDs should map to the correct VRAM atlas slots")
 	if _use_imported_room:
 		if _atlas_texture == null or _room_layout.size() != IMPORTED_ROOM_WIDTH * IMPORTED_ROOM_HEIGHT:
 			errors.append("imported room and combined tile atlas should load")
