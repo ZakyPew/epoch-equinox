@@ -173,9 +173,14 @@ func _create_palette_atlas(source: Image, palette: Array) -> Image:
 		for x in range(paletted.get_width()):
 			var pixel: Color = paletted.get_pixel(x, y)
 			if pixel.a > 0.0:
-				var shade := clampi(roundi(pixel.r * 3.0), 0, 3)
+				var shade := _grayscale_to_palette_index(pixel.r)
 				paletted.set_pixel(x, y, colors[shade])
 	return paletted
+
+
+func _grayscale_to_palette_index(intensity: float) -> int:
+	# The disassembly PNG encoder writes GB color 0 as white and color 3 as black.
+	return 3 - clampi(roundi(intensity * 3.0), 0, 3)
 
 
 func _rgb5_to_color(rgb5: Array) -> Color:
@@ -389,6 +394,8 @@ func _run_smoke_test() -> void:
 	var red := _rgb5_to_color([31, 0, 0])
 	if red.r != 1.0 or red.g != 0.0 or red.b != 0.0:
 		errors.append("5-bit disassembly palette colors should expand to normalized RGB")
+	if _grayscale_to_palette_index(1.0) != 0 or _grayscale_to_palette_index(0.0) != 3:
+		errors.append("disassembly grayscale values should map white to color 0 and black to color 3")
 		for metatile_id in _room_layout:
 			if _mapping_tile_offset(int(metatile_id), 3) + 4 >= _room_mappings.size():
 				errors.append("room references a metatile without mapping data")
