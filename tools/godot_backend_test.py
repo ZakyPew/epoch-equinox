@@ -45,9 +45,32 @@ with tempfile.TemporaryDirectory(prefix="epoch-godot-backend-") as temporary:
         f"--mods-dir={(backend_root / 'mods').resolve()}",
     ]
 
+    # A neighboring full reconstruction takes precedence over the smaller
+    # Epoch lab, so the launcher reuses the real game when both are present.
+    neighboring_game = root / "ooa-godot"
+    touch(neighboring_game / "project.godot")
+    prototype = epoch / "backends" / "ages-godot"
+    touch(prototype / "project.godot")
+    preferred = discover_godot_backend(epoch, environment={"GODOT4": str(editor)})
+    assert preferred.backend is not None
+    assert preferred.backend.project_directory == neighboring_game.resolve()
+
+    bundled_game = epoch / "backends" / "ooa-godot"
+    touch(bundled_game / "project.godot")
+    bundled = discover_godot_backend(epoch, environment={"GODOT4": str(editor)})
+    assert bundled.backend is not None
+    assert bundled.backend.project_directory == bundled_game.resolve()
+
+    built_runner_root = epoch / "build" / "Release"
+    nested = discover_godot_backend(
+        built_runner_root, environment={"GODOT4": str(editor)}
+    )
+    assert nested.backend is not None
+    assert nested.backend.project_directory == bundled_game.resolve()
+
     exported = backend_root / "oracle-of-ages.exe"
     touch(exported)
-    exported_discovery = discover_godot_backend(epoch, environment={})
+    exported_discovery = discover_godot_backend(epoch, explicit=backend_root, environment={})
     assert exported_discovery.backend is not None
     assert exported_discovery.backend.executable == exported.resolve()
 

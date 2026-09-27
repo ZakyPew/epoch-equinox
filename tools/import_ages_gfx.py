@@ -112,6 +112,7 @@ def resolve_background_palettes(header_source: Path, data_source: Path, symbol: 
 
 def import_tilesets(disasm_root: Path, output_dir: Path, room_group: int = ROOM_GROUP, room_id: int = ROOM_ID) -> dict[str, object]:
     source_dir = disasm_root / "gfx_compressible" / "ages"
+    sprite_source = disasm_root / "gfx" / "common" / "spr_link.png"
     data_dir = disasm_root / "data" / "ages"
     images: list[dict[str, object]] = []
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -166,12 +167,22 @@ def import_tilesets(disasm_root: Path, output_dir: Path, room_group: int = ROOM_
             raise ValueError(f"Missing or malformed tileset {tileset_id:02x} table: {source}")
         shutil.copyfile(source, output_dir / source.name)
     shutil.copyfile(room, output_dir / room_file)
+    sprite_name = "spr_link.png"
+    if not sprite_source.is_file():
+        raise FileNotFoundError(f"Required decoded Link sprite sheet is missing: {sprite_source}")
+    sprite_width, sprite_height = png_dimensions(sprite_source)
+    if sprite_width != 128 or sprite_height < 16 or sprite_height % 8 != 0:
+        raise ValueError(f"Expected an 8x8-aligned 128px-wide Link sprite sheet: {sprite_source} ({sprite_width}x{sprite_height})")
+    shutil.copyfile(sprite_source, output_dir / sprite_name)
     manifest: dict[str, object] = {
         "format": 1,
         "source": "local oracles-disasm decoded Ages graphics and layout tables",
         "images": images,
         "palettes": palettes,
         "room": {"group": room_group, "id": room_id, "tileset": tileset_id, "assignment": tileset_assignment, "layout": layout_id, "width": ROOM_WIDTH, "height": ROOM_HEIGHT, "file": room_file},
+        # Link's special-object animation table points idle at 0x2140 and its
+        # two-step walk at 0x2080/0x20c0 within spr_link's decoded tile stream.
+        "player_sprite": {"file": sprite_name, "format": "gameboy_oam_8x16_pair", "tile_ids": [0, 2], "idle_offset": 0x2140, "walking_offsets": [0x2080, 0x20C0]},
     }
     (output_dir / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     return manifest

@@ -1,9 +1,17 @@
 # Epoch Ages Lab
 
-This is an Epoch-owned Godot prototype, implemented independently of the
-separate `ooa-godot` reconstruction. Without local imported assets, it falls
-back to a fixed 160x144 programmer-art room with deterministic movement,
-wall/water collision, and a small saveable chest interaction.
+Epoch includes the `ooa-godot` repository as a pinned Git submodule at
+`backends/ooa-godot`, and launches that project's normal title/file-select
+flow. Clone Epoch with `--recurse-submodules` (or run `git submodule update
+--init --recursive`) to fetch its game source. This folder remains a small
+Epoch-owned development fallback, not a second game implementation to grow in
+parallel.
+
+To use another checkout, set `OOA_GODOT_PATH` to its project directory or pass
+`--godot-backend` to the launcher. The developer-only “Start native Ages” menu
+item remains hidden from the normal launcher menu. The backend's own `mods/`
+directory is passed through to its native mod system; use
+`--godot-mods-dir` to override it for a local test.
 
 When local imported assets are present, the lab instead loads room `0000`
 (10x8 metatiles), reads tileset 08's layout index from the disassembly,
@@ -12,12 +20,10 @@ present-era VRAM graphics sequence (common overworld sheets plus Talus Peaks
 unique sheets). Room tiles use the Talus Peaks background palettes decoded
 from the local disassembly data; the player remains a simple debug marker.
 
-The prototype is deliberately hidden from the normal launcher menu. To show the
-developer-only “Start native Ages” action, run Epoch's launcher with
-`--dev-native-backend`. Godot 4 must be available as `GODOT4`, `GODOT`, or on
-`PATH`. The launcher discovers this project at `backends/ages-godot` and passes
-the selected mods directory through `--mods-dir`; the prototype does not load
-mods yet.
+To show the developer-only native-backend actions, run Epoch's launcher with
+`--dev-native-backend`. Godot 4.7.1 with .NET support must be available as
+`GODOT4`, `GODOT`, or on `PATH` when launching the full `ooa-godot` project.
+The small fallback prototype does not load mods.
 
 Run directly from this directory:
 

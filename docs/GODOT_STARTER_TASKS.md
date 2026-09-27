@@ -1,0 +1,104 @@
+# Native Ages launcher and Godot starter tasks
+
+These are bounded starting points for community contributors. The project goal
+is faithful Oracle of Ages behavior, not a redesign: compare against a clean
+US game and the matching `oracles-disasm` source, then add a focused automated
+regression with any behavior change. Never commit ROMs, generated ROM-derived
+assets, or personal saves.
+
+## Epoch-only task: add UI tests for native mod management
+
+**Difficulty:** beginner/intermediate; does not require a ROM or editing the
+Godot submodule.
+
+The launcher now has a separate `NativeModsDialog`. Add an offscreen Qt test
+that creates temporary manifests and checks that valid mods are listed,
+malformed/duplicate manifests are diagnosed, toggling and saving changes only
+the `enabled` field, Cancel writes nothing, and Refresh reflects files added
+while the dialog is open. Use temporary directories only; do not touch the
+checked-in backend's `mods/` folder. Put the test in `tools/` and add it to the
+existing launcher CI job.
+
+**Done when:** the test runs with `QT_QPA_PLATFORM=offscreen`, passes in CI,
+and fails if the dialog accidentally calls the classic ROM-mod state writer.
+The root Epoch MIT license covers launcher files, as described in `LICENSE`;
+this does not license the Godot submodule or Nintendo content.
+
+## Godot-submodule proposals (rights review pending)
+
+The following are useful scoped tasks to discuss and investigate. The
+submodule's code license and provenance need maintainer review before its code
+can be advertised as open source or outside contributions merged or
+redistributed.
+
+### Reproduce one player-animation discrepancy
+
+**Difficulty:** beginner-friendly investigation; small code fix only if the
+comparison reveals a specific defect.
+
+Compare Link's walking animation in the Godot game and a clean US Oracle of Ages
+run in the same top-down room, first on flat ground and then while entering a
+water/slow terrain tile. Record the room, starting position, held input, number
+of original 60 Hz updates, and the observed animation/frame sequence. Use the
+existing player validation helpers and source references rather than judging
+from two differently scaled screenshots alone.
+
+**Done when:** the issue or PR contains a deterministic reproduction; any
+claimed mismatch is traced to its source behavior; and a focused validation
+checks the relevant frame/timing boundary. Keep movement, sprite artwork, and
+render scaling as separate issues if they turn out to be separate causes.
+
+### Gameplay slice: top-down Mermaid Suit swimming
+
+**Difficulty:** intermediate.
+
+Top-down Mermaid Suit movement and deep-water transitions are listed as
+unfinished in [implementation status](../backends/ooa-godot/docs/implementation-status.md).
+Trace the original swimming state and its callers in `link.s` / the relevant
+interaction and collision code. Implement one coherent top-down swimming
+behavior slice; do not try to finish every water room or all Mermaid Suit
+upgrades in one PR. Extend the player validation suite with a focused scenario
+that covers entry, one movement/update boundary, collision or water exit, and
+re-entry where that slice needs it.
+
+**Done when:** the change preserves source timing, input priority, fixed-point
+arithmetic, collision, and RNG behavior; its expected result is independently
+derived from the ROM/disassembly; `dotnet build` has no warnings/errors; and
+the complete Godot validation suite passes.
+
+### Native mod support: add a safe example overlay
+
+**Difficulty:** beginner to intermediate; no gameplay or ROM changes.
+
+Extend [the modding guide](../backends/ooa-godot/docs/modding.md) with a tiny
+example mod that demonstrates one supported complete table or image override,
+priority, disabled fallback, and how to run vanilla with `--no-mods`. Use
+synthetic/original example data only; do not copy Nintendo assets into the
+example. Keep the example outside `assets/oracle/` and the clean-ROM import
+manifest.
+
+**Done when:** a contributor can create the example under an external mods
+directory, see which mod won from startup diagnostics, and return to vanilla by
+disabling the mod or passing `--no-mods`; the documented commands and manifest
+match the existing resolver/tests.
+
+## Where to work and how to submit
+
+- Gameplay, generated-asset mod loader, and its tests: work inside
+  `backends/ooa-godot`; external contributors fork `ZakyPew/ooa-godot` and
+  open a PR targeting that repository as explained in the build/contribution
+  guide.
+- Launcher discovery, launch behavior, or Epoch UI: work in Epoch's
+  `launcher/` and tests. Do not copy Godot gameplay code into the launcher.
+- A change spanning both: keep commits and review scopes separate, then update
+  Epoch's submodule pointer to the reviewed Godot commit.
+- Use the [build and contribution guide](GODOT_BACKEND_CONTRIBUTING.md) for
+  setup and exact validation commands. State what you ran and what remains
+  unverified in the PR.
+
+The Godot submodule has no tracked license at this time. That is an ownership
+and rights question for maintainers to resolve before presenting the
+submodule as open source or merging/redistributing external code; see the
+contribution guide's licensing note. Contributors may discuss these scoped
+tasks and submit issue reports while that review is pending. This task list is
+not a grant of rights to game content or assets.

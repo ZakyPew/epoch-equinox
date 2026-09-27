@@ -81,10 +81,13 @@ from a source checkout won't overwrite itself; use `git pull`.
 **Building from source** takes about a minute — no game data is involved:
 
 ```sh
-git clone https://github.com/ZakyPew/epoch-equinox.git
+git clone --recurse-submodules https://github.com/ZakyPew/epoch-equinox.git
 cd epoch-equinox
 ./setup.sh          # Linux/macOS; Windows: setup.ps1 (needs VS + vcpkg)
 ```
+
+If the repository was cloned without submodules, fetch the optional native Ages
+game source with `git submodule update --init --recursive`.
 
 <details>
 <summary><b>History: why this repo used to take 25 minutes to build</b></summary>
@@ -179,23 +182,35 @@ The launcher handles this for you, but the binary stands alone:
 ./build/epoch --game tlozooa --voxel 2
 ```
 
-### Hidden native Ages prototype
+### Native Ages reconstruction (developer preview)
 
-Epoch includes an early, independently implemented Godot prototype at
-`backends/ages-godot`. It is not part of the normal player-facing launcher menu
-and currently uses placeholder art. With Godot 4 available via `GODOT4`,
-`GODOT`, or `PATH`, developers can reveal its launcher action with the hidden
-`--dev-native-backend` flag:
+The Godot version is included as the separate
+[`ooa-godot` submodule](backends/ooa-godot), pinned to our fork's
+`codex/mod-asset-overlays` branch. It is an in-progress native reconstruction,
+not the original ROM running in an emulator. ROM files and generated,
+ROM-derived runtime assets are not included. Follow the submodule README to
+generate local assets from a clean supported US ROM and `oracles-disasm`.
+
+The backend remains hidden from the normal player-facing launcher menu. With
+Godot 4.7.1/.NET available via `GODOT4`, `GODOT`, or `PATH`, developers can
+reveal its launcher action with the hidden `--dev-native-backend` flag:
 
 ```powershell
 $env:GODOT4 = 'C:\path\to\Godot_v4.7.1-stable_mono_win64.exe'
 python launcher/epoch_launcher.py --runner build/epoch.exe --dev-native-backend
 ```
 
-The prototype currently validates a fixed-resolution room, movement, simple
-collision, one chest interaction, and local save/load. It does not yet import
-Oracle of Ages room data or implement mod loading. ROMs and ROM-derived assets
-are not included in the repository.
+Epoch launches the submodule's full game project and passes its `mods/`
+directory to the native mod loader. Set `OOA_GODOT_PATH` to use another
+checkout, or `--godot-mods-dir` to point at a separate local mod collection.
+The small Epoch-owned room lab remains as a fallback when the submodule is not
+available; it is not the implementation Epoch will grow in parallel.
+
+See the [Godot backend contributor and build guide](docs/GODOT_BACKEND_CONTRIBUTING.md)
+for setup, validation, launcher testing, and the two-repository contribution
+workflow.
+The [native Ages launcher and Godot starter tasks](docs/GODOT_STARTER_TASKS.md)
+include a launcher-only test task and scoped reconstruction/modding proposals.
 
 ## Voxel mode
 

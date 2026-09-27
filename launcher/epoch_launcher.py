@@ -107,6 +107,7 @@ import stream_config
 import updater
 from gamepad import GamepadBridge
 from godot_backend import GodotBackend, discover_godot_backend
+from godot_mods import NativeMod, scan_native_mods, set_native_mod_enabled
 
 # The version this build was released as. The updater compares it against
 # the repository's release tags, so it has to match the tag it ships under
@@ -1528,6 +1529,99 @@ class ModsDialog(QDialog):
         self.accept()
 
 
+class NativeModsDialog(QDialog):
+    """Manage ooa-godot manifests without mixing them with ROM patch mods."""
+
+    def __init__(self, runner: Runner, parent=None):
+        super().__init__(parent)
+        self.runner = runner
+        self.boxes: list[tuple[NativeMod, QCheckBox]] = []
+        self.setWindowTitle("Native Ages Mods")
+        self.setMinimumSize(560, 440)
+        self.setStyleSheet(DIALOG_STYLE)
+
+        layout = QVBoxLayout(self)
+        intro = QLabel(
+            "These are generated-asset overlays for the Godot version of Ages. "
+            "They are separate from ROM patches and take effect the next time "
+            "native Ages starts."
+        )
+        intro.setWordWrap(True)
+        layout.addWidget(intro)
+
+        self.scroll = QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setStyleSheet("QScrollArea { border: 0; }")
+        layout.addWidget(self.scroll, 1)
+
+        self.diagnostics = QLabel()
+        self.diagnostics.setWordWrap(True)
+        self.diagnostics.setStyleSheet("color: #e6b85c; font-size: 11px;")
+        layout.addWidget(self.diagnostics)
+
+        row = QHBoxLayout()
+        open_btn = QPushButton("Open Native Mods Folder")
+        open_btn.clicked.connect(self.open_mods_folder)
+        refresh_btn = QPushButton("Refresh")
+        refresh_btn.clicked.connect(self.rebuild)
+        row.addWidget(open_btn)
+        row.addWidget(refresh_btn)
+        row.addStretch(1)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(self.save)
+        buttons.rejected.connect(self.reject)
+        row.addWidget(buttons)
+        layout.addLayout(row)
+        self.rebuild()
+
+    def open_mods_folder(self) -> None:
+        directory = self.runner.godot_mods_dir
+        if directory is not None:
+            directory.mkdir(parents=True, exist_ok=True)
+            open_in_file_manager(directory)
+
+    def rebuild(self) -> None:
+        self.boxes = []
+        inner = QWidget()
+        box_layout = QVBoxLayout(inner)
+        directory = self.runner.godot_mods_dir
+        result = scan_native_mods(directory) if directory is not None else None
+        mods = result.mods if result else ()
+        if not mods:
+            hint = QLabel(
+                "No valid native mods found. Add one immediate child folder per mod, "
+                "with a manifest.json containing required id and version fields. "
+                "Only generated .tsv tables and .png images are currently supported."
+            )
+            hint.setWordWrap(True)
+            box_layout.addWidget(hint)
+        for mod in mods:
+            cb = QCheckBox(f"{mod.name}  ·  v{mod.version}  ·  priority {mod.priority}")
+            cb.setChecked(mod.enabled)
+            box_layout.addWidget(cb)
+            if mod.name != mod.mod_id:
+                detail = QLabel(mod.mod_id)
+                detail.setStyleSheet("color: #8b97a2; font-size: 11px; margin-left: 28px;")
+                box_layout.addWidget(detail)
+            self.boxes.append((mod, cb))
+        box_layout.addStretch(1)
+        self.scroll.setWidget(inner)
+        messages = result.diagnostics if result else ("Native Godot backend is unavailable.",)
+        self.diagnostics.setText("\n".join(messages))
+        self.diagnostics.setVisible(bool(messages))
+
+    def save(self) -> None:
+        try:
+            for mod, checkbox in self.boxes:
+                set_native_mod_enabled(mod.manifest, mod.mod_id, checkbox.isChecked())
+        except (OSError, ValueError) as exc:
+            QMessageBox.warning(self, "Could not save native mod settings", str(exc))
+            return
+        self.accept()
+
+
 # --------------------------------------------------------------------------
 # updates
 # --------------------------------------------------------------------------
@@ -2229,10 +2323,7 @@ class MainWindow(QWidget):
                 ModsDialog(self.runner, game, self).exec()
         elif item == "Native mods":
             if self.runner.native_available(game):
-                mods = self.runner.godot_mods_dir
-                if mods is not None:
-                    mods.mkdir(parents=True, exist_ok=True)
-                    open_in_file_manager(mods)
+                NativeModsDialog(self.runner, self).exec()
         elif item == "Start game":
             if game.playable:
                 self.start_game(game)

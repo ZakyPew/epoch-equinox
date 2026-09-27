@@ -37,9 +37,17 @@ const ROOM := [
 var player_cell := Vector2i(2, 3)
 var chest_open := false
 var _step_clock := 0.0
+var _walking_clock := 0.0
+var _moving := false
+var _move_progress := 0.0
+var _move_from_cell := Vector2.ZERO
+var _move_to_cell := Vector2.ZERO
+var _draw_player_cell := Vector2.ZERO
+var _player_facing := Vector2i.DOWN
 var _message := "Arrows / WASD move   Z / A interact"
 var _show_tileset_atlas := false
 var _atlas_texture: Texture2D
+var _player_textures: Array[Texture2D] = []
 var _palette_atlases: Dictionary = {}
 var _use_imported_room := false
 var _room_layout := PackedByteArray()
@@ -69,13 +77,22 @@ func _physics_process(delta: float) -> void:
 	if Input.is_action_just_pressed("interact"):
 		_interact()
 		queue_redraw()
-	_step_clock += delta
-	if _step_clock < STEP_SECONDS:
+	if _moving:
+		_move_progress = minf(_move_progress + delta / STEP_SECONDS, 1.0)
+		_draw_player_cell = _move_from_cell.lerp(_move_to_cell, _move_progress)
+		_walking_clock += delta
+		if _move_progress >= 1.0:
+			_moving = false
+			_draw_player_cell = _move_to_cell
+			_step_clock = STEP_SECONDS
+		queue_redraw()
 		return
-	_step_clock -= STEP_SECONDS
-	var direction := _read_direction()
-	if direction != Vector2i.ZERO:
-		_try_step(direction)
+	_step_clock += delta
+	if _step_clock >= STEP_SECONDS:
+		_step_clock = 0.0
+		var direction := _read_direction()
+		if direction != Vector2i.ZERO:
+			_start_smooth_step(direction)
 		queue_redraw()
 
 
@@ -124,6 +141,7 @@ func _load_local_tileset() -> void:
 	if not manifest is Dictionary or not manifest.get("images", []) is Array:
 		push_warning("Local Ages asset manifest is malformed")
 		return
+	_load_local_player_sprite(manifest)
 	var covered_tiles := PackedByteArray()
 	covered_tiles.resize(256)
 	for graphics in manifest["images"]:
@@ -210,8 +228,60 @@ func _load_local_room() -> void:
 		return
 	_use_imported_room = true
 	_room_label = "%X-%02X" % [int(room_info.get("group", 0)), int(room_info.get("id", 0))]
-	player_cell = Vector2i(1, 1)
+	player_cell = Vector2i(4, 4)
+	_draw_player_cell = Vector2(player_cell)
 	chest_open = false
+
+
+func _load_local_player_sprite(manifest: Dictionary) -> void:
+	var sprite_info: Variant = manifest.get("player_sprite", {})
+	if not sprite_info is Dictionary:
+		return
+	var sprite_path := "res://imported/%s" % str(sprite_info.get("file", ""))
+	if not FileAccess.file_exists(sprite_path):
+		push_warning("Imported Link sprite sheet is missing: %s" % sprite_path)
+		return
+	var sheet := Image.load_from_file(ProjectSettings.globalize_path(sprite_path))
+	if sheet == null or sheet.is_empty() or sheet.get_width() != 128 or sheet.get_height() < 8:
+		push_warning("Imported Link sprite sheet has invalid dimensions")
+		return
+	sheet.convert(Image.FORMAT_RGBA8)
+	var idle_offset := int(sprite_info.get("idle_offset", 0x2140))
+	var frame_offsets: Array = [idle_offset]
+	var walking_offsets: Variant = sprite_info.get("walking_offsets", [0x2080, 0x20C0])
+	if not walking_offsets is Array or walking_offsets.is_empty():
+		walking_offsets = []
+	frame_offsets.append_array(walking_offsets)
+	for byte_offset in frame_offsets:
+		var first_tile := int(byte_offset) / 16
+		if first_tile < 0 or first_tile + 3 >= (sheet.get_width() * sheet.get_height()) / 64:
+			continue
+		_player_textures.append(ImageTexture.create_from_image(_compose_link_frame(sheet, first_tile)))
+
+
+func _compose_link_frame(sheet: Image, first_tile: int) -> Image:
+	var frame := Image.create(16, 16, false, Image.FORMAT_RGBA8)
+	var sprite_colors := [Color(0, 0, 0, 0), Color("292b25"), Color("398b4e"), Color("e5c589")]
+	for y in range(16):
+		for x in range(16):
+			# Link uses two adjacent 8x16 OAM entries (tile IDs 0 and 2).
+			# spr_ sheets are deinterleaved by gfx.py in pairs of tile rows,
+			# so each sequential source tile must be remapped into PNG order.
+			var oam_tile_offset := (0 if y < 8 else 1) + (0 if x < 8 else 2)
+			var sheet_tile := _deinterleaved_sprite_tile(first_tile + oam_tile_offset, sheet.get_width() / 8)
+			var source := Vector2i((sheet_tile % (sheet.get_width() / 8)) * 8 + x % 8, (sheet_tile / (sheet.get_width() / 8)) * 8 + y % 8)
+			var source_color: Color = sheet.get_pixelv(source)
+			var color_index := clampi(roundi(source_color.r * 3.0), 0, 3)
+			frame.set_pixel(x, y, sprite_colors[color_index])
+	return frame
+
+
+func _deinterleaved_sprite_tile(source_tile: int, tiles_per_row: int) -> int:
+	# gfx.py's deinterleave() takes successive pairs of rows and alternates
+	# their tiles: source row 0/1, col N -> PNG row pair, positions 2N/2N+1.
+	var source_row := source_tile / tiles_per_row
+	var source_column := source_tile % tiles_per_row
+	return (source_row / 2) * tiles_per_row * 2 + source_column * 2 + (source_row % 2)
 
 
 func _draw_imported_room() -> void:
@@ -249,13 +319,25 @@ func _mapping_tile_offset(metatile_id: int, quadrant: int) -> int:
 
 
 func _draw_imported_player() -> void:
-	var origin := Vector2i(player_cell.x * 16, player_cell.y * 16)
-	draw_rect(Rect2i(origin + Vector2i(3, 12), Vector2i(10, 2)), Color(0.12, 0.2, 0.12, 0.55))
-	draw_rect(Rect2i(origin + Vector2i(5, 2), Vector2i(6, 5)), Color("e4bd83"))
-	draw_rect(Rect2i(origin + Vector2i(4, 1), Vector2i(8, 3)), Color("397646"))
-	draw_rect(Rect2i(origin + Vector2i(4, 7), Vector2i(8, 6)), Color("3d8e52"))
-	draw_rect(Rect2i(origin + Vector2i(5, 13), Vector2i(3, 2)), Color("75452d"))
-	draw_rect(Rect2i(origin + Vector2i(9, 13), Vector2i(3, 2)), Color("75452d"))
+	var origin := (_draw_player_cell * 16.0).round()
+	if not _player_textures.is_empty():
+		var frame_index := 0
+		if _moving and _player_textures.size() > 1:
+			frame_index = 1 + (int(_walking_clock / 0.08) % (_player_textures.size() - 1))
+		if _player_facing.x < 0:
+			draw_set_transform(origin + Vector2(16, 0), 0.0, Vector2(-1, 1))
+			draw_texture(_player_textures[frame_index], Vector2.ZERO)
+			draw_set_transform(Vector2.ZERO)
+		else:
+			draw_texture(_player_textures[frame_index], origin)
+		return
+	var integer_origin := Vector2i(origin)
+	draw_rect(Rect2i(integer_origin + Vector2i(3, 12), Vector2i(10, 2)), Color(0.12, 0.2, 0.12, 0.55))
+	draw_rect(Rect2i(integer_origin + Vector2i(5, 2), Vector2i(6, 5)), Color("e4bd83"))
+	draw_rect(Rect2i(integer_origin + Vector2i(4, 1), Vector2i(8, 3)), Color("397646"))
+	draw_rect(Rect2i(integer_origin + Vector2i(4, 7), Vector2i(8, 6)), Color("3d8e52"))
+	draw_rect(Rect2i(integer_origin + Vector2i(5, 13), Vector2i(3, 2)), Color("75452d"))
+	draw_rect(Rect2i(integer_origin + Vector2i(9, 13), Vector2i(3, 2)), Color("75452d"))
 
 
 func _draw_tileset_atlas() -> void:
@@ -302,6 +384,19 @@ func _try_step(direction: Vector2i) -> bool:
 	if not _is_walkable(destination):
 		return false
 	player_cell = destination
+	return true
+
+
+func _start_smooth_step(direction: Vector2i) -> bool:
+	var source_cell := Vector2(player_cell)
+	if not _try_step(direction):
+		return false
+	_move_from_cell = source_cell
+	_move_to_cell = Vector2(player_cell)
+	_move_progress = 0.0
+	_walking_clock = 0.0
+	_player_facing = direction
+	_moving = true
 	return true
 
 
@@ -386,9 +481,13 @@ func _run_smoke_test() -> void:
 	var errors: Array[String] = []
 	if _vram_tile_index(0x80) != 0 or _vram_tile_index(0x00) != 128:
 		errors.append("Game Boy signed BG tile IDs should map to the correct VRAM atlas slots")
+	if _deinterleaved_sprite_tile(0, 16) != 0 or _deinterleaved_sprite_tile(1, 16) != 2 or _deinterleaved_sprite_tile(16, 16) != 1 or _deinterleaved_sprite_tile(532, 16) != 521:
+		errors.append("Link sprite offsets should map from the source stream into gfx.py deinterleaved PNG tile order")
 	if _use_imported_room:
 		if _atlas_texture == null or _room_layout.size() != IMPORTED_ROOM_WIDTH * IMPORTED_ROOM_HEIGHT:
 			errors.append("imported room and combined tile atlas should load")
+		if _player_textures.is_empty():
+			errors.append("local Link walking frames should load from the imported asset manifest")
 		if not _palette_atlases.has(2) or not _palette_atlases.has(7):
 			errors.append("Talus Peaks BG palettes 2 through 7 should load for tile rendering")
 	var red := _rgb5_to_color([31, 0, 0])
@@ -419,6 +518,17 @@ func _run_smoke_test() -> void:
 	player_cell = Vector2i(1, 1)
 	if not _try_step(Vector2i(1, 0)) or player_cell != Vector2i(2, 1):
 		errors.append("movement should enter adjacent floor")
+	player_cell = Vector2i(1, 1)
+	_draw_player_cell = Vector2(1, 1)
+	if not _start_smooth_step(Vector2i(1, 0)) or not _moving:
+		errors.append("accepted movement should start a smooth visual transition")
+	else:
+		var midpoint := _move_from_cell.lerp(_move_to_cell, 0.5)
+		if midpoint != Vector2(1.5, 1.0):
+			errors.append("smooth movement should interpolate between adjacent cells")
+	_moving = false
+	player_cell = Vector2i(1, 1)
+	_draw_player_cell = Vector2(1, 1)
 	player_cell = Vector2i(1, 1)
 	if _try_step(Vector2i(-1, 0)) or player_cell != Vector2i(1, 1):
 		errors.append("wall collision should preserve player position")

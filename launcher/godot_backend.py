@@ -56,6 +56,15 @@ def discover_godot_backend(
     else:
         candidates.extend(
             (
+                epoch_root / "backends" / "ooa-godot",
+                # Prefer the independently developed, playable reconstruction
+                # when it is checked out beside Epoch. Keep the Epoch-owned
+                # lab as a fallback for clean clones without that checkout.
+                epoch_root / "ooa-godot",
+                epoch_root.parent / "ooa-godot",
+                epoch_root.parent.parent / "ooa-godot",
+                epoch_root.parent / "backends" / "ooa-godot",
+                epoch_root.parent.parent / "backends" / "ooa-godot",
                 epoch_root / "backends" / "ages-godot",
                 epoch_root.parent / "backends" / "ages-godot",
                 epoch_root.parent.parent / "backends" / "ages-godot",

@@ -1,0 +1,4 @@
+[submodule "backends/ooa-godot"]
+	path = backends/ooa-godot
+	url = https://github.com/ZakyPew/ooa-godot.git
+	branch = codex/mod-asset-overlays

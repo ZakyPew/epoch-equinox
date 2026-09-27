@@ -1,17 +1,18 @@
 # Contributing to Epoch Equinox
 
-Thanks for helping make the voxel renderer better. The easiest way to contribute is to pick one small, observable task, attach before/after screenshots, and keep the pull request focused.
+Thanks for helping improve Epoch & Equinox. The easiest way to contribute is to pick one small, observable task, attach before/after evidence when it is visual, and keep each pull request focused.
 
 ## Choose a track
 
 | Track | Good first contribution |
 | --- | --- |
+| Godot Ages | Fix one reconstruction behavior or add a source-backed regression in the `ooa-godot` submodule |
 | Voxel art | Sculpt one room or repair one prop using the in-game voxel editor |
 | Rendering | Improve depth ordering, camera behavior, or a compound object such as a chest |
 | Testing and tools | Add a reproducible screenshot route or a small diagnostic |
 | Documentation | Clarify a workflow, capture a known issue, or improve contributor onboarding |
 
-Start with [the contributor starter tasks](docs/CONTRIBUTOR_STARTER_TASKS.md). They are deliberately scoped so another developer can finish one without learning the whole renderer first.
+Start with the [Epoch contributor starter tasks](docs/CONTRIBUTOR_STARTER_TASKS.md), or the [native Ages launcher and Godot starter tasks](docs/GODOT_STARTER_TASKS.md). The native launcher task is safe to contribute to under Epoch's root license; work in the separate Godot submodule is subject to its unresolved rights review below.
 
 ## Quick start
 
@@ -22,6 +23,10 @@ Start with [the contributor starter tasks](docs/CONTRIBUTOR_STARTER_TASKS.md). T
 5. Open a pull request with a short summary, reproduction steps, and before/after evidence.
 
 The detailed voxel workflow, coordinate conventions, debug flags, and legal asset rules are in [docs/VOXEL_CONTRIBUTING.md](docs/VOXEL_CONTRIBUTING.md).
+
+For the native Godot Ages backend, follow the [Godot build and contribution guide](docs/GODOT_BACKEND_CONTRIBUTING.md). Gameplay code and its tests belong in the submodule; Epoch owns the launcher integration.
+
+The Godot submodule is currently unlicensed and was imported from a separate project. Until maintainers resolve code provenance and licensing authority, community members can help by reporting issues, discussing the starter tasks, and reviewing proposals—but we should not advertise the submodule as open source or merge/redistribute outside contributions as if rights were settled. Do not add a license covering Nintendo game content. See the rights-status section in the Godot guide.
 
 ## What makes a useful PR
 

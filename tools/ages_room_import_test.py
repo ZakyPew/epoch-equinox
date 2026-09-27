@@ -21,8 +21,10 @@ class AgesRoomImportTests(unittest.TestCase):
             rooms = root / "rooms" / "ages"
             layouts = root / "tileset_layouts" / "ages"
             data = root / "data" / "ages"
-            for folder in (gfx, rooms / "small", layouts, data):
+            shared_gfx = root / "gfx" / "common"
+            for folder in (gfx, rooms / "small", layouts, data, shared_gfx):
                 folder.mkdir(parents=True)
+            (shared_gfx / "spr_link.png").write_bytes(png_header(128, 288))
             for filename, height in (
                 ("gfx_tileset_overworld_standard.png", 48),
                 ("gfx_tileset_overworld_present.png", 40),
@@ -93,6 +95,11 @@ class AgesRoomImportTests(unittest.TestCase):
             self.assertEqual(manifest["room"]["id"], 0)
             self.assertEqual(manifest["room"]["tileset"], 8)
             self.assertEqual(manifest["room"]["file"], "room0000.bin")
+            self.assertEqual(manifest["player_sprite"]["file"], "spr_link.png")
+            self.assertEqual(manifest["player_sprite"]["tile_ids"], [0, 2])
+            self.assertEqual(manifest["player_sprite"]["idle_offset"], 0x2140)
+            self.assertEqual(manifest["player_sprite"]["walking_offsets"], [0x2080, 0x20C0])
+            self.assertEqual((output / "spr_link.png").stat().st_size, 24)
             self.assertEqual((output / "room0000.bin").stat().st_size, 80)
             self.assertEqual((output / "tilesetMappings06.bin").stat().st_size, 2048)
             self.assertEqual((output / "tilesetCollisions06.bin").stat().st_size, 256)
