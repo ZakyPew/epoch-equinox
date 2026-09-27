@@ -56,6 +56,15 @@ class AgesRoomImportTests(unittest.TestCase):
                 "\tm_GfxHeader gfx_tileset_talus_peaks_3, $9701\n\tm_GfxHeaderEnd\n",
                 encoding="utf-8",
             )
+            (data / "paletteHeaders.s").write_text(
+                "m_PaletteHeaderStart $28, PALH_TILESET_TALUS_PEAKS_PRESENT\n"
+                "\tm_PaletteHeaderBg  2, 6, paletteData4cd0\n\tm_PaletteHeaderEnd\n",
+                encoding="utf-8",
+            )
+            (data / "paletteData.s").write_text(
+                "paletteData4cd0:\n" + "\tm_RGB16 $1f $00 $00\n" * 24,
+                encoding="utf-8",
+            )
             (rooms / "small" / "room0000.bin").write_bytes(bytes(80))
             (rooms / "group0Tilesets.bin").write_bytes(bytes([8]) + bytes(255))
             (layouts / "tilesetMappings06.bin").write_bytes(bytes(2048))
@@ -70,6 +79,9 @@ class AgesRoomImportTests(unittest.TestCase):
             self.assertEqual((output / "tilesetCollisions06.bin").stat().st_size, 256)
             self.assertEqual(len(manifest["images"]), 8)
             self.assertEqual([image["start_tile"] for image in manifest["images"]], [0, 96, 176, 208, 240, 176, 208, 240])
+            self.assertEqual(manifest["palettes"]["start_index"], 2)
+            self.assertEqual(len(manifest["palettes"]["palettes"]), 6)
+            self.assertEqual(manifest["palettes"]["palettes"][0][0], [31, 0, 0])
             self.assertEqual(json.loads((output / "manifest.json").read_text(encoding="utf-8"))["room"], manifest["room"])
 
 

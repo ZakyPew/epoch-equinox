@@ -70,6 +70,46 @@ def resolve_graphics_header(header_source: Path, symbol: str, unique: bool) -> l
     return graphics
 
 
+def resolve_background_palettes(header_source: Path, data_source: Path, symbol: str) -> dict[str, object]:
+    header_lines = header_source.read_text(encoding="utf-8").splitlines()
+    start = next(
+        (i for i, line in enumerate(header_lines) if re.search(rf"m_PaletteHeaderStart\s+\$[0-9a-f]+,\s*{re.escape(symbol)}\b", line, re.IGNORECASE)),
+        None,
+    )
+    if start is None:
+        raise ValueError(f"Could not find palette header {symbol} in {header_source}")
+    entry: tuple[int, int, str] | None = None
+    for line in header_lines[start + 1 :]:
+        if "m_PaletteHeaderEnd" in line:
+            break
+        match = re.search(r"\bm_PaletteHeaderBg\s+(\d+)\s*,\s*(\d+)\s*,\s*([A-Za-z0-9_]+)", line)
+        if match:
+            if entry is not None:
+                raise ValueError(f"Palette header {symbol} has multiple background ranges")
+            entry = (int(match.group(1)), int(match.group(2)), match.group(3))
+    if entry is None:
+        raise ValueError(f"Palette header {symbol} has no background palette range")
+    first_palette, palette_count, data_label = entry
+
+    data_lines = data_source.read_text(encoding="utf-8").splitlines()
+    data_start = next((i for i, line in enumerate(data_lines) if line.strip() == f"{data_label}:"), None)
+    if data_start is None:
+        raise ValueError(f"Could not find palette data {data_label} in {data_source}")
+    colors: list[list[int]] = []
+    for line in data_lines[data_start + 1 :]:
+        match = re.search(r"\bm_RGB16\s+\$([0-9a-f]{1,2})\s+\$([0-9a-f]{1,2})\s+\$([0-9a-f]{1,2})", line, re.IGNORECASE)
+        if match:
+            colors.append([int(component, 16) for component in match.groups()])
+            if len(colors) == palette_count * 4:
+                break
+        elif colors and line.strip().endswith(":"):
+            break
+    if len(colors) != palette_count * 4:
+        raise ValueError(f"Palette data {data_label} has {len(colors)} colors; expected {palette_count * 4}")
+    palettes = [colors[index : index + 4] for index in range(0, len(colors), 4)]
+    return {"start_index": first_palette, "palettes": palettes}
+
+
 def import_tilesets(disasm_root: Path, output_dir: Path) -> dict[str, object]:
     source_dir = disasm_root / "gfx_compressible" / "ages"
     data_dir = disasm_root / "data" / "ages"
@@ -93,6 +133,9 @@ def import_tilesets(disasm_root: Path, output_dir: Path) -> dict[str, object]:
     layout_id = int(layout_numbers[0], 16)
     graphics = resolve_graphics_header(data_dir / "gfxHeaders.s", record[2], unique=False)
     graphics += resolve_graphics_header(data_dir / "uniqueGfxHeaders.s", record[1], unique=True)
+    palettes = resolve_background_palettes(
+        data_dir / "paletteHeaders.s", data_dir / "paletteData.s", record[3]
+    )
     covered_tiles: set[int] = set()
     for entry in graphics:
         filename = str(entry["file"])
@@ -123,6 +166,7 @@ def import_tilesets(disasm_root: Path, output_dir: Path) -> dict[str, object]:
         "format": 1,
         "source": "local oracles-disasm decoded Ages graphics and layout tables",
         "images": images,
+        "palettes": palettes,
         "room": {"group": ROOM_GROUP, "id": ROOM_ID, "tileset": tileset_id, "layout": layout_id, "width": ROOM_WIDTH, "height": ROOM_HEIGHT},
     }
     (output_dir / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")

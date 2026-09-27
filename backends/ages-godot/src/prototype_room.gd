@@ -40,6 +40,7 @@ var _step_clock := 0.0
 var _message := "Arrows / WASD move   Z / A interact"
 var _show_tileset_atlas := false
 var _atlas_texture: Texture2D
+var _palette_atlases: Dictionary = {}
 var _use_imported_room := false
 var _room_layout := PackedByteArray()
 var _room_mappings := PackedByteArray()
@@ -149,6 +150,35 @@ func _load_local_tileset() -> void:
 		push_warning("Imported graphics do not cover all 256 BG tile slots")
 		return
 	_atlas_texture = ImageTexture.create_from_image(atlas)
+	var palette_data: Variant = manifest.get("palettes", {})
+	if palette_data is Dictionary and palette_data.get("palettes", []) is Array:
+		var first_palette := int(palette_data.get("start_index", -1))
+		for palette_offset in range(palette_data["palettes"].size()):
+			var palette: Variant = palette_data["palettes"][palette_offset]
+			if palette is Array and palette.size() == 4:
+				var palette_id := first_palette + palette_offset
+				if palette_id >= 0 and palette_id < 8:
+					_palette_atlases[palette_id] = ImageTexture.create_from_image(_create_palette_atlas(atlas, palette))
+
+
+func _create_palette_atlas(source: Image, palette: Array) -> Image:
+	var paletted := source.duplicate()
+	var colors: Array[Color] = []
+	for rgb5 in palette:
+		if not rgb5 is Array or rgb5.size() != 3:
+			return source.duplicate()
+		colors.append(_rgb5_to_color(rgb5))
+	for y in range(paletted.get_height()):
+		for x in range(paletted.get_width()):
+			var pixel: Color = paletted.get_pixel(x, y)
+			if pixel.a > 0.0:
+				var shade := clampi(roundi(pixel.r * 3.0), 0, 3)
+				paletted.set_pixel(x, y, colors[shade])
+	return paletted
+
+
+func _rgb5_to_color(rgb5: Array) -> Color:
+	return Color(float(rgb5[0]) / 31.0, float(rgb5[1]) / 31.0, float(rgb5[2]) / 31.0, 1.0)
 
 
 func _load_local_room() -> void:
@@ -176,6 +206,8 @@ func _draw_imported_room() -> void:
 				var mapping_index := _mapping_tile_offset(metatile_id, quadrant)
 				var tile_id := _vram_tile_index(int(_room_mappings[mapping_index]))
 				var attribute := int(_room_mappings[mapping_index + 4])
+				var palette_id := attribute & 0x07
+				var tile_atlas: Texture2D = _palette_atlases.get(palette_id, _atlas_texture)
 				var source := Vector2i((tile_id % 16) * 8, (tile_id >> 4) * 8)
 				var destination := Vector2i(x * 16 + (quadrant % 2) * 8, y * 16 + (quadrant >> 1) * 8)
 				var flip_x := (attribute & 0x20) != 0
@@ -183,10 +215,10 @@ func _draw_imported_room() -> void:
 				if flip_x or flip_y:
 					var origin := Vector2(destination + Vector2i(8 if flip_x else 0, 8 if flip_y else 0))
 					draw_set_transform(origin, 0.0, Vector2(-1.0 if flip_x else 1.0, -1.0 if flip_y else 1.0))
-					draw_texture_rect_region(_atlas_texture, Rect2(Vector2.ZERO, Vector2(8, 8)), Rect2(source, Vector2(8, 8)))
+					draw_texture_rect_region(tile_atlas, Rect2(Vector2.ZERO, Vector2(8, 8)), Rect2(source, Vector2(8, 8)))
 					draw_set_transform(Vector2.ZERO)
 				else:
-					draw_texture_rect_region(_atlas_texture, Rect2(destination, Vector2(8, 8)), Rect2(source, Vector2(8, 8)))
+					draw_texture_rect_region(tile_atlas, Rect2(destination, Vector2(8, 8)), Rect2(source, Vector2(8, 8)))
 
 
 func _vram_tile_index(gameboy_tile_id: int) -> int:
@@ -341,6 +373,11 @@ func _run_smoke_test() -> void:
 	if _use_imported_room:
 		if _atlas_texture == null or _room_layout.size() != IMPORTED_ROOM_WIDTH * IMPORTED_ROOM_HEIGHT:
 			errors.append("imported room and combined tile atlas should load")
+		if not _palette_atlases.has(2) or not _palette_atlases.has(7):
+			errors.append("Talus Peaks BG palettes 2 through 7 should load for tile rendering")
+	var red := _rgb5_to_color([31, 0, 0])
+	if red.r != 1.0 or red.g != 0.0 or red.b != 0.0:
+		errors.append("5-bit disassembly palette colors should expand to normalized RGB")
 		for metatile_id in _room_layout:
 			if _mapping_tile_offset(int(metatile_id), 3) + 4 >= _room_mappings.size():
 				errors.append("room references a metatile without mapping data")

@@ -9,8 +9,8 @@ When local imported assets are present, the lab instead loads room `0000`
 (10x8 metatiles), reads tileset 08's layout index from the disassembly,
 applies that tile mapping/collision table, and draws the room from the exact
 present-era VRAM graphics sequence (common overworld sheets plus Talus Peaks
-unique sheets). The player remains a simple debug marker; the initial render
-uses the source sheets' grayscale palette.
+unique sheets). Room tiles use the Talus Peaks background palettes decoded
+from the local disassembly data; the player remains a simple debug marker.
 
 The prototype is deliberately hidden from the normal launcher menu. To show the
 developer-only “Start native Ages” action, run Epoch's launcher with
@@ -45,8 +45,7 @@ python ..\..\tools\import_ages_gfx.py --disasm-root C:\path\to\oracles-disasm
 The prototype automatically selects room 0000 after import. Walk with arrows
 or WASD; grid cells whose imported collision type is non-zero currently block
 movement. Press F1 to inspect the combined 256-tile atlas; Esc closes it. These
-decoded assets are not committed or distributed. Palette-header interpretation,
-exact collision semantics, object placements, and the correct Link sprite are
-still follow-up work.
+decoded assets are not committed or distributed. Exact collision semantics,
+object placements, and the correct Link sprite are still follow-up work.
 
 No upstream reconstruction source, ROM, or ROM-derived assets are included.
