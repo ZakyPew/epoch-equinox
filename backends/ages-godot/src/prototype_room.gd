@@ -45,6 +45,7 @@ var _use_imported_room := false
 var _room_layout := PackedByteArray()
 var _room_mappings := PackedByteArray()
 var _room_collisions := PackedByteArray()
+var _room_label := "0000"
 
 
 func _ready() -> void:
@@ -83,7 +84,7 @@ func _draw() -> void:
 		_draw_imported_room()
 		_draw_imported_player()
 		draw_rect(Rect2i(0, 0, 160, 9), Color(0.04, 0.07, 0.09, 0.86))
-		draw_string(ThemeDB.fallback_font, Vector2(3, 7), "AGES ROOM 0000 / GRID COLLISION PROBE", HORIZONTAL_ALIGNMENT_LEFT, -1, 6, Color("e3ddae"))
+		draw_string(ThemeDB.fallback_font, Vector2(3, 7), "AGES ROOM %s / GRID COLLISION PROBE" % _room_label, HORIZONTAL_ALIGNMENT_LEFT, -1, 6, Color("e3ddae"))
 		draw_string(ThemeDB.fallback_font, Vector2(3, 141), "Arrows / WASD move   F1 atlas", HORIZONTAL_ALIGNMENT_LEFT, 154, 6, Color("fff2b2"))
 	else:
 		for y in range(ROOM_HEIGHT):
@@ -182,9 +183,18 @@ func _rgb5_to_color(rgb5: Array) -> Color:
 
 
 func _load_local_room() -> void:
-	var room_path := "res://imported/room0000.bin"
-	var mappings_path := "res://imported/tilesetMappings06.bin"
-	var collisions_path := "res://imported/tilesetCollisions06.bin"
+	var manifest_path := "res://imported/manifest.json"
+	if not FileAccess.file_exists(manifest_path):
+		return
+	var manifest: Variant = JSON.parse_string(FileAccess.get_file_as_string(manifest_path))
+	if not manifest is Dictionary or not manifest.get("room", {}) is Dictionary:
+		push_warning("Local Ages room manifest is malformed; keeping the prototype room")
+		return
+	var room_info: Dictionary = manifest["room"]
+	var room_path := "res://imported/%s" % str(room_info.get("file", "room0000.bin"))
+	var layout_id := int(room_info.get("layout", 6))
+	var mappings_path := "res://imported/tilesetMappings%02x.bin" % layout_id
+	var collisions_path := "res://imported/tilesetCollisions%02x.bin" % layout_id
 	if _atlas_texture == null or not FileAccess.file_exists(room_path) or not FileAccess.file_exists(mappings_path) or not FileAccess.file_exists(collisions_path):
 		return
 	_room_layout = FileAccess.get_file_as_bytes(room_path)
@@ -194,6 +204,7 @@ func _load_local_room() -> void:
 		push_warning("Local Ages room import has an unexpected table size; keeping the prototype room")
 		return
 	_use_imported_room = true
+	_room_label = "%X-%02X" % [int(room_info.get("group", 0)), int(room_info.get("id", 0))]
 	player_cell = Vector2i(1, 1)
 	chest_open = false
 

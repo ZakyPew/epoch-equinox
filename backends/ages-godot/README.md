@@ -42,8 +42,12 @@ disassembly's `tilesets.s` and graphics-header tables:
 python ..\..\tools\import_ages_gfx.py --disasm-root C:\path\to\oracles-disasm
 ```
 
-The prototype automatically selects room 0000 after import. Walk with arrows
-or WASD; grid cells whose imported collision type is non-zero currently block
+To inspect a particular overworld room (for example, match the reference
+window's room `0-8A`), re-import it with `--room-group 0 --room-id 0x8a`.
+The Godot lab reads the selected room and its assigned tileset from the manifest.
+
+The prototype automatically loads the room selected during import. Walk with
+arrows or WASD; grid cells whose imported collision type is non-zero currently block
 movement. Press F1 to inspect the combined 256-tile atlas; Esc closes it. These
 decoded assets are not committed or distributed. Exact collision semantics,
 object placements, and the correct Link sprite are still follow-up work.

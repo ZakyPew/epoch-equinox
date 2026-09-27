@@ -110,22 +110,26 @@ def resolve_background_palettes(header_source: Path, data_source: Path, symbol: 
     return {"start_index": first_palette, "palettes": palettes}
 
 
-def import_tilesets(disasm_root: Path, output_dir: Path) -> dict[str, object]:
+def import_tilesets(disasm_root: Path, output_dir: Path, room_group: int = ROOM_GROUP, room_id: int = ROOM_ID) -> dict[str, object]:
     source_dir = disasm_root / "gfx_compressible" / "ages"
     data_dir = disasm_root / "data" / "ages"
     images: list[dict[str, object]] = []
     output_dir.mkdir(parents=True, exist_ok=True)
-    room = disasm_root / "rooms" / "ages" / "small" / "room0000.bin"
-    assignments = disasm_root / "rooms" / "ages" / "group0Tilesets.bin"
+    if not 0 <= room_group <= 7 or not 0 <= room_id <= 255:
+        raise ValueError("Room group must be 0..7 and room ID must be 0..255")
+    room_file = f"room{room_id:04x}.bin"
+    room = disasm_root / "rooms" / "ages" / "small" / room_file
+    assignments = disasm_root / "rooms" / "ages" / f"group{room_group}Tilesets.bin"
     if not room.is_file() or not assignments.is_file():
-        raise FileNotFoundError(f"Room 0000 or its tileset assignment is missing from {disasm_root}")
+        raise FileNotFoundError(f"Room {room_group}-{room_id:02x} or its tileset assignment is missing from {disasm_root}")
     room_data = room.read_bytes()
     assignment_data = assignments.read_bytes()
-    if not assignment_data:
-        raise ValueError(f"Room group 0 tileset assignment table is empty: {assignments}")
+    if len(assignment_data) <= room_id:
+        raise ValueError(f"Room group {room_group} tileset assignment table has no entry for room {room_id:02x}: {assignments}")
     if len(room_data) != ROOM_WIDTH * ROOM_HEIGHT:
         raise ValueError(f"Expected an 80-byte 10x8 room layout: {room}")
-    tileset_id = assignment_data[ROOM_ID]
+    tileset_assignment = assignment_data[room_id]
+    tileset_id = tileset_assignment & 0x7F
     record = read_tileset_record(data_dir / "tilesets.s", tileset_id)
     layout_numbers = re.findall(r"\$([0-9a-f]{2})", record[4], re.IGNORECASE)
     if len(layout_numbers) != 3:
@@ -161,13 +165,13 @@ def import_tilesets(disasm_root: Path, output_dir: Path) -> dict[str, object]:
         if not source.is_file() or source.stat().st_size != expected_size:
             raise ValueError(f"Missing or malformed tileset {tileset_id:02x} table: {source}")
         shutil.copyfile(source, output_dir / source.name)
-    shutil.copyfile(room, output_dir / "room0000.bin")
+    shutil.copyfile(room, output_dir / room_file)
     manifest: dict[str, object] = {
         "format": 1,
         "source": "local oracles-disasm decoded Ages graphics and layout tables",
         "images": images,
         "palettes": palettes,
-        "room": {"group": ROOM_GROUP, "id": ROOM_ID, "tileset": tileset_id, "layout": layout_id, "width": ROOM_WIDTH, "height": ROOM_HEIGHT},
+        "room": {"group": room_group, "id": room_id, "tileset": tileset_id, "assignment": tileset_assignment, "layout": layout_id, "width": ROOM_WIDTH, "height": ROOM_HEIGHT, "file": room_file},
     }
     (output_dir / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     return manifest
@@ -176,6 +180,8 @@ def import_tilesets(disasm_root: Path, output_dir: Path) -> dict[str, object]:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--disasm-root", type=Path, required=True, help="Local oracles-disasm checkout")
+    parser.add_argument("--room-group", type=lambda value: int(value, 0), default=ROOM_GROUP, help="Ages room group (default: 0)")
+    parser.add_argument("--room-id", type=lambda value: int(value, 0), default=ROOM_ID, help="Ages room ID (decimal or 0x-prefixed; default: 0)")
     parser.add_argument(
         "--output-dir",
         type=Path,
@@ -183,7 +189,7 @@ def main() -> int:
         help="Local Godot asset output (ignored by Git)",
     )
     args = parser.parse_args()
-    manifest = import_tilesets(args.disasm_root.resolve(), args.output_dir.resolve())
+    manifest = import_tilesets(args.disasm_root.resolve(), args.output_dir.resolve(), args.room_group, args.room_id)
     room = manifest["room"]
     print(f"Imported Ages room {room['group']:02x}{room['id']:02x} (tileset {room['tileset']:02x}, layout {room['layout']:02x}) to {args.output_dir.resolve()}")
     for image in manifest["images"]:

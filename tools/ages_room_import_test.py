@@ -35,6 +35,9 @@ class AgesRoomImportTests(unittest.TestCase):
             ):
                 (gfx / filename).write_bytes(png_header(128, height))
             (data / "tilesets.s").write_text(
+                "; 0x00\n\t.db $0f, $01\n\t.db UNIQUE_GFXH_LYNNA_CITY_1\n"
+                "\t.db GFXH_TILESET_OVERWORLD_PRESENT\n\t.db PALH_TILESET_LYNNA_CITY\n"
+                "\t.db $00, $00, $00\n"
                 "; 0x08\n\t.db $0f, $01\n\t.db UNIQUE_GFXH_TALUS_PEAKS\n"
                 "\t.db GFXH_TILESET_OVERWORLD_PRESENT\n\t.db PALH_TILESET_TALUS_PEAKS_PRESENT\n"
                 "\t.db $06, $00, $01\n",
@@ -49,31 +52,47 @@ class AgesRoomImportTests(unittest.TestCase):
                 "\tm_GfxHeader gfx_tileset_lynna_city_3, $9701\n\tm_GfxHeaderEnd\n",
                 encoding="utf-8",
             )
+            (data / "paletteHeaders.s").write_text(
+                "m_PaletteHeaderStart $10, PALH_TILESET_LYNNA_CITY\n"
+                "\tm_PaletteHeaderBg  2, 6, paletteData4a30\n\tm_PaletteHeaderEnd\n"
+                "m_PaletteHeaderStart $28, PALH_TILESET_TALUS_PEAKS_PRESENT\n"
+                "\tm_PaletteHeaderBg  2, 6, paletteData4cd0\n\tm_PaletteHeaderEnd\n",
+                encoding="utf-8",
+            )
+            (data / "paletteData.s").write_text(
+                "paletteData4a30:\n" + "\tm_RGB16 $00 $1f $00\n" * 24
+                + "paletteData4cd0:\n" + "\tm_RGB16 $1f $00 $00\n" * 24,
+                encoding="utf-8",
+            )
             (data / "uniqueGfxHeaders.s").write_text(
+                "m_UniqueGfxHeaderStart $01, UNIQUE_GFXH_LYNNA_CITY_1\n"
+                "\tm_GfxHeader gfx_tileset_lynna_city_1, $9301\n"
+                "\tm_GfxHeader gfx_tileset_lynna_city_2, $9501\n"
+                "\tm_GfxHeader gfx_tileset_lynna_city_3, $9701\n\tm_GfxHeaderEnd\n"
                 "m_UniqueGfxHeaderStart $09, UNIQUE_GFXH_TALUS_PEAKS\n"
                 "\tm_GfxHeader gfx_tileset_talus_peaks_1, $9301\n"
                 "\tm_GfxHeader gfx_tileset_talus_peaks_2, $9501\n"
                 "\tm_GfxHeader gfx_tileset_talus_peaks_3, $9701\n\tm_GfxHeaderEnd\n",
                 encoding="utf-8",
             )
-            (data / "paletteHeaders.s").write_text(
-                "m_PaletteHeaderStart $28, PALH_TILESET_TALUS_PEAKS_PRESENT\n"
-                "\tm_PaletteHeaderBg  2, 6, paletteData4cd0\n\tm_PaletteHeaderEnd\n",
-                encoding="utf-8",
-            )
-            (data / "paletteData.s").write_text(
-                "paletteData4cd0:\n" + "\tm_RGB16 $1f $00 $00\n" * 24,
-                encoding="utf-8",
-            )
             (rooms / "small" / "room0000.bin").write_bytes(bytes(80))
-            (rooms / "group0Tilesets.bin").write_bytes(bytes([8]) + bytes(255))
+            (rooms / "small" / "room008a.bin").write_bytes(bytes([65]) * 80)
+            assignment_data = bytearray(256)
+            assignment_data[0] = 8
+            assignment_data[0x8A] = 0x80
+            (rooms / "group0Tilesets.bin").write_bytes(assignment_data)
             (layouts / "tilesetMappings06.bin").write_bytes(bytes(2048))
             (layouts / "tilesetCollisions06.bin").write_bytes(bytes(256))
+            (layouts / "tilesetMappings00.bin").write_bytes(bytes(2048))
+            (layouts / "tilesetCollisions00.bin").write_bytes(bytes(256))
             output = root / "imported"
 
             manifest = import_tilesets(root, output)
 
-            self.assertEqual(manifest["room"], {"group": 0, "id": 0, "tileset": 8, "layout": 6, "width": 10, "height": 8})
+            self.assertEqual(manifest["room"]["group"], 0)
+            self.assertEqual(manifest["room"]["id"], 0)
+            self.assertEqual(manifest["room"]["tileset"], 8)
+            self.assertEqual(manifest["room"]["file"], "room0000.bin")
             self.assertEqual((output / "room0000.bin").stat().st_size, 80)
             self.assertEqual((output / "tilesetMappings06.bin").stat().st_size, 2048)
             self.assertEqual((output / "tilesetCollisions06.bin").stat().st_size, 256)
@@ -83,6 +102,14 @@ class AgesRoomImportTests(unittest.TestCase):
             self.assertEqual(len(manifest["palettes"]["palettes"]), 6)
             self.assertEqual(manifest["palettes"]["palettes"][0][0], [31, 0, 0])
             self.assertEqual(json.loads((output / "manifest.json").read_text(encoding="utf-8"))["room"], manifest["room"])
+
+            selected = import_tilesets(root, output, room_id=0x8A)
+            self.assertEqual(selected["room"]["id"], 0x8A)
+            self.assertEqual(selected["room"]["tileset"], 0)
+            self.assertEqual(selected["room"]["assignment"], 0x80)
+            self.assertEqual(selected["room"]["file"], "room008a.bin")
+            self.assertEqual((output / "room008a.bin").read_bytes(), bytes([65]) * 80)
+            self.assertEqual(selected["palettes"]["palettes"][0][0], [0, 31, 0])
 
 
 if __name__ == "__main__":
