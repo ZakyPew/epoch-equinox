@@ -12,7 +12,7 @@ Thanks for helping improve Epoch & Equinox. The easiest way to contribute is to 
 | Testing and tools | Add a reproducible screenshot route or a small diagnostic |
 | Documentation | Clarify a workflow, capture a known issue, or improve contributor onboarding |
 
-Start with the [Epoch contributor starter tasks](docs/CONTRIBUTOR_STARTER_TASKS.md), or the [native Ages launcher and Godot starter tasks](docs/GODOT_STARTER_TASKS.md). The native launcher task is safe to contribute to under Epoch's root license; work in the separate Godot submodule is subject to its unresolved rights review below.
+Start with the [Epoch contributor starter tasks](docs/CONTRIBUTOR_STARTER_TASKS.md), or the [native Ages launcher and Godot starter tasks](docs/GODOT_STARTER_TASKS.md). Epoch-only work is covered by the root license. Godot gameplay, tools, and tests are welcome in the separate `ooa-godot` repository under its contributor guide.
 
 ## Quick start
 
@@ -26,7 +26,7 @@ The detailed voxel workflow, coordinate conventions, debug flags, and legal asse
 
 For the native Godot Ages backend, follow the [Godot build and contribution guide](docs/GODOT_BACKEND_CONTRIBUTING.md). Gameplay code and its tests belong in the submodule; Epoch owns the launcher integration.
 
-The Godot submodule is currently unlicensed and was imported from a separate project. Until maintainers resolve code provenance and licensing authority, community members can help by reporting issues, discussing the starter tasks, and reviewing proposals—but we should not advertise the submodule as open source or merge/redistribute outside contributions as if rights were settled. Do not add a license covering Nintendo game content. See the rights-status section in the Godot guide.
+The original Godot project creator has authorized Epoch to continue, modify, publicly redistribute, and accept community contributions to the maintained `ZakyPew/ooa-godot` fork. This permission does not transfer ownership of the creator's pre-existing code or grant rights to Nintendo game content. The Godot repository does not currently declare a general-purpose software license, so do not imply that third parties have blanket rights to reuse it outside this project. See the rights-status section in the Godot guide.
 
 ## What makes a useful PR
 

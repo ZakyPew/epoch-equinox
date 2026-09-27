@@ -24,4 +24,4 @@ List the exact commands or checks a reviewer can run. Prefer temporary test data
 
 - [ ] The example uses original/synthetic content only.
 - [ ] I will not attach or commit a ROM, ROM dump, ROM-derived asset, or personal save.
-- [ ] I understand that the Godot submodule's license/rights policy is unresolved; this issue is a proposal, not a license grant.
+- [ ] I understand community code contributions are submitted to the `ZakyPew/ooa-godot` fork on `codex/mod-asset-overlays`, and that this permission does not cover Nintendo game content or grant blanket third-party reuse rights.

@@ -24,12 +24,18 @@ and fails if the dialog accidentally calls the classic ROM-mod state writer.
 The root Epoch MIT license covers launcher files, as described in `LICENSE`;
 this does not license the Godot submodule or Nintendo content.
 
-## Godot-submodule proposals (rights review pending)
+## Godot gameplay and tooling tasks
 
-The following are useful scoped tasks to discuss and investigate. The
-submodule's code license and provenance need maintainer review before its code
-can be advertised as open source or outside contributions merged or
-redistributed.
+The original project creator has authorized Epoch to modify and publicly
+redistribute its maintained fork and accept community contributions. These
+tasks are ready to claim; submit implementation PRs to `ZakyPew/ooa-godot`
+targeting `codex/mod-asset-overlays`, following the [Godot build and
+contribution guide](GODOT_BACKEND_CONTRIBUTING.md). Preserve upstream
+attribution. This permission does not grant rights to Nintendo content or
+provide a blanket license for third-party reuse outside this project.
+
+For modding work, start from the checked-in [synthetic priority demo](../backends/ooa-godot/docs/modding.md#run-the-synthetic-priority-example)
+and its automated test rather than using ROM-derived example assets.
 
 ### Reproduce one player-animation discrepancy
 
@@ -66,22 +72,6 @@ arithmetic, collision, and RNG behavior; its expected result is independently
 derived from the ROM/disassembly; `dotnet build` has no warnings/errors; and
 the complete Godot validation suite passes.
 
-### Native mod support: add a safe example overlay
-
-**Difficulty:** beginner to intermediate; no gameplay or ROM changes.
-
-Extend [the modding guide](../backends/ooa-godot/docs/modding.md) with a tiny
-example mod that demonstrates one supported complete table or image override,
-priority, disabled fallback, and how to run vanilla with `--no-mods`. Use
-synthetic/original example data only; do not copy Nintendo assets into the
-example. Keep the example outside `assets/oracle/` and the clean-ROM import
-manifest.
-
-**Done when:** a contributor can create the example under an external mods
-directory, see which mod won from startup diagnostics, and return to vanilla by
-disabling the mod or passing `--no-mods`; the documented commands and manifest
-match the existing resolver/tests.
-
 ## Where to work and how to submit
 
 - Gameplay, generated-asset mod loader, and its tests: work inside
@@ -96,9 +86,8 @@ match the existing resolver/tests.
   setup and exact validation commands. State what you ran and what remains
   unverified in the PR.
 
-The Godot submodule has no tracked license at this time. That is an ownership
-and rights question for maintainers to resolve before presenting the
-submodule as open source or merging/redistributing external code; see the
-contribution guide's licensing note. Contributors may discuss these scoped
-tasks and submit issue reports while that review is pending. This task list is
-not a grant of rights to game content or assets.
+The Godot repository has no tracked general-purpose software license.
+Community contributions are welcome under the creator's project-specific
+authorization, but contributors should not assume this grants them blanket
+rights to reuse the repository outside Epoch. This task list does not grant
+rights to Nintendo game content or assets.

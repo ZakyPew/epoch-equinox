@@ -26,4 +26,4 @@ Attach a focused screenshot, short clip, test output, or diagnostic only when ne
 - [ ] No ROM, ROM dump, ROM-derived asset, generated game asset, or personal save is included.
 - [ ] Any new example art/data is original or synthetic, and its source is stated.
 - [ ] I have checked that the change does not claim rights to Nintendo content or to code outside my authority.
-- [ ] If this PR touches `backends/ooa-godot`, I understand its license/rights policy is unresolved; opening this PR does not establish a license or authorize redistribution.
+- [ ] If this PR changes Godot code, I have authority to submit it and permit maintainers to include, modify, and publicly redistribute it as part of the `ooa-godot`/Epoch project.
