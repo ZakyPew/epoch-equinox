@@ -183,8 +183,7 @@ func _draw_imported_room() -> void:
 				if flip_x or flip_y:
 					var origin := Vector2(destination + Vector2i(8 if flip_x else 0, 8 if flip_y else 0))
 					draw_set_transform(origin, 0.0, Vector2(-1.0 if flip_x else 1.0, -1.0 if flip_y else 1.0))
-					var local_position := Vector2(-8 if flip_x else 0, -8 if flip_y else 0)
-					draw_texture_rect_region(_atlas_texture, Rect2(local_position, Vector2(8, 8)), Rect2(source, Vector2(8, 8)))
+					draw_texture_rect_region(_atlas_texture, Rect2(Vector2.ZERO, Vector2(8, 8)), Rect2(source, Vector2(8, 8)))
 					draw_set_transform(Vector2.ZERO)
 				else:
 					draw_texture_rect_region(_atlas_texture, Rect2(destination, Vector2(8, 8)), Rect2(source, Vector2(8, 8)))
