@@ -71,6 +71,13 @@ jobs:
       - name: Byte-compile
         run: python -m compileall -q launcher tools
 
+      - name: Godot backend discovery
+        run: python3 tools/godot_backend_test.py
+      - name: Godot native mod manifests
+        run: python3 tools/godot_mods_test.py
+      - name: Ages room asset import
+        run: python3 tools/ages_room_import_test.py
+
       # The stream overlays load the achievement icons as PNGs, because no
       # browser reads PAM. Those PNGs are a mirror of achievements/icons,
       # so a new or edited icon that never got mirrored would silently show

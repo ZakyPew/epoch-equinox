@@ -106,6 +106,8 @@ import save_manager
 import stream_config
 import updater
 from gamepad import GamepadBridge
+from godot_backend import GodotBackend, discover_godot_backend
+from godot_mods import NativeMod, scan_native_mods, set_native_mod_enabled
 
 # The version this build was released as. The updater compares it against
 # the repository's release tags, so it has to match the tag it ships under
@@ -183,9 +185,30 @@ class Game:
 class Runner:
     """Everything that talks to the game binary or its data directories."""
 
-    def __init__(self, exe: Path):
+    def __init__(
+        self,
+        exe: Path,
+        godot_backend: Path | None = None,
+        godot_mods_dir: Path | None = None,
+        developer_backends: bool = False,
+    ):
         self.exe = exe.resolve()
         self.root = self.exe.parent
+        self.developer_backends = developer_backends
+        discovery = discover_godot_backend(
+            self.root,
+            explicit=godot_backend,
+            mods_override=godot_mods_dir,
+        )
+        self.godot_backend: GodotBackend | None = discovery.backend
+        for diagnostic in discovery.diagnostics:
+            print(f"[launcher] native Ages backend: {diagnostic}", file=sys.stderr)
+        if self.godot_backend is not None:
+            print(
+                f"[launcher] native Ages backend: {self.godot_backend.executable}; "
+                f"mods: {self.godot_backend.mods_directory}",
+                file=sys.stderr,
+            )
 
     def query_games(self) -> list[Game]:
         out = subprocess.run(
@@ -273,6 +296,21 @@ class Runner:
     def run_log(self) -> Path:
         return self.root / "epoch-run.log"
 
+    @property
+    def godot_run_log(self) -> Path:
+        return self.root / "ages-native-run.log"
+
+    def native_available(self, game: Game) -> bool:
+        return game.id == "tlozooa" and self.godot_backend is not None
+
+    @property
+    def godot_mods_dir(self) -> Path | None:
+        return (
+            self.godot_backend.mods_directory
+            if self.godot_backend is not None
+            else None
+        )
+
     @staticmethod
     def _game_env() -> dict:
         """Environment for the game process. The gamepad bridge points SDL
@@ -294,15 +332,37 @@ class Runner:
         # anyway. The log also turns "the game just didn't start" into a
         # readable error -- start_game checks for an early exit and shows
         # the tail of this file.
-        log = open(self.run_log, "w", encoding="utf-8", errors="replace")
+        return self._launch_logged(
+            [str(self.exe), "--game", game.id],
+            self.root,
+            self.run_log,
+        )
+
+    def launch_native(self, game: Game) -> subprocess.Popen:
+        if not self.native_available(game) or self.godot_backend is None:
+            raise RuntimeError("The Epoch native Ages backend is not available for this game.")
+        self.godot_backend.mods_directory.mkdir(parents=True, exist_ok=True)
+        return self._launch_logged(
+            self.godot_backend.command(),
+            self.godot_backend.working_directory,
+            self.godot_run_log,
+        )
+
+    def _launch_logged(
+        self,
+        command: list[str],
+        working_directory: Path,
+        log_path: Path,
+    ) -> subprocess.Popen:
+        log = open(log_path, "w", encoding="utf-8", errors="replace")
         kwargs = {}
         if os.name == "nt":
             # Don't flash a console window behind the game.
             kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
         try:
             return subprocess.Popen(
-                [str(self.exe), "--game", game.id],
-                cwd=self.root,
+                command,
+                cwd=working_directory,
                 env=self._game_env(),
                 stdin=subprocess.DEVNULL,
                 stdout=log,
@@ -428,9 +488,19 @@ def draw_seasons_motif(pr: QPainter, c: QPointF, r: float, col: QColor) -> None:
 # --------------------------------------------------------------------------
 
 MENU_ITEMS = [
-    "Start game", "Continue Legend", "Mods", "Achievements", "Secrets",
-    "Saves", "Install ROM", "Stream", "Updates", "Exit",
+    "Start game", "Continue Legend",
+    "Mods", "Achievements", "Secrets", "Saves", "Install ROM", "Stream",
+    "Updates", "Exit",
 ]
+NATIVE_MENU_ITEMS = ["Start native Ages", "Native mods"]
+
+
+def launcher_menu_items(developer_backends: bool = False) -> list[str]:
+    """Keep experimental native backends out of the default player menu."""
+    items = list(MENU_ITEMS)
+    if developer_backends:
+        items[1:1] = NATIVE_MENU_ITEMS
+    return items
 
 # The two halves of the legend. Continuing one means linking the other.
 GAME_PAIR = {"tlozooa": "tlozoos", "tlozoos": "tlozooa"}
@@ -448,6 +518,7 @@ class LauncherView(QWidget):
         self.pad_name = ""
         self.update_note = ""
         self._menu_rects: list[QRectF] = []
+        self.menu_items = launcher_menu_items(runner.developer_backends)
         self._covers: dict[str, QPixmap | None] = {}
         self.setMouseTracking(True)
         self.setMinimumSize(900, 520)
@@ -511,11 +582,11 @@ class LauncherView(QWidget):
         if dx and len(self.games) > 1:
             self.active = max(0, min(len(self.games) - 1, self.active + dx))
         if dy:
-            self.menu_index = (self.menu_index + dy) % len(MENU_ITEMS)
+            self.menu_index = (self.menu_index + dy) % len(self.menu_items)
         self.update()
 
     def activate(self) -> None:
-        self.action.emit(MENU_ITEMS[self.menu_index], self.active_game())
+        self.action.emit(self.menu_items[self.menu_index], self.active_game())
 
     def set_pad_name(self, name: str) -> None:
         self.pad_name = name
@@ -551,7 +622,7 @@ class LauncherView(QWidget):
         pos = event.position()
         for i, r in enumerate(self._menu_rects):
             if r.contains(pos):
-                self.action.emit(MENU_ITEMS[i], self.active_game())
+                self.action.emit(self.menu_items[i], self.active_game())
                 return
         idx = self._panel_at(pos.x(), pos.y())
         if idx < len(self.games) and idx != self.active:
@@ -759,13 +830,15 @@ class LauncherView(QWidget):
         pr.setFont(font)
         fm = QFontMetricsF(font)
         line_h = fm.height() * 1.85
-        top = h - 40 - line_h * len(MENU_ITEMS)
+        top = h - 40 - line_h * len(self.menu_items)
 
-        for i, item in enumerate(MENU_ITEMS):
+        for i, item in enumerate(self.menu_items):
             rect = QRectF(x, top + i * line_h, box_w, line_h)
             self._menu_rects.append(rect)
 
             disabled = item in ("Start game", "Mods") and not game.playable
+            if item in ("Start native Ages", "Native mods"):
+                disabled = not self.runner.native_available(game)
             if disabled:
                 col = QColor(150, 150, 155, 90)
             elif i == self.menu_index:
@@ -1453,6 +1526,99 @@ class ModsDialog(QDialog):
 
     def save(self) -> None:
         self.runner.write_state({mod_id: cb.isChecked() for mod_id, cb in self.boxes})
+        self.accept()
+
+
+class NativeModsDialog(QDialog):
+    """Manage ooa-godot manifests without mixing them with ROM patch mods."""
+
+    def __init__(self, runner: Runner, parent=None):
+        super().__init__(parent)
+        self.runner = runner
+        self.boxes: list[tuple[NativeMod, QCheckBox]] = []
+        self.setWindowTitle("Native Ages Mods")
+        self.setMinimumSize(560, 440)
+        self.setStyleSheet(DIALOG_STYLE)
+
+        layout = QVBoxLayout(self)
+        intro = QLabel(
+            "These are generated-asset overlays for the Godot version of Ages. "
+            "They are separate from ROM patches and take effect the next time "
+            "native Ages starts."
+        )
+        intro.setWordWrap(True)
+        layout.addWidget(intro)
+
+        self.scroll = QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setStyleSheet("QScrollArea { border: 0; }")
+        layout.addWidget(self.scroll, 1)
+
+        self.diagnostics = QLabel()
+        self.diagnostics.setWordWrap(True)
+        self.diagnostics.setStyleSheet("color: #e6b85c; font-size: 11px;")
+        layout.addWidget(self.diagnostics)
+
+        row = QHBoxLayout()
+        open_btn = QPushButton("Open Native Mods Folder")
+        open_btn.clicked.connect(self.open_mods_folder)
+        refresh_btn = QPushButton("Refresh")
+        refresh_btn.clicked.connect(self.rebuild)
+        row.addWidget(open_btn)
+        row.addWidget(refresh_btn)
+        row.addStretch(1)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(self.save)
+        buttons.rejected.connect(self.reject)
+        row.addWidget(buttons)
+        layout.addLayout(row)
+        self.rebuild()
+
+    def open_mods_folder(self) -> None:
+        directory = self.runner.godot_mods_dir
+        if directory is not None:
+            directory.mkdir(parents=True, exist_ok=True)
+            open_in_file_manager(directory)
+
+    def rebuild(self) -> None:
+        self.boxes = []
+        inner = QWidget()
+        box_layout = QVBoxLayout(inner)
+        directory = self.runner.godot_mods_dir
+        result = scan_native_mods(directory) if directory is not None else None
+        mods = result.mods if result else ()
+        if not mods:
+            hint = QLabel(
+                "No valid native mods found. Add one immediate child folder per mod, "
+                "with a manifest.json containing required id and version fields. "
+                "Only generated .tsv tables and .png images are currently supported."
+            )
+            hint.setWordWrap(True)
+            box_layout.addWidget(hint)
+        for mod in mods:
+            cb = QCheckBox(f"{mod.name}  ·  v{mod.version}  ·  priority {mod.priority}")
+            cb.setChecked(mod.enabled)
+            box_layout.addWidget(cb)
+            if mod.name != mod.mod_id:
+                detail = QLabel(mod.mod_id)
+                detail.setStyleSheet("color: #8b97a2; font-size: 11px; margin-left: 28px;")
+                box_layout.addWidget(detail)
+            self.boxes.append((mod, cb))
+        box_layout.addStretch(1)
+        self.scroll.setWidget(inner)
+        messages = result.diagnostics if result else ("Native Godot backend is unavailable.",)
+        self.diagnostics.setText("\n".join(messages))
+        self.diagnostics.setVisible(bool(messages))
+
+    def save(self) -> None:
+        try:
+            for mod, checkbox in self.boxes:
+                set_native_mod_enabled(mod.manifest, mod.mod_id, checkbox.isChecked())
+        except (OSError, ValueError) as exc:
+            QMessageBox.warning(self, "Could not save native mod settings", str(exc))
+            return
         self.accept()
 
 
@@ -2155,9 +2321,15 @@ class MainWindow(QWidget):
         elif item == "Mods":
             if game.playable:
                 ModsDialog(self.runner, game, self).exec()
+        elif item == "Native mods":
+            if self.runner.native_available(game):
+                NativeModsDialog(self.runner, self).exec()
         elif item == "Start game":
             if game.playable:
                 self.start_game(game)
+        elif item == "Start native Ages":
+            if self.runner.native_available(game):
+                self.start_native_game(game)
 
     def continue_legend(self, game: Game) -> None:
         """The seamless linked game: take this game's transfer secret and
@@ -2235,6 +2407,22 @@ class MainWindow(QWidget):
         except OSError as exc:
             QMessageBox.warning(self, "Could not start the game", str(exc))
             return
+        self.game_log = self.runner.run_log
+        self.game_process_name = self.runner.exe.name
+        self._watch_game_process()
+
+    def start_native_game(self, game: Game) -> None:
+        try:
+            self.game_proc = self.runner.launch_native(game)
+        except (OSError, RuntimeError) as exc:
+            QMessageBox.warning(self, "Could not start native Ages", str(exc))
+            return
+        backend = self.runner.godot_backend
+        self.game_log = self.runner.godot_run_log
+        self.game_process_name = backend.executable.name if backend else "Epoch Ages Lab"
+        self._watch_game_process()
+
+    def _watch_game_process(self) -> None:
         # Stay hidden for as long as the game owns the screen. The old
         # behaviour -- reappear on a fixed 1.5s timer -- put the launcher
         # window on top of the running game, which read as a glitch.
@@ -2260,8 +2448,9 @@ class MainWindow(QWidget):
             # The runner never took (or lost) the screen -- surface what it
             # said instead of silently reappearing.
             tail = ""
+            log_path = getattr(self, "game_log", self.runner.run_log)
             try:
-                text = self.runner.run_log.read_text(
+                text = log_path.read_text(
                     encoding="utf-8", errors="replace"
                 ).strip()
                 tail = "\n".join(text.splitlines()[-15:])
@@ -2270,9 +2459,10 @@ class MainWindow(QWidget):
             QMessageBox.critical(
                 self,
                 "The game exited",
-                f"{self.runner.exe.name} exited with code {rc}.\n\n"
+                f"{getattr(self, 'game_process_name', self.runner.exe.name)} "
+                f"exited with code {rc}.\n\n"
                 f"{tail or '(no output captured)'}\n\n"
-                f"Full log: {self.runner.run_log}",
+                f"Full log: {log_path}",
             )
 
 
@@ -2295,6 +2485,19 @@ def main() -> int:
     parser.add_argument(
         "--runner", type=Path, default=None, help="path to the oracles game binary"
     )
+    parser.add_argument(
+        "--godot-backend",
+        type=Path,
+        default=None,
+        help=argparse.SUPPRESS,
+    )
+    parser.add_argument(
+        "--godot-mods-dir",
+        type=Path,
+        default=None,
+        help=argparse.SUPPRESS,
+    )
+    parser.add_argument("--dev-native-backend", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--smoke-test", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
 
@@ -2327,7 +2530,12 @@ def main() -> int:
         box.exec()
         return 1
 
-    runner = Runner(runner_path)
+    runner = Runner(
+        runner_path,
+        args.godot_backend,
+        args.godot_mods_dir,
+        developer_backends=args.dev_native_backend,
+    )
     if args.smoke_test:
         runner.query_games()
         return 0

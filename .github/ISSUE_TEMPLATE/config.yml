@@ -1,5 +1,11 @@
 blank_issues_enabled: true
 contact_links:
+  - name: Godot Ages starter tasks
+    url: https://github.com/ZakyPew/epoch-equinox/blob/main/docs/GODOT_STARTER_TASKS.md
+    about: Pick a bounded first contribution for gameplay, native mods, or validation.
+  - name: Godot Ages build and contribution guide
+    url: https://github.com/ZakyPew/epoch-equinox/blob/main/docs/GODOT_BACKEND_CONTRIBUTING.md
+    about: Set up Godot/.NET, run the checks, and submit backend changes through the right repository.
   - name: Voxel contributor guide
     url: https://github.com/ZakyPew/epoch-equinox/blob/main/docs/VOXEL_CONTRIBUTING.md
     about: Read the renderer workflow, debug flags, and asset safety rules.

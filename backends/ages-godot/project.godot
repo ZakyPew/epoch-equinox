@@ -1,0 +1,32 @@
+; Epoch-owned Oracle of Ages native backend prototype.
+; Copyright (c) Epoch & Equinox contributors.
+
+config_version=5
+
+[application]
+
+config/name="Epoch Ages Lab"
+run/main_scene="res://scenes/prototype_room.tscn"
+config/features=PackedStringArray("4.7", "GL Compatibility")
+
+[display]
+
+window/size/viewport_width=160
+window/size/viewport_height=144
+window/size/window_width_override=640
+window/size/window_height_override=576
+window/stretch/mode="canvas_items"
+window/stretch/scale_mode="integer"
+
+[physics]
+
+2d/default_gravity=0.0
+common/physics_ticks_per_second=60
+
+[rendering]
+
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"
+textures/default_filters/use_nearest_mipmap_filter=false
+textures/default_filters/texture_filter=0
+environment/defaults/default_clear_color=Color(0.04, 0.05, 0.08, 1)
