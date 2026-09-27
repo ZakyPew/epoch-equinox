@@ -25,4 +25,20 @@ Run its headless regression:
 & $env:GODOT4 --headless --path . -- --smoke-test
 ```
 
+## Local graphics import
+
+With a local `oracles-disasm` checkout (built from a clean supported ROM),
+import the first decoded overworld graphics sheets into the Git-ignored
+`imported/` directory:
+
+```powershell
+python ..\..\tools\import_ages_gfx.py --disasm-root C:\path\to\oracles-disasm
+```
+
+Press F1 in the prototype to inspect the locally imported overworld tileset
+sheet; Esc closes the atlas. These decoded assets are not committed or
+distributed. This is an initial asset-pipeline milestone, not yet a room
+renderer: translating room dictionaries/layouts, palettes, tile properties,
+and object placements is the next reconstruction step.
+
 No upstream reconstruction source, ROM, or ROM-derived assets are included.

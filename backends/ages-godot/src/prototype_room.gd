@@ -36,11 +36,14 @@ var player_cell := Vector2i(2, 3)
 var chest_open := false
 var _step_clock := 0.0
 var _message := "Arrows / WASD move   Z / A interact"
+var _show_tileset_atlas := false
+var _atlas_texture: Texture2D
 
 
 func _ready() -> void:
 	_ensure_input_actions()
 	_load_state()
+	_load_local_tileset()
 	if "--smoke-test" in OS.get_cmdline_user_args():
 		_run_smoke_test()
 		return
@@ -48,6 +51,12 @@ func _ready() -> void:
 
 
 func _physics_process(delta: float) -> void:
+	if Input.is_key_pressed(KEY_F1) and not _show_tileset_atlas:
+		_show_tileset_atlas = true
+		queue_redraw()
+	elif Input.is_key_pressed(KEY_ESCAPE) and _show_tileset_atlas:
+		_show_tileset_atlas = false
+		queue_redraw()
 	if Input.is_action_just_pressed("interact"):
 		_interact()
 		queue_redraw()
@@ -87,6 +96,26 @@ func _draw() -> void:
 	draw_rect(Rect2i(0, 0, 160, 10), Color(0.04, 0.07, 0.09, 0.86))
 	draw_string(ThemeDB.fallback_font, Vector2(3, 8), "AGES LAB / ROOM PROTOTYPE", HORIZONTAL_ALIGNMENT_LEFT, -1, 6, Color("e3ddae"))
 	draw_string(ThemeDB.fallback_font, Vector2(3, 141), _message, HORIZONTAL_ALIGNMENT_LEFT, 154, 6, Color("fff2b2"))
+	if _show_tileset_atlas:
+		_draw_tileset_atlas()
+
+
+func _load_local_tileset() -> void:
+	var path := "res://imported/gfx_tileset_overworld_standard.png"
+	if not FileAccess.file_exists(path):
+		return
+	var image := Image.load_from_file(ProjectSettings.globalize_path(path))
+	if image != null and not image.is_empty():
+		_atlas_texture = ImageTexture.create_from_image(image)
+
+
+func _draw_tileset_atlas() -> void:
+	draw_rect(Rect2i(4, 16, 152, 80), Color("151c20"))
+	if _atlas_texture != null:
+		draw_texture(_atlas_texture, Vector2(16, 30))
+		draw_string(ThemeDB.fallback_font, Vector2(8, 25), "OVERWORLD TILESET ATLAS (F1 / ESC)", HORIZONTAL_ALIGNMENT_LEFT, 144, 6, Color("fff2b2"))
+	else:
+		draw_string(ThemeDB.fallback_font, Vector2(8, 30), "No local tileset imported. See README.", HORIZONTAL_ALIGNMENT_LEFT, 144, 6, Color("fff2b2"))
 
 
 func _draw_chest() -> void:
