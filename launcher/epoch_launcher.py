@@ -189,9 +189,11 @@ class Runner:
         exe: Path,
         godot_backend: Path | None = None,
         godot_mods_dir: Path | None = None,
+        developer_backends: bool = False,
     ):
         self.exe = exe.resolve()
         self.root = self.exe.parent
+        self.developer_backends = developer_backends
         discovery = discover_godot_backend(
             self.root,
             explicit=godot_backend,
@@ -199,10 +201,10 @@ class Runner:
         )
         self.godot_backend: GodotBackend | None = discovery.backend
         for diagnostic in discovery.diagnostics:
-            print(f"[launcher] ooa-godot: {diagnostic}", file=sys.stderr)
+            print(f"[launcher] native Ages backend: {diagnostic}", file=sys.stderr)
         if self.godot_backend is not None:
             print(
-                f"[launcher] ooa-godot: {self.godot_backend.executable}; "
+                f"[launcher] native Ages backend: {self.godot_backend.executable}; "
                 f"mods: {self.godot_backend.mods_directory}",
                 file=sys.stderr,
             )
@@ -295,7 +297,7 @@ class Runner:
 
     @property
     def godot_run_log(self) -> Path:
-        return self.root / "ooa-godot-run.log"
+        return self.root / "ages-native-run.log"
 
     def native_available(self, game: Game) -> bool:
         return game.id == "tlozooa" and self.godot_backend is not None
@@ -337,7 +339,7 @@ class Runner:
 
     def launch_native(self, game: Game) -> subprocess.Popen:
         if not self.native_available(game) or self.godot_backend is None:
-            raise RuntimeError("The ooa-godot backend is not available for this game.")
+            raise RuntimeError("The Epoch native Ages backend is not available for this game.")
         self.godot_backend.mods_directory.mkdir(parents=True, exist_ok=True)
         return self._launch_logged(
             self.godot_backend.command(),
@@ -485,10 +487,19 @@ def draw_seasons_motif(pr: QPainter, c: QPointF, r: float, col: QColor) -> None:
 # --------------------------------------------------------------------------
 
 MENU_ITEMS = [
-    "Start game", "Start native Ages", "Native mods", "Continue Legend",
+    "Start game", "Continue Legend",
     "Mods", "Achievements", "Secrets", "Saves", "Install ROM", "Stream",
     "Updates", "Exit",
 ]
+NATIVE_MENU_ITEMS = ["Start native Ages", "Native mods"]
+
+
+def launcher_menu_items(developer_backends: bool = False) -> list[str]:
+    """Keep experimental native backends out of the default player menu."""
+    items = list(MENU_ITEMS)
+    if developer_backends:
+        items[1:1] = NATIVE_MENU_ITEMS
+    return items
 
 # The two halves of the legend. Continuing one means linking the other.
 GAME_PAIR = {"tlozooa": "tlozoos", "tlozoos": "tlozooa"}
@@ -506,6 +517,7 @@ class LauncherView(QWidget):
         self.pad_name = ""
         self.update_note = ""
         self._menu_rects: list[QRectF] = []
+        self.menu_items = launcher_menu_items(runner.developer_backends)
         self._covers: dict[str, QPixmap | None] = {}
         self.setMouseTracking(True)
         self.setMinimumSize(900, 520)
@@ -569,11 +581,11 @@ class LauncherView(QWidget):
         if dx and len(self.games) > 1:
             self.active = max(0, min(len(self.games) - 1, self.active + dx))
         if dy:
-            self.menu_index = (self.menu_index + dy) % len(MENU_ITEMS)
+            self.menu_index = (self.menu_index + dy) % len(self.menu_items)
         self.update()
 
     def activate(self) -> None:
-        self.action.emit(MENU_ITEMS[self.menu_index], self.active_game())
+        self.action.emit(self.menu_items[self.menu_index], self.active_game())
 
     def set_pad_name(self, name: str) -> None:
         self.pad_name = name
@@ -609,7 +621,7 @@ class LauncherView(QWidget):
         pos = event.position()
         for i, r in enumerate(self._menu_rects):
             if r.contains(pos):
-                self.action.emit(MENU_ITEMS[i], self.active_game())
+                self.action.emit(self.menu_items[i], self.active_game())
                 return
         idx = self._panel_at(pos.x(), pos.y())
         if idx < len(self.games) and idx != self.active:
@@ -817,9 +829,9 @@ class LauncherView(QWidget):
         pr.setFont(font)
         fm = QFontMetricsF(font)
         line_h = fm.height() * 1.85
-        top = h - 40 - line_h * len(MENU_ITEMS)
+        top = h - 40 - line_h * len(self.menu_items)
 
-        for i, item in enumerate(MENU_ITEMS):
+        for i, item in enumerate(self.menu_items):
             rect = QRectF(x, top + i * line_h, box_w, line_h)
             self._menu_rects.append(rect)
 
@@ -2316,7 +2328,7 @@ class MainWindow(QWidget):
             return
         backend = self.runner.godot_backend
         self.game_log = self.runner.godot_run_log
-        self.game_process_name = backend.executable.name if backend else "ooa-godot"
+        self.game_process_name = backend.executable.name if backend else "Epoch Ages Lab"
         self._watch_game_process()
 
     def _watch_game_process(self) -> None:
@@ -2386,14 +2398,15 @@ def main() -> int:
         "--godot-backend",
         type=Path,
         default=None,
-        help="ooa-godot executable, project directory, or backend descriptor directory",
+        help=argparse.SUPPRESS,
     )
     parser.add_argument(
         "--godot-mods-dir",
         type=Path,
         default=None,
-        help="mod directory passed to the ooa-godot backend",
+        help=argparse.SUPPRESS,
     )
+    parser.add_argument("--dev-native-backend", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--smoke-test", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
 
@@ -2426,7 +2439,12 @@ def main() -> int:
         box.exec()
         return 1
 
-    runner = Runner(runner_path, args.godot_backend, args.godot_mods_dir)
+    runner = Runner(
+        runner_path,
+        args.godot_backend,
+        args.godot_mods_dir,
+        developer_backends=args.dev_native_backend,
+    )
     if args.smoke_test:
         runner.query_games()
         return 0

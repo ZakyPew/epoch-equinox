@@ -1,4 +1,4 @@
-"""Discovery and command construction for the optional ooa-godot backend."""
+"""Discovery and command construction for Epoch's optional Godot backend."""
 from __future__ import annotations
 
 import json
@@ -12,9 +12,9 @@ from typing import Mapping
 EXPORTED_NAMES = (
     "oracle-of-ages.exe",
     "Oracle of Ages.exe",
-    "ooa-godot.exe",
+    "ages-lab.exe",
     "oracle-of-ages",
-    "ooa-godot",
+    "ages-lab",
 )
 
 
@@ -56,9 +56,9 @@ def discover_godot_backend(
     else:
         candidates.extend(
             (
-                epoch_root / "backends" / "ooa-godot",
-                epoch_root / "ooa-godot",
-                epoch_root.parent / "ooa-godot",
+                epoch_root / "backends" / "ages-godot",
+                epoch_root.parent / "backends" / "ages-godot",
+                epoch_root.parent.parent / "backends" / "ages-godot",
             )
         )
 
@@ -78,7 +78,7 @@ def discover_godot_backend(
             return BackendDiscovery(backend, tuple(diagnostics))
 
     if explicit is not None and not diagnostics:
-        diagnostics.append(f"{explicit}: no ooa-godot executable or project was found")
+        diagnostics.append(f"{explicit}: no Godot executable or project was found")
     return BackendDiscovery(None, tuple(diagnostics))
 
 

@@ -36,6 +36,11 @@ shot_pylauncher.sh
 stream/live.js
 stream/live.js.tmp
 
+# Epoch-owned Godot prototype output and local mod/save data.
+/backends/ages-godot/.godot/
+/backends/ages-godot/mods/
+/backends/ages-godot/user_data/
+
 # Icons ripped from the player's own ROM (tools/rip_item_icons.py).
 # Cartridge art: never committed, never shipped.
 stream/icons/items/
