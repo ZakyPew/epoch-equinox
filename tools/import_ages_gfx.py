@@ -42,10 +42,29 @@ def import_tilesets(disasm_root: Path, output_dir: Path) -> dict[str, object]:
         destination = output_dir / filename
         shutil.copyfile(source, destination)
         images.append({"file": filename, "width": width, "height": height})
+    room = disasm_root / "rooms" / "ages" / "small" / "room0000.bin"
+    assignments = disasm_root / "rooms" / "ages" / "group0Tilesets.bin"
+    if not room.is_file() or not assignments.is_file():
+        raise FileNotFoundError(f"Room 0000 or its tileset assignment is missing from {disasm_root}")
+    room_data = room.read_bytes()
+    assignment_data = assignments.read_bytes()
+    if not assignment_data:
+        raise ValueError(f"Room group 0 tileset assignment table is empty: {assignments}")
+    tileset_id = assignment_data[0]
+    if len(room_data) != 80:
+        raise ValueError(f"Expected an 80-byte 10x8 room layout: {room}")
+    mappings = disasm_root / "tileset_layouts" / "ages" / f"tilesetMappings{tileset_id:02x}.bin"
+    collisions = disasm_root / "tileset_layouts" / "ages" / f"tilesetCollisions{tileset_id:02x}.bin"
+    for source, expected_size in ((mappings, 2048), (collisions, 256)):
+        if not source.is_file() or source.stat().st_size != expected_size:
+            raise ValueError(f"Missing or malformed tileset {tileset_id:02x} table: {source}")
+        shutil.copyfile(source, output_dir / source.name)
+    shutil.copyfile(room, output_dir / "room0000.bin")
     manifest: dict[str, object] = {
         "format": 1,
         "source": "local oracles-disasm gfx_compressible/ages",
         "images": images,
+        "room": {"group": 0, "id": 0, "tileset": tileset_id, "width": 10, "height": 8},
     }
     (output_dir / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     return manifest

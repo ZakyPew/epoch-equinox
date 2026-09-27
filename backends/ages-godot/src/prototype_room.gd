@@ -10,6 +10,8 @@ const ROOM_WIDTH := 20
 const ROOM_HEIGHT := 18
 const STEP_SECONDS := 0.12
 const CHEST_CELL := Vector2i(15, 8)
+const IMPORTED_ROOM_WIDTH := 10
+const IMPORTED_ROOM_HEIGHT := 8
 const SAVE_PATH := "user://ages_lab_save.json"
 const ROOM := [
 	"####################",
@@ -38,12 +40,17 @@ var _step_clock := 0.0
 var _message := "Arrows / WASD move   Z / A interact"
 var _show_tileset_atlas := false
 var _atlas_texture: Texture2D
+var _use_imported_room := false
+var _room_layout := PackedByteArray()
+var _room_mappings := PackedByteArray()
+var _room_collisions := PackedByteArray()
 
 
 func _ready() -> void:
 	_ensure_input_actions()
 	_load_state()
 	_load_local_tileset()
+	_load_local_room()
 	if "--smoke-test" in OS.get_cmdline_user_args():
 		_run_smoke_test()
 		return
@@ -71,49 +78,115 @@ func _physics_process(delta: float) -> void:
 
 
 func _draw() -> void:
-	for y in range(ROOM_HEIGHT):
-		for x in range(ROOM_WIDTH):
-			var cell := Vector2i(x, y)
-			var tile := _tile_at(cell)
-			var rect := Rect2i(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE)
-			match tile:
-				"#":
-					draw_rect(rect, Color("304d42"))
-					draw_rect(Rect2i(rect.position + Vector2i(1, 1), Vector2i(6, 1)), Color("557161"))
-				"~":
-					draw_rect(rect, Color("326a88"))
-					draw_rect(Rect2i(rect.position + Vector2i(1, 2), Vector2i(3, 1)), Color("6c9ab0"))
-				_:
-					draw_rect(rect, Color("668d4f"))
-					if (x * 7 + y * 3) % 5 == 0:
-						draw_rect(Rect2i(rect.position + Vector2i(2, 5), Vector2i(1, 1)), Color("83a95d"))
-			if tile == "D":
-				draw_rect(Rect2i(rect.position, Vector2i(TILE_SIZE, TILE_SIZE)), Color("594431"))
-				draw_rect(Rect2i(rect.position + Vector2i(2, 1), Vector2i(4, 7)), Color("ad8953"))
-
-	_draw_chest()
-	_draw_player()
-	draw_rect(Rect2i(0, 0, 160, 10), Color(0.04, 0.07, 0.09, 0.86))
-	draw_string(ThemeDB.fallback_font, Vector2(3, 8), "AGES LAB / ROOM PROTOTYPE", HORIZONTAL_ALIGNMENT_LEFT, -1, 6, Color("e3ddae"))
-	draw_string(ThemeDB.fallback_font, Vector2(3, 141), _message, HORIZONTAL_ALIGNMENT_LEFT, 154, 6, Color("fff2b2"))
+	if _use_imported_room:
+		_draw_imported_room()
+		_draw_imported_player()
+		draw_rect(Rect2i(0, 0, 160, 9), Color(0.04, 0.07, 0.09, 0.86))
+		draw_string(ThemeDB.fallback_font, Vector2(3, 7), "AGES ROOM 0000 / GRID COLLISION PROBE", HORIZONTAL_ALIGNMENT_LEFT, -1, 6, Color("e3ddae"))
+		draw_string(ThemeDB.fallback_font, Vector2(3, 141), "Arrows / WASD move   F1 atlas", HORIZONTAL_ALIGNMENT_LEFT, 154, 6, Color("fff2b2"))
+	else:
+		for y in range(ROOM_HEIGHT):
+			for x in range(ROOM_WIDTH):
+				var cell := Vector2i(x, y)
+				var tile := _tile_at(cell)
+				var rect := Rect2i(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE)
+				match tile:
+					"#":
+						draw_rect(rect, Color("304d42"))
+						draw_rect(Rect2i(rect.position + Vector2i(1, 1), Vector2i(6, 1)), Color("557161"))
+					"~":
+						draw_rect(rect, Color("326a88"))
+						draw_rect(Rect2i(rect.position + Vector2i(1, 2), Vector2i(3, 1)), Color("6c9ab0"))
+					_:
+						draw_rect(rect, Color("668d4f"))
+						if (x * 7 + y * 3) % 5 == 0:
+							draw_rect(Rect2i(rect.position + Vector2i(2, 5), Vector2i(1, 1)), Color("83a95d"))
+				if tile == "D":
+					draw_rect(Rect2i(rect.position, Vector2i(TILE_SIZE, TILE_SIZE)), Color("594431"))
+					draw_rect(Rect2i(rect.position + Vector2i(2, 1), Vector2i(4, 7)), Color("ad8953"))
+		_draw_chest()
+		_draw_player()
+		draw_rect(Rect2i(0, 0, 160, 10), Color(0.04, 0.07, 0.09, 0.86))
+		draw_string(ThemeDB.fallback_font, Vector2(3, 8), "AGES LAB / ROOM PROTOTYPE", HORIZONTAL_ALIGNMENT_LEFT, -1, 6, Color("e3ddae"))
+		draw_string(ThemeDB.fallback_font, Vector2(3, 141), _message, HORIZONTAL_ALIGNMENT_LEFT, 154, 6, Color("fff2b2"))
 	if _show_tileset_atlas:
 		_draw_tileset_atlas()
 
 
 func _load_local_tileset() -> void:
-	var path := "res://imported/gfx_tileset_overworld_standard.png"
-	if not FileAccess.file_exists(path):
+	var atlas := Image.create(128, 128, false, Image.FORMAT_RGBA8)
+	var y_offset := 0
+	for sheet in ["standard", "present", "past"]:
+		var path := "res://imported/gfx_tileset_overworld_%s.png" % sheet
+		if not FileAccess.file_exists(path):
+			return
+		var image := Image.load_from_file(ProjectSettings.globalize_path(path))
+		if image == null or image.is_empty() or image.get_width() != 128 or image.get_height() % 8 != 0:
+			push_warning("Invalid local overworld graphics sheet: %s" % path)
+			return
+		image.convert(Image.FORMAT_RGBA8)
+		atlas.blit_rect(image, Rect2i(Vector2i.ZERO, image.get_size()), Vector2i(0, y_offset))
+		y_offset += image.get_height()
+	if y_offset != 128:
+		push_warning("Expected 256 8x8 tiles across imported Ages sheets; found %d pixels" % y_offset)
 		return
-	var image := Image.load_from_file(ProjectSettings.globalize_path(path))
-	if image != null and not image.is_empty():
-		_atlas_texture = ImageTexture.create_from_image(image)
+	_atlas_texture = ImageTexture.create_from_image(atlas)
+
+
+func _load_local_room() -> void:
+	var room_path := "res://imported/room0000.bin"
+	var mappings_path := "res://imported/tilesetMappings08.bin"
+	var collisions_path := "res://imported/tilesetCollisions08.bin"
+	if _atlas_texture == null or not FileAccess.file_exists(room_path) or not FileAccess.file_exists(mappings_path) or not FileAccess.file_exists(collisions_path):
+		return
+	_room_layout = FileAccess.get_file_as_bytes(room_path)
+	_room_mappings = FileAccess.get_file_as_bytes(mappings_path)
+	_room_collisions = FileAccess.get_file_as_bytes(collisions_path)
+	if _room_layout.size() != IMPORTED_ROOM_WIDTH * IMPORTED_ROOM_HEIGHT or _room_mappings.size() != 2048 or _room_collisions.size() != 256:
+		push_warning("Local Ages room import has an unexpected table size; keeping the prototype room")
+		return
+	_use_imported_room = true
+	player_cell = Vector2i(1, 1)
+	chest_open = false
+
+
+func _draw_imported_room() -> void:
+	for y in range(IMPORTED_ROOM_HEIGHT):
+		for x in range(IMPORTED_ROOM_WIDTH):
+			var metatile_id := int(_room_layout[y * IMPORTED_ROOM_WIDTH + x])
+			for quadrant in range(4):
+				var mapping_index := metatile_id * 4 + quadrant
+				var tile_id := int(_room_mappings[mapping_index])
+				var attribute := int(_room_mappings[1024 + mapping_index])
+				var source := Vector2i((tile_id % 16) * 8, (tile_id / 16) * 8)
+				var destination := Vector2i(x * 16 + (quadrant % 2) * 8, y * 16 + (quadrant / 2) * 8)
+				var flip_x := (attribute & 0x20) != 0
+				var flip_y := (attribute & 0x40) != 0
+				if flip_x or flip_y:
+					var origin := Vector2(destination + Vector2i(8 if flip_x else 0, 8 if flip_y else 0))
+					draw_set_transform(origin, 0.0, Vector2(-1.0 if flip_x else 1.0, -1.0 if flip_y else 1.0))
+					var local_position := Vector2(-8 if flip_x else 0, -8 if flip_y else 0)
+					draw_texture_rect_region(_atlas_texture, Rect2(local_position, Vector2(8, 8)), Rect2(source, Vector2(8, 8)))
+					draw_set_transform(Vector2.ZERO)
+				else:
+					draw_texture_rect_region(_atlas_texture, Rect2(destination, Vector2(8, 8)), Rect2(source, Vector2(8, 8)))
+
+
+func _draw_imported_player() -> void:
+	var origin := Vector2i(player_cell.x * 16, player_cell.y * 16)
+	draw_rect(Rect2i(origin + Vector2i(3, 12), Vector2i(10, 2)), Color(0.12, 0.2, 0.12, 0.55))
+	draw_rect(Rect2i(origin + Vector2i(5, 2), Vector2i(6, 5)), Color("e4bd83"))
+	draw_rect(Rect2i(origin + Vector2i(4, 1), Vector2i(8, 3)), Color("397646"))
+	draw_rect(Rect2i(origin + Vector2i(4, 7), Vector2i(8, 6)), Color("3d8e52"))
+	draw_rect(Rect2i(origin + Vector2i(5, 13), Vector2i(3, 2)), Color("75452d"))
+	draw_rect(Rect2i(origin + Vector2i(9, 13), Vector2i(3, 2)), Color("75452d"))
 
 
 func _draw_tileset_atlas() -> void:
-	draw_rect(Rect2i(4, 16, 152, 80), Color("151c20"))
+	draw_rect(Rect2i(4, 12, 152, 120), Color("151c20"))
 	if _atlas_texture != null:
-		draw_texture(_atlas_texture, Vector2(16, 30))
-		draw_string(ThemeDB.fallback_font, Vector2(8, 25), "OVERWORLD TILESET ATLAS (F1 / ESC)", HORIZONTAL_ALIGNMENT_LEFT, 144, 6, Color("fff2b2"))
+		draw_texture_rect(_atlas_texture, Rect2(24, 25, 112, 112), false)
+		draw_string(ThemeDB.fallback_font, Vector2(8, 20), "AGES TILESET / 256 TILES (F1 / ESC)", HORIZONTAL_ALIGNMENT_LEFT, 144, 6, Color("fff2b2"))
 	else:
 		draw_string(ThemeDB.fallback_font, Vector2(8, 30), "No local tileset imported. See README.", HORIZONTAL_ALIGNMENT_LEFT, 144, 6, Color("fff2b2"))
 
@@ -157,6 +230,11 @@ func _try_step(direction: Vector2i) -> bool:
 
 
 func _is_walkable(cell: Vector2i) -> bool:
+	if _use_imported_room:
+		if cell.x < 0 or cell.y < 0 or cell.x >= IMPORTED_ROOM_WIDTH or cell.y >= IMPORTED_ROOM_HEIGHT:
+			return false
+		var metatile_id := int(_room_layout[cell.y * IMPORTED_ROOM_WIDTH + cell.x])
+		return _room_collisions[metatile_id] == 0
 	var tile := _tile_at(cell)
 	return tile != "#" and tile != "~" and tile != "C"
 
@@ -230,6 +308,16 @@ func _add_key_action(action: StringName, keycodes: Array[int]) -> void:
 
 func _run_smoke_test() -> void:
 	var errors: Array[String] = []
+	if _use_imported_room:
+		if _atlas_texture == null or _room_layout.size() != IMPORTED_ROOM_WIDTH * IMPORTED_ROOM_HEIGHT:
+			errors.append("imported room and combined tile atlas should load")
+		for metatile_id in _room_layout:
+			if int(metatile_id) * 4 + 3 >= _room_mappings.size() / 2:
+				errors.append("room references a metatile without mapping data")
+				break
+		if not _is_walkable(Vector2i(1, 1)) or _is_walkable(Vector2i(0, 0)):
+			errors.append("imported room collision table should distinguish floor and wall")
+		_use_imported_room = false
 	if ROOM.size() != ROOM_HEIGHT:
 		errors.append("room height mismatch")
 	for row in ROOM:
