@@ -173,9 +173,9 @@ func _draw_imported_room() -> void:
 		for x in range(IMPORTED_ROOM_WIDTH):
 			var metatile_id := int(_room_layout[y * IMPORTED_ROOM_WIDTH + x])
 			for quadrant in range(4):
-				var mapping_index := metatile_id * 4 + quadrant
+				var mapping_index := _mapping_tile_offset(metatile_id, quadrant)
 				var tile_id := _vram_tile_index(int(_room_mappings[mapping_index]))
-				var attribute := int(_room_mappings[1024 + mapping_index])
+				var attribute := int(_room_mappings[mapping_index + 4])
 				var source := Vector2i((tile_id % 16) * 8, (tile_id >> 4) * 8)
 				var destination := Vector2i(x * 16 + (quadrant % 2) * 8, y * 16 + (quadrant >> 1) * 8)
 				var flip_x := (attribute & 0x20) != 0
@@ -194,6 +194,11 @@ func _vram_tile_index(gameboy_tile_id: int) -> int:
 	# Oracle room tile IDs use Game Boy's signed BG addressing: $80 maps to
 	# $8800 (atlas slot 0), while $00 maps to $9000 (atlas slot 128).
 	return gameboy_tile_id ^ 0x80
+
+
+func _mapping_tile_offset(metatile_id: int, quadrant: int) -> int:
+	# Each extracted mapping is eight bytes: four tile IDs followed by four attributes.
+	return metatile_id * 8 + quadrant
 
 
 func _draw_imported_player() -> void:
@@ -338,9 +343,11 @@ func _run_smoke_test() -> void:
 		if _atlas_texture == null or _room_layout.size() != IMPORTED_ROOM_WIDTH * IMPORTED_ROOM_HEIGHT:
 			errors.append("imported room and combined tile atlas should load")
 		for metatile_id in _room_layout:
-			if int(metatile_id) * 4 + 3 >= _room_mappings.size() / 2:
+			if _mapping_tile_offset(int(metatile_id), 3) + 4 >= _room_mappings.size():
 				errors.append("room references a metatile without mapping data")
 				break
+		if _mapping_tile_offset(1, 0) != 8 or _mapping_tile_offset(1, 3) + 4 != 15:
+			errors.append("metatile mappings should store four tile IDs then four attributes per record")
 		if not _is_walkable(Vector2i(1, 1)) or _is_walkable(Vector2i(0, 0)):
 			errors.append("imported room collision table should distinguish floor and wall")
 		_use_imported_room = false
