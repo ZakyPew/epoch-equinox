@@ -21,9 +21,12 @@ git submodule update --init --recursive
 ```
 
 The submodule is pinned to `ZakyPew/ooa-godot` on `codex/mod-asset-overlays`.
-Do not flatten its files into Epoch or change `.gitmodules` to point at a
-personal checkout. The small `backends/ages-godot` project is only a launcher
-fallback and is not where reconstruction gameplay should be developed.
+That is the active Godot contribution base: gameplay contributors should fork
+that branch, then open a Godot PR with its base set to
+`codex/mod-asset-overlays`. Do not flatten its files into Epoch or change
+`.gitmodules` to point at a personal checkout. The small `backends/ages-godot`
+project is only a launcher fallback and is not where reconstruction gameplay
+should be developed.
 
 ## Requirements and build
 
@@ -117,8 +120,8 @@ a rigorous workflow checklist.
    parallel suite. Report the exact command and result in the PR.
 4. For an external contribution, fork `ZakyPew/ooa-godot` on GitHub, add that
    fork as a remote inside the submodule checkout, push the feature branch
-   there, and open a PR targeting `ZakyPew/ooa-godot`. For example, from the
-   Epoch root:
+   there, and open a PR targeting `ZakyPew/ooa-godot` with base branch
+   `codex/mod-asset-overlays`. For example, from the Epoch root:
 
    ```powershell
    cd backends/ooa-godot
@@ -135,14 +138,16 @@ a rigorous workflow checklist.
    pointer and links the Godot PR/commit. Launcher-only changes go directly
    through an Epoch PR.
 5. Keep ROMs, save files, generated ROM-derived art/data, build output, and
-   local Godot settings out of commits. The Godot repository currently has no
-   tracked `LICENSE` file. Do not copy Epoch's root license into the submodule
-   or imply that a code license covers Nintendo's game, disassembly, or
-   ROM-derived content. Before adding a license, maintainers need to confirm
-   they have authority to license the original contributions and identify
-   third-party/derived files that must be excluded or separately attributed.
-   This is project guidance, not legal advice; get qualified review if the
-   intended distribution is commercial or broad public release.
+   local Godot settings out of commits. The original project creator has
+   authorized Epoch to continue, modify, publicly redistribute, and accept
+   community contributions to its `ZakyPew/ooa-godot` fork. Preserve upstream
+   attribution; this permission is not a copyright transfer and is not a
+   general-purpose license for third parties to reuse the code outside this
+   project. The Godot repository has no tracked `LICENSE`; do not copy Epoch's
+   root license into it or imply that any code permission covers Nintendo's
+   game, disassembly, or ROM-derived content. This is project guidance, not
+   legal advice; get qualified review if the intended distribution is
+   commercial or broad public release.
 
 The Epoch PR should describe changes in both repositories separately: the
 Godot submodule commit and any parent-repository launcher/docs changes.
@@ -152,13 +157,18 @@ claim, your planned scope, and the check you intend to run. Wait for a
 maintainer to confirm ownership before doing broad or multi-week work; this
 keeps contributors from duplicating effort or accidentally widening a task.
 
-## Current rights status
+## Current rights and attribution
 
-The Epoch repository's root `LICENSE` explicitly excludes the Nintendo game;
-it is not the license for `backends/ooa-godot`. That submodule was imported
-from a separate project and currently has no tracked license, so do not tell
-contributors that it is open-source or that a Nintendo ROM/asset license is
-included. Until maintainers confirm the provenance and authority to license
-the submodule's original code, keep participation to issue reports, task
-discussion, and review proposals; do not merge or redistribute third-party
-contributions as though a license were settled. This is not legal advice.
+Epoch's maintainer reports that the original Godot project creator authorized
+the `ZakyPew/ooa-godot` fork to continue development, modify and publicly
+redistribute the project, and accept community contributions. Contributors
+may therefore submit gameplay, tooling, tests, and documentation PRs to the
+active Godot branch described above. Keep changes attributable, and use the
+Godot PR template's contribution confirmation.
+
+This authorization does not transfer ownership of pre-existing code, create a
+general-purpose software license for unrelated reuse, or grant rights to
+Nintendo game content. The Godot submodule has no tracked `LICENSE`; Epoch's
+root `LICENSE` covers only Epoch-owned files and explicitly excludes Nintendo
+content. Never commit or redistribute ROMs or ROM-derived files. This is
+project guidance, not legal advice.

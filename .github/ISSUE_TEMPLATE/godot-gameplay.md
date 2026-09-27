@@ -31,4 +31,4 @@ List observable checks, including re-entry/persistence where relevant.
 
 - [ ] I will not attach or commit a ROM, ROM dump, ROM-derived asset, or personal save.
 - [ ] I have read the [Godot contributor guide](https://github.com/ZakyPew/epoch-equinox/blob/main/docs/GODOT_BACKEND_CONTRIBUTING.md).
-- [ ] I understand that the Godot submodule's license/rights policy is unresolved; this issue is a proposal, not a license grant.
+- [ ] I understand community code contributions are submitted to the `ZakyPew/ooa-godot` fork on `codex/mod-asset-overlays`, and that this permission does not cover Nintendo game content or grant blanket third-party reuse rights.

@@ -24,12 +24,15 @@ and fails if the dialog accidentally calls the classic ROM-mod state writer.
 The root Epoch MIT license covers launcher files, as described in `LICENSE`;
 this does not license the Godot submodule or Nintendo content.
 
-## Godot-submodule proposals (rights review pending)
+## Godot gameplay and tooling tasks
 
-The following are useful scoped tasks to discuss and investigate. The
-submodule's code license and provenance need maintainer review before its code
-can be advertised as open source or outside contributions merged or
-redistributed.
+The original project creator has authorized Epoch to modify and publicly
+redistribute its maintained fork and accept community contributions. These
+tasks are ready to claim; submit implementation PRs to `ZakyPew/ooa-godot`
+targeting `codex/mod-asset-overlays`, following the [Godot build and
+contribution guide](GODOT_BACKEND_CONTRIBUTING.md). Preserve upstream
+attribution. This permission does not grant rights to Nintendo content or
+provide a blanket license for third-party reuse outside this project.
 
 ### Reproduce one player-animation discrepancy
 
@@ -96,9 +99,8 @@ match the existing resolver/tests.
   setup and exact validation commands. State what you ran and what remains
   unverified in the PR.
 
-The Godot submodule has no tracked license at this time. That is an ownership
-and rights question for maintainers to resolve before presenting the
-submodule as open source or merging/redistributing external code; see the
-contribution guide's licensing note. Contributors may discuss these scoped
-tasks and submit issue reports while that review is pending. This task list is
-not a grant of rights to game content or assets.
+The Godot repository has no tracked general-purpose software license.
+Community contributions are welcome under the creator's project-specific
+authorization, but contributors should not assume this grants them blanket
+rights to reuse the repository outside Epoch. This task list does not grant
+rights to Nintendo game content or assets.
