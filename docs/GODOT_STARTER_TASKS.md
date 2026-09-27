@@ -54,23 +54,25 @@ claimed mismatch is traced to its source behavior; and a focused validation
 checks the relevant frame/timing boundary. Keep movement, sprite artwork, and
 render scaling as separate issues if they turn out to be separate causes.
 
-### Gameplay slice: top-down Mermaid Suit swimming
+### Gameplay slice: Mermaid Suit deep-water transition
 
 **Difficulty:** intermediate.
 
-Top-down Mermaid Suit movement and deep-water transitions are listed as
-unfinished in [implementation status](../backends/ooa-godot/docs/implementation-status.md).
-Trace the original swimming state and its callers in `link.s` / the relevant
-interaction and collision code. Implement one coherent top-down swimming
-behavior slice; do not try to finish every water room or all Mermaid Suit
-upgrades in one PR. Extend the player validation suite with a focused scenario
-that covers entry, one movement/update boundary, collision or water exit, and
-re-entry where that slice needs it.
+Top-down surface seawater entry, Mermaid movement, water exit, and re-entry now
+have an initial source-backed path. Deep-water transitions remain unfinished
+in [implementation status](../backends/ooa-godot/docs/implementation-status.md).
+Trace `linkUpdateDiving` and its `checkForUnderwaterTransition@levelDown`
+caller in `link.s`, including the `wDisableScreenTransitions` gate and the
+`TILEINDEX_DEEP_WATER` test. Implement one transition boundary only; do not
+attempt every underwater room or all Mermaid Suit behavior at once. Extend the
+player validation with a focused scenario for the selected dive/transition
+boundary and the no-transition case.
 
-**Done when:** the change preserves source timing, input priority, fixed-point
-arithmetic, collision, and RNG behavior; its expected result is independently
-derived from the ROM/disassembly; `dotnet build` has no warnings/errors; and
-the complete Godot validation suite passes.
+**Done when:** the transition matches the traced source timing, destination,
+Link position, and retained dive state; the disabled-transition case stays
+local; expectations are independently derived from the ROM/disassembly;
+`dotnet build` has no warnings/errors; and the complete Godot validation suite
+passes.
 
 ## Where to work and how to submit
 
