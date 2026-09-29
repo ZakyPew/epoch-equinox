@@ -121,6 +121,10 @@ Useful switches:
 | `VOX_DUMP_WORLD` | Log persistent-world cache hits and misses at room borders |
 | `VOX_SHOT_TURN` | Apply one chase-camera turn impulse for an alternate angle |
 
+The probe reads `voxel/tuning.ini` from its working directory exactly as the
+player does, so an A/B of any Esc-menu slider is one line in that file
+(`mist=0` against `mist=1`, say) and no rebuild.
+
 Keep a flat screenshot beside every voxel screenshot. Test the object from at
 least front, side and rear chase angles, then cross a room boundary and return.
 A fix that only works from the capture angle is not done.
@@ -194,10 +198,25 @@ Build and run the C checks from `tools/` against `epoch_support` and `gbrt`:
 - `achievements_test`, `secrets_c_test`, `typist_test`, and `stream_test` for
   shared-player regressions.
 
-The exact Linux and macOS compile loops live in `.github/workflows/release.yml`; Windows
-contributors can use the generated Visual Studio/vcpkg include and library
-paths or let the PR run the portable matrix. Always launch the built player
-and confirm `--list-games` before calling the build healthy.
+The exact Linux and macOS compile loops live in `.github/workflows/release.yml`.
+On Windows, from an *x64 Native Tools Command Prompt* in `build\Release`
+after `setup.ps1` has built the player (swap `vox_shot` for any probe):
+
+```bat
+cl /nologo /O2 /MD /DWIN32 /DNDEBUG /DGB_HAS_SDL2 /DEPOCH_HAVE_VOXEL=1 /DSDL_MAIN_HANDLED ^
+   /I ..\..\src /I ..\_deps\gb_recompiled-src\runtime\include ^
+   /I ..\_deps\gb_recompiled-src\runtime\vendor /I ..\_deps\gb_recompiled-src\runtime\vendor\imgui ^
+   /I "%VCPKG_ROOT%\installed\x64-windows\include" /I "%VCPKG_ROOT%\installed\x64-windows\include\SDL2" ^
+   ..\..\tools\vox_shot.c /Fevox_shot.exe /link epoch_support.lib ..\_gbrt_build\Release\gbrt.lib ^
+   "%VCPKG_ROOT%\installed\x64-windows\lib\SDL2.lib" "%VCPKG_ROOT%\installed\x64-windows\lib\libcurl.lib" ^
+   "%VCPKG_ROOT%\installed\x64-windows\lib\glew32.lib" opengl32.lib ws2_32.lib user32.lib gdi32.lib ^
+   shell32.lib ole32.lib oleaut32.lib uuid.lib advapi32.lib
+```
+
+Leave `SDL_VIDEODRIVER` alone there: SDL's offscreen driver cannot make a GL
+context on Windows, so the probes open a real window for the run instead
+(`tools/dungeon_shot.py` already knows). Always launch the built player and
+confirm `--list-games` before calling the build healthy.
 
 ## Collaboration rules
 

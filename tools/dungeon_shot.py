@@ -60,11 +60,19 @@ def run_capture(tool, rom, mode, prefix, env):
 
 def main(argv):
     ap = argparse.ArgumentParser()
-    ap.add_argument("--tool", default=os.path.join(ROOT, "build", "vox_shot"))
+    default_tool = os.path.join(ROOT, "build", "vox_shot")
+    if sys.platform == "win32":     # the VS generator nests by config
+        default_tool = os.path.join(ROOT, "build", "Release", "vox_shot.exe")
+    ap.add_argument("--tool", default=default_tool)
     ap.add_argument("--rom", default=os.path.join("roms", "tlozooa.gbc"),
                     help="relative to the tool's folder, like the player")
     ap.add_argument("--out", default=os.path.join(ROOT, "build", "dungeon-route"))
     args = ap.parse_args(argv)
+    # vox_shot resolves its output prefix against ITS cwd (the tool's own
+    # folder, so the ROM path works like the player's). A relative --out
+    # would land the frames under build/Release/build/... and the route
+    # would "verify" from the log with nothing to move.
+    args.out = os.path.abspath(args.out)
 
     if not os.path.exists(args.tool):
         print(f"vox_shot not found at {args.tool} -- build it first "
@@ -77,7 +85,10 @@ def main(argv):
         return 1
 
     env = dict(os.environ)
-    env.setdefault("SDL_VIDEODRIVER", "offscreen")
+    # SDL's offscreen driver cannot create a GL context on Windows; there
+    # the tool briefly opens a real window instead.
+    if sys.platform != "win32":
+        env.setdefault("SDL_VIDEODRIVER", "offscreen")
     env["VOX_DUMP_ROOM"] = "1"
 
     os.makedirs(args.out, exist_ok=True)
